@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Blox Fruits Web Clone — Prototype</title>
+    <link rel="stylesheet" href="/src/ui/hud.css" />
+    <link rel="stylesheet" href="/src/ui/panels.css" />
+    <link rel="stylesheet" href="/src/ui/multiplayer.css" />
+    <style>
+      /* 번들 로드 전에도 시작 화면이 제대로 보이도록 하는 최소 스타일 */
+      #start-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(circle at 50% 35%, #17324d, #08111c 70%);
+        font-family: "Trebuchet MS", "Malgun Gothic", sans-serif;
+        color: #fff;
+      }
+      #start-screen[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!--
+      시작 화면. 번들(2.5MB)이 로드되기 전에도 바로 보이도록 마크업과 최소 스타일을
+      HTML에 직접 넣었습니다. 버튼은 main.ts가 준비되면 활성화됩니다.
+    -->
+    <div id="start-screen">
+      <div class="start-card">
+        <h1 class="start-title">Blox Fruits Web</h1>
+
+        <!-- 0단계: 로그인 — 구글 계정으로 진행상황을 클라우드에 저장합니다.
+             (Firebase 설정이 없으면 이 단계는 통째로 건너뜁니다) -->
+        <div class="start-step" id="start-step-login" hidden>
+          <p class="start-sub">진행상황을 저장하시겠습니까?</p>
+          <div class="start-modes">
+            <button class="start-btn google" id="btn-google-login">
+              <span class="start-btn-icon">🔐</span>
+              <span class="start-btn-name">구글로 로그인</span>
+              <span class="start-btn-desc">레벨·코인·열매를 클라우드에 저장합니다<br/>다른 컴퓨터에서도 이어서 플레이 · 랭킹 등록</span>
+            </button>
+            <button class="start-btn guest" id="btn-play-guest">
+              <span class="start-btn-icon">👤</span>
+              <span class="start-btn-name">로그인 없이 플레이</span>
+              <span class="start-btn-desc">이 브라우저에만 저장됩니다<br/>랭킹에는 올라가지 않습니다</span>
+            </button>
+          </div>
+          <p class="start-note" id="login-note"></p>
+        </div>
+
+        <!-- 1단계: 진영 선택 — 시작 섬만 갈리고 그 다음 항로는 양쪽이 같습니다.
+             로그인 단계가 끝난 뒤에 main.ts가 열어줍니다 (두 단계가 겹쳐 보이지 않도록) -->
+        <div class="start-step" id="start-step-faction" hidden>
+          <p class="start-sub">어느 편으로 시작하시겠습니까?</p>
+          <div class="start-modes">
+            <button class="start-btn pirate" data-faction="pirate" disabled>
+              <span class="start-btn-icon">🏴‍☠️</span>
+              <span class="start-btn-name">해적</span>
+              <span class="start-btn-desc">해적 마을에서 시작합니다<br/>쳐들어오는 <b>해군 신병</b>을 상대하세요</span>
+            </button>
+            <button class="start-btn marine" data-faction="marine" disabled>
+              <span class="start-btn-icon">⚓</span>
+              <span class="start-btn-name">해군</span>
+              <span class="start-btn-desc">해군 기지에서 시작합니다<br/>기어드는 <b>해적 잡병</b>을 소탕하세요</span>
+            </button>
+          </div>
+          <p class="start-note">시작 섬만 다르고, 정글 섬(Lv.25)부터의 항로는 양쪽이 완전히 같습니다.</p>
+        </div>
+
+        <!-- 2단계: 그래픽/플레이 모드 -->
+        <div class="start-step" id="start-step-mode" hidden>
+          <p class="start-sub">플레이 방식을 선택하세요 <span class="start-chosen" id="start-chosen"></span></p>
+          <div class="start-modes">
+            <button class="start-btn fast" data-mode="fast">
+              <span class="start-btn-icon">⚡</span>
+              <span class="start-btn-name">빠른 모드</span>
+              <span class="start-btn-desc">그림자·안티앨리어싱을 끄고 먼 섬을 숨겨서<br/>사양이 낮은 컴퓨터에서도 부드럽게 돌아갑니다</span>
+            </button>
+            <button class="start-btn normal" data-mode="normal">
+              <span class="start-btn-icon">✨</span>
+              <span class="start-btn-name">그냥 모드</span>
+              <span class="start-btn-desc">그림자와 파도 반짝임까지 모두 켜고<br/>수평선의 먼 섬들도 전부 보여줍니다</span>
+            </button>
+            <button class="start-btn dev" data-mode="dev">
+              <span class="start-btn-icon">🛠️</span>
+              <span class="start-btn-name">개발자 모드</span>
+              <span class="start-btn-desc">하늘을 날아다니며 섬들을 빠르게 둘러봅니다<br/>피해 없음 · <b>P</b>키로 섬 목록에서 순간이동</span>
+            </button>
+          </div>
+        </div>
+
+        <p class="start-status" id="start-status">불러오는 중…</p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,427 @@
+// ---------------------------------------------------------------------------
+// 멀티플레이 서버의 방(room) 상태 — 지금은 프로세스 하나 = 방 하나입니다.
+//
+// 여기서 하는 일은 딱 두 가지입니다.
+//   1) 누가 어디에 있는지 모아서 다른 사람들에게 뿌리기 (presence)
+//   2) PvP 공격이 들어오면 "진짜로 맞았는지"를 서버가 다시 계산해서 판정하기
+//
+// 2번이 핵심입니다. 공격자가 보낸 "데미지 12"라는 숫자를 그대로 믿지 않고,
+// src/simulation/CombatSystem.ts의 totalMeleeDamage/skillDamage를 서버에서
+// **그대로 다시 호출**해서 데미지를 새로 구합니다. README에서 설명한 대로
+// simulation/ 아래 모듈들은 원래부터 DOM·Three.js를 모르는 순수 로직이라
+// 렌더러 없이 Node에서도 그대로 돌아갑니다 (verify-logic.mjs가 검증하는 것과
+// 정확히 같은 성질입니다).
+//
+// ⚠️ 솔직히 말하면: 이건 "클라이언트가 스텟을 보고한 값"을 믿고 계산하는
+// 구조라 완전한 서버 권위(authoritative) 시뮬레이션은 아닙니다. 클라이언트가
+// combat_stats로 거짓 스텟(예: 공격력을 부풀린 값)을 보내면 그 값 기준으로
+// 데미지가 계산됩니다. 그래서 마지막 방어선으로 상식적인 상한선을 한 번 더
+// 잘라냅니다(clampStats). 완전히 막을 수 있는 건 아니라는 걸 README에도 그대로
+//적어뒀습니다 — 이 프로젝트가 개발자 모드·랭킹에서 이미 지켜온 태도와 같습니다.
+// ---------------------------------------------------------------------------
+
+import type { WebSocket } from "ws";
+import type { PlayerState } from "../src/core/GameState";
+import type { Faction } from "../src/world/islands";
+import { totalMeleeCooldown, totalMeleeDamage, totalMeleeRange, skillDamage } from "../src/simulation/CombatSystem";
+import { isSlotUnlocked, skillsForFruit } from "../src/simulation/skills";
+import { dist2D, pointInShape } from "../src/simulation/ShapeMath";
+import {
+  CONE_LATENCY_BUFFER_DEG,
+  RANGE_LATENCY_BUFFER_M,
+  type AnimState,
+  type ClientMessage,
+  type CombatStatsSnapshot,
+  type RemotePlayerSnapshot,
+  type ServerMessage,
+} from "../src/network/protocol";
+
+/** 데미지 상한선 — 정상적인 만렙 캐릭터의 최고 한 방(대략 수백~수천 단위)보다
+ *  넉넉히 위지만, 무한대나 1e9 같은 조작값은 확실히 걸러냅니다. */
+const MAX_DAMAGE_PER_HIT = 20000;
+const MAX_MELEE_DAMAGE = 20000;
+const MAX_ABILITY_MULTIPLIER = 50;
+const MAX_FRUIT_BUFF_MULTIPLIER = 2; // 카탈로그 최댓값(기어 세컨드 1.8배)보다 여유
+const MAX_MELEE_RANGE = 30;
+const MIN_MELEE_COOLDOWN_SEC = 0.05;
+const MELEE_COOLDOWN_GRACE = 0.7; // 지연시간 보정 — 서버가 요구하는 최소 대기 비율
+const SKILL_COOLDOWN_GRACE = 0.7;
+const STALE_TIMEOUT_MS = 25_000;
+const MAX_MESSAGES_PER_SEC = 40;
+
+function clampFinite(n: unknown, min: number, max: number, fallback: number): number {
+  const v = typeof n === "number" && Number.isFinite(n) ? n : fallback;
+  return Math.max(min, Math.min(max, v));
+}
+
+/** 클라이언트가 보낸 스텟을 상식적인 범위로 잘라 "다시 계산"에 씁니다. */
+function clampStats(raw: CombatStatsSnapshot): CombatStatsSnapshot {
+  return {
+    meleeDamage: clampFinite(raw.meleeDamage, 0, MAX_MELEE_DAMAGE, 0),
+    meleeRange: clampFinite(raw.meleeRange, 0, MAX_MELEE_RANGE, 2.2),
+    meleeCooldownSec: clampFinite(raw.meleeCooldownSec, MIN_MELEE_COOLDOWN_SEC, 10, 0.5),
+    hakiActive: raw.hakiActive === true,
+    activeHotbarSlot:
+      typeof raw.activeHotbarSlot === "number" && raw.activeHotbarSlot >= 0 && raw.activeHotbarSlot < 8
+        ? Math.floor(raw.activeHotbarSlot)
+        : null,
+    hotbar: Array.isArray(raw.hotbar) ? raw.hotbar.slice(0, 8).map((x) => (typeof x === "string" ? x : null)) : [],
+    abilityDamageMultiplier: clampFinite(raw.abilityDamageMultiplier, 0, MAX_ABILITY_MULTIPLIER, 1),
+    fruitLevel: clampFinite(raw.fruitLevel, 1, 150, 1),
+    fruitBuffMultiplier: clampFinite(raw.fruitBuffMultiplier, 1, MAX_FRUIT_BUFF_MULTIPLIER, 1),
+    equippedFruit: typeof raw.equippedFruit === "string" ? raw.equippedFruit : "magma_fist",
+  };
+}
+
+/**
+ * CombatSystem.ts의 함수들은 PlayerState 전체를 받지만, 실제로 읽는 필드는
+ * 스텟 몇 개뿐입니다(README "구조" 절대로 GameState는 렌더러 참조가 없는
+ * 순수 데이터입니다). 서버가 아는 만큼만 채운 "가짜" PlayerState를 만들어
+ * 그대로 넘깁니다 — 클라이언트가 쓰는 것과 완전히 같은 함수, 같은 공식입니다.
+ */
+function asPlayerStateForCombat(stats: CombatStatsSnapshot, aimYaw: number): PlayerState {
+  return {
+    meleeDamage: stats.meleeDamage,
+    meleeRange: stats.meleeRange,
+    meleeCooldownSec: stats.meleeCooldownSec,
+    hakiActive: stats.hakiActive,
+    activeHotbarSlot: stats.activeHotbarSlot,
+    hotbar: stats.hotbar as PlayerState["hotbar"],
+    abilityDamageMultiplier: stats.abilityDamageMultiplier,
+    fruitLevel: stats.fruitLevel,
+    fruitBuffMultiplier: stats.fruitBuffMultiplier,
+    equippedFruit: stats.equippedFruit as PlayerState["equippedFruit"],
+    aimYaw,
+    position: { x: 0, y: 0, z: 0 },
+    // 아래는 이 계산에서 안 쓰이는 필드들 — 타입을 맞추기 위한 자리 채우기.
+  } as unknown as PlayerState;
+}
+
+export interface Connection {
+  id: string;
+  ws: WebSocket;
+  name: string;
+  faction: Faction;
+  position: { x: number; y: number; z: number };
+  yaw: number;
+  aimYaw: number;
+  hp: number;
+  maxHp: number;
+  level: number;
+  sea: 1 | 2;
+  animState: AnimState;
+  hakiActive: boolean;
+  drawnWeaponId: string | null;
+  pvpEnabled: boolean;
+  alive: boolean;
+  stats: CombatStatsSnapshot;
+  lastMeleeAtMs: number;
+  lastSkillAtMs: Record<number, number>;
+  lastSeenMs: number;
+  msgTimestamps: number[];
+}
+
+function snapshotOf(conn: Connection): RemotePlayerSnapshot {
+  return {
+    id: conn.id,
+    name: conn.name,
+    faction: conn.faction,
+    position: conn.position,
+    yaw: conn.yaw,
+    aimYaw: conn.aimYaw,
+    hp: conn.hp,
+    maxHp: conn.maxHp,
+    level: conn.level,
+    sea: conn.sea,
+    animState: conn.animState,
+    hakiActive: conn.hakiActive,
+    drawnWeaponId: conn.drawnWeaponId,
+    pvpEnabled: conn.pvpEnabled,
+  };
+}
+
+let nextId = 1;
+function makeId() {
+  return `p${nextId++}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export class World {
+  private connections = new Map<string, Connection>();
+
+  private send(conn: Connection, msg: ServerMessage) {
+    if (conn.ws.readyState !== conn.ws.OPEN) return;
+    try {
+      conn.ws.send(JSON.stringify(msg));
+    } catch {
+      // 소켓이 막 닫히는 타이밍이면 조용히 무시합니다 — close 핸들러가 정리합니다.
+    }
+  }
+
+  private broadcast(msg: ServerMessage, exceptId?: string) {
+    for (const conn of this.connections.values()) {
+      if (conn.id === exceptId) continue;
+      this.send(conn, msg);
+    }
+  }
+
+  /** 초당 메시지 수 제한 — 도배로 서버를 괴롭히는 걸 막는 최소한의 안전장치. */
+  private rateLimited(conn: Connection, nowMs: number): boolean {
+    conn.msgTimestamps.push(nowMs);
+    const cutoff = nowMs - 1000;
+    while (conn.msgTimestamps.length && conn.msgTimestamps[0] < cutoff) conn.msgTimestamps.shift();
+    return conn.msgTimestamps.length > MAX_MESSAGES_PER_SEC;
+  }
+
+  join(ws: WebSocket, name: string, faction: Faction): Connection {
+    const conn: Connection = {
+      id: makeId(),
+      ws,
+      name: name.slice(0, 24) || "이름없음",
+      faction,
+      position: { x: 0, y: 0, z: 0 },
+      yaw: 0,
+      aimYaw: 0,
+      hp: 100,
+      maxHp: 100,
+      level: 1,
+      sea: 1,
+      animState: "idle",
+      hakiActive: false,
+      drawnWeaponId: null,
+      pvpEnabled: false,
+      alive: true,
+      stats: clampStats({
+        meleeDamage: 8,
+        meleeRange: 2.2,
+        meleeCooldownSec: 0.5,
+        hakiActive: false,
+        activeHotbarSlot: null,
+        hotbar: [],
+        abilityDamageMultiplier: 1,
+        fruitLevel: 1,
+        fruitBuffMultiplier: 1,
+        equippedFruit: "magma_fist",
+      }),
+      lastMeleeAtMs: 0,
+      lastSkillAtMs: {},
+      lastSeenMs: Date.now(),
+      msgTimestamps: [],
+    };
+    this.connections.set(conn.id, conn);
+
+    this.send(conn, {
+      type: "welcome",
+      id: conn.id,
+      players: [...this.connections.values()].filter((c) => c.id !== conn.id).map(snapshotOf),
+    });
+    this.broadcast({ type: "player_state", player: snapshotOf(conn) }, conn.id);
+    return conn;
+  }
+
+  leave(id: string) {
+    if (!this.connections.delete(id)) return;
+    this.broadcast({ type: "player_left", id });
+  }
+
+  count() {
+    return this.connections.size;
+  }
+
+  /** 25초 넘게 조용한 연결은 죽은 것으로 보고 정리합니다 (탭 강제 종료 등 close 이벤트가 안 오는 경우 대비). */
+  reapStale(nowMs: number) {
+    for (const conn of [...this.connections.values()]) {
+      if (nowMs - conn.lastSeenMs > STALE_TIMEOUT_MS) {
+        try {
+          conn.ws.close();
+        } catch {
+          /* noop */
+        }
+        this.leave(conn.id);
+      }
+    }
+  }
+
+  handleMessage(conn: Connection, raw: string) {
+    const nowMs = Date.now();
+    conn.lastSeenMs = nowMs;
+    if (this.rateLimited(conn, nowMs)) {
+      this.send(conn, { type: "pvp_rejected", reason: "rate_limited" });
+      return;
+    }
+
+    let msg: ClientMessage;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (!msg || typeof msg !== "object") return;
+
+    switch (msg.type) {
+      case "hello":
+        // 접속 직후 이름/진영을 다시 보낼 수 있게 허용 (재연결 등)
+        if (typeof msg.name === "string") conn.name = msg.name.slice(0, 24) || conn.name;
+        if (msg.faction === "pirate" || msg.faction === "marine") conn.faction = msg.faction;
+        break;
+
+      case "state": {
+        conn.position = {
+          x: clampFinite(msg.position?.x, -20000, 20000, conn.position.x),
+          y: clampFinite(msg.position?.y, -500, 2000, conn.position.y),
+          z: clampFinite(msg.position?.z, -20000, 20000, conn.position.z),
+        };
+        conn.yaw = clampFinite(msg.yaw, -1000, 1000, conn.yaw);
+        conn.aimYaw = clampFinite(msg.aimYaw, -1000, 1000, conn.aimYaw);
+        conn.maxHp = clampFinite(msg.maxHp, 1, 1_000_000, conn.maxHp);
+        conn.hp = clampFinite(msg.hp, 0, conn.maxHp, conn.hp);
+        conn.level = clampFinite(msg.level, 1, 3000, conn.level);
+        conn.sea = msg.sea === 2 ? 2 : 1;
+        conn.animState = (["idle", "move", "swim", "boat"] as const).includes(msg.animState as AnimState)
+          ? (msg.animState as AnimState)
+          : "idle";
+        conn.hakiActive = msg.hakiActive === true;
+        conn.drawnWeaponId = typeof msg.drawnWeaponId === "string" ? msg.drawnWeaponId : null;
+        conn.alive = conn.hp > 0;
+        this.broadcast({ type: "player_state", player: snapshotOf(conn) }, conn.id);
+        break;
+      }
+
+      case "combat_stats":
+        conn.stats = clampStats(msg.stats ?? ({} as CombatStatsSnapshot));
+        break;
+
+      case "pvp_toggle":
+        conn.pvpEnabled = msg.enabled === true;
+        break;
+
+      case "melee_attack":
+        this.resolveMeleeAttack(conn, msg.targetId, nowMs);
+        break;
+
+      case "skill_attack":
+        this.resolveSkillAttack(conn, msg.targetId, msg.slot, nowMs);
+        break;
+
+      case "ping":
+        this.send(conn, { type: "pong" });
+        break;
+    }
+  }
+
+  /** 공격 가능 여부의 공통 조건 (진영·PvP 켜짐·같은 바다·생존) */
+  private basicPvpCheck(attacker: Connection, target: Connection | undefined): string | null {
+    if (!target) return "not_connected";
+    if (!attacker.pvpEnabled) return "self_pvp_off";
+    if (!target.pvpEnabled) return "pvp_off";
+    if (attacker.faction === target.faction) return "same_faction";
+    if (attacker.sea !== target.sea) return "different_sea";
+    if (!target.alive || target.hp <= 0) return "target_down";
+    return null;
+  }
+
+  private applyDamage(attacker: Connection, target: Connection, rawDamage: number, kind: "melee" | "skill") {
+    const damage = Math.round(clampFinite(rawDamage, 0, MAX_DAMAGE_PER_HIT, 0));
+    if (damage <= 0) return;
+    target.hp = Math.max(0, target.hp - damage);
+    target.alive = target.hp > 0;
+
+    this.send(target, { type: "pvp_damage", attackerId: attacker.id, attackerName: attacker.name, damage, kind });
+    this.send(attacker, { type: "pvp_hit_ack", targetId: target.id, targetName: target.name, damage });
+    // 다른 사람들도 체력 변화를 볼 수 있도록 갱신된 스냅샷을 뿌립니다.
+    this.broadcast({ type: "player_state", player: snapshotOf(target) });
+  }
+
+  private resolveMeleeAttack(attacker: Connection, targetId: string, nowMs: number) {
+    const target = this.connections.get(targetId);
+    const reason = this.basicPvpCheck(attacker, target);
+    if (reason || !target) {
+      this.send(attacker, { type: "pvp_rejected", reason: reason ?? "not_connected" });
+      return;
+    }
+
+    const stats = attacker.stats;
+    const fakePlayer = asPlayerStateForCombat(stats, attacker.aimYaw);
+    const cooldown = totalMeleeCooldown(fakePlayer);
+    if (nowMs - attacker.lastMeleeAtMs < cooldown * 1000 * MELEE_COOLDOWN_GRACE) {
+      this.send(attacker, { type: "pvp_rejected", reason: "on_cooldown" });
+      return;
+    }
+
+    const range = totalMeleeRange(fakePlayer) + RANGE_LATENCY_BUFFER_M;
+    const d = dist2D(attacker.position.x, attacker.position.z, target.position.x, target.position.z);
+    if (d > range) {
+      this.send(attacker, { type: "pvp_rejected", reason: "out_of_range" });
+      return;
+    }
+
+    attacker.lastMeleeAtMs = nowMs;
+    const damage = totalMeleeDamage(fakePlayer);
+    this.applyDamage(attacker, target, damage, "melee");
+  }
+
+  private resolveSkillAttack(attacker: Connection, targetId: string, slot: number, nowMs: number) {
+    const target = this.connections.get(targetId);
+    const reason = this.basicPvpCheck(attacker, target);
+    if (reason || !target) {
+      this.send(attacker, { type: "pvp_rejected", reason: reason ?? "not_connected" });
+      return;
+    }
+    if (typeof slot !== "number" || slot < 0 || slot > 3) {
+      this.send(attacker, { type: "pvp_rejected", reason: "unknown_skill" });
+      return;
+    }
+
+    const stats = attacker.stats;
+    const skills = skillsForFruit(stats.equippedFruit as Parameters<typeof skillsForFruit>[0]);
+    const skill = skills?.[slot];
+    if (!skill) {
+      this.send(attacker, { type: "pvp_rejected", reason: "unknown_skill" });
+      return;
+    }
+    if (!isSlotUnlocked(slot, stats.fruitLevel)) {
+      this.send(attacker, { type: "pvp_rejected", reason: "locked_skill" });
+      return;
+    }
+
+    const lastAt = attacker.lastSkillAtMs[slot] ?? 0;
+    if (nowMs - lastAt < skill.cooldownSec * 1000 * SKILL_COOLDOWN_GRACE) {
+      this.send(attacker, { type: "pvp_rejected", reason: "on_cooldown" });
+      return;
+    }
+
+    const shape = skill.shape;
+    const inRange =
+      shape.kind === "self"
+        ? false
+        : pointInShape(
+            { x: attacker.position.x, z: attacker.position.z, aimYaw: attacker.aimYaw },
+            target.position.x,
+            target.position.z,
+            widenShapeForLatency(shape),
+          );
+    if (!inRange) {
+      this.send(attacker, { type: "pvp_rejected", reason: "out_of_range" });
+      return;
+    }
+
+    attacker.lastSkillAtMs[slot] = nowMs;
+    const fakePlayer = asPlayerStateForCombat(stats, attacker.aimYaw);
+    const damage = skillDamage(fakePlayer, skill);
+    this.applyDamage(attacker, target, damage, "skill");
+  }
+}
+
+/** 지연시간 보정 — 판정 모양을 살짝 넉넉하게 키워서 검사합니다. */
+function widenShapeForLatency<T extends { kind: string }>(shape: T): T {
+  const s = shape as unknown as Record<string, number> & { kind: string };
+  switch (s.kind) {
+    case "radial":
+      return { ...s, radius: s.radius + RANGE_LATENCY_BUFFER_M } as unknown as T;
+    case "cone":
+      return { ...s, range: s.range + RANGE_LATENCY_BUFFER_M, halfAngleDeg: s.halfAngleDeg + CONE_LATENCY_BUFFER_DEG } as unknown as T;
+    case "line":
+      return { ...s, range: s.range + RANGE_LATENCY_BUFFER_M, width: s.width + RANGE_LATENCY_BUFFER_M } as unknown as T;
+    default:
+      return shape;
+  }
+}
