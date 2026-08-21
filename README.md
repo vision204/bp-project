@@ -779,6 +779,24 @@ npm run server:dev
 - 서버를 올렸으면 게임 화면의 멀티플레이 패널에 그 주소(`wss://...`)를 넣고
   접속하면 됩니다. `.env`의 `VITE_MULTIPLAYER_URL`을 채워두면 그 주소가
   기본값으로 미리 채워집니다.
+- 실제 배포 서버: `wss://bp-project-server.onrender.com` (Render 무료
+  플랜 — 15분간 아무도 없으면 잠들고, 다음 접속 때 30~60초 정도 깨어나는
+  시간이 걸립니다. 헬스체크: `https://bp-project-server.onrender.com/healthz`).
+
+#### Netlify에서 자동 접속되게 하기
+
+패널을 열고 매번 서버 주소를 입력하는 대신, 사이트에 들어가자마자 자동으로
+붙게 하려면 Netlify 사이트 설정 → **Site configuration → Environment
+variables**에 아래 둘을 추가하고 다시 배포하면 됩니다.
+
+```
+VITE_MULTIPLAYER_URL=wss://bp-project-server.onrender.com
+VITE_MULTIPLAYER_AUTOCONNECT=1
+```
+
+`VITE_MULTIPLAYER_AUTOCONNECT`가 없으면(로컬 개발·검증 스위트가 그렇습니다)
+기존과 동일하게 버튼을 눌러야만 접속합니다 — 자동 접속은 이 두 값이 **둘 다**
+설정된 빌드에서만 켜집니다.
 
 ### 접속하고 PvP 켜기
 

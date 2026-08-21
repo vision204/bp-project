@@ -303,10 +303,20 @@ async function main() {
       return { entries, myUid: user.uid, notice: null };
     },
   });
-  // 멀티플레이 — 완전히 선택 사항입니다. 버튼을 눌러 접속하기 전까지는
+  // 멀티플레이 — 기본은 선택 사항입니다. 버튼을 눌러 접속하기 전까지는
   // 소켓을 열지 않고, 싱글플레이 동작에 아무 영향도 주지 않습니다.
+  //
+  // 다만 VITE_MULTIPLAYER_AUTOCONNECT가 설정된 빌드(배포용 Netlify 빌드)에서는
+  // 접속 화면을 통과하는 즉시 자동으로 서버에 붙습니다 — 로컬 개발/검증
+  // 스위트(verify-logic.mjs·e2e.mjs)는 이 환경변수를 설정하지 않으므로 기존
+  // 동작에는 아무 영향이 없습니다.
   const multiplayer = new MultiplayerClient(simulation.state);
   const multiplayerUI = new MultiplayerUI(appEl, multiplayer, simulation.state);
+  const env = typeof import.meta !== "undefined" ? (import.meta as { env?: Record<string, string> }).env : undefined;
+  if (env?.VITE_MULTIPLAYER_AUTOCONNECT && env?.VITE_MULTIPLAYER_URL) {
+    const autoName = (user?.name?.trim() || "여행자").slice(0, 12);
+    multiplayer.connect(env.VITE_MULTIPLAYER_URL, autoName);
+  }
 
   const hud = new Hud(appEl, {
     onShop: () => panels.toggle("shop"),
