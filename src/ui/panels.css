@@ -1,0 +1,1096 @@
+.panel {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 460px;
+  max-height: 82vh;
+  /* padding까지 높이에 포함시켜야 max-height가 실제 화면 높이를 지킵니다.
+     (content-box이면 padding 48px가 더해져 패널이 화면 밖으로 삐져나갑니다) */
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(24, 26, 36, 0.96), rgba(14, 15, 22, 0.96));
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 213, 79, 0.35);
+  border-radius: 18px;
+  padding: 22px 26px 26px;
+  color: #fff;
+  font-family: "Trebuchet MS", "Malgun Gothic", sans-serif;
+  pointer-events: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+.shop-panel {
+  width: 560px;
+}
+
+/*
+ * 목록이 길면 본문만 스크롤되게 하고(헤더는 고정), 스크롤바를 눈에 띄게 만듭니다.
+ * 예전에는 패널 전체가 스크롤 컨테이너라 아래쪽 항목(어둠·고무·모래 열매)이
+ * 화면 밖으로 잘려서 클릭조차 할 수 없었습니다.
+ */
+.panel-body {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  padding-right: 6px;
+  margin-right: -6px;
+}
+
+.panel-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.panel-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+}
+
+.panel-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 213, 79, 0.55);
+  border-radius: 999px;
+}
+
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 213, 79, 0.85);
+}
+
+/* 헤더/안내문은 스크롤되지 않도록 고정 */
+.panel-header,
+.panel-sub-line {
+  flex-shrink: 0;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 22px;
+  font-weight: bold;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  padding-bottom: 14px;
+  margin-bottom: 16px;
+}
+
+.panel-close {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.panel-close:hover {
+  background: rgba(255, 82, 82, 0.75);
+  transform: scale(1.08);
+}
+
+.panel-sub-line {
+  font-size: 14px;
+  margin-bottom: 14px;
+  opacity: 0.9;
+}
+
+.panel-sub-line b {
+  color: #ffd54f;
+}
+
+/* 캐릭터/스텟 패널 */
+.stats-summary {
+  display: flex;
+  justify-content: space-between;
+  font-size: 15px;
+  margin-bottom: 16px;
+  opacity: 0.9;
+}
+
+.stats-summary b {
+  color: #ffd54f;
+}
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.stat-name {
+  width: 90px;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.stat-value {
+  flex: 1;
+  font-size: 18px;
+  color: #80d8ff;
+  font-weight: bold;
+}
+
+.round-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  color: #302400;
+  font-size: 20px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(255, 179, 0, 0.4);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.round-btn:hover:not(:disabled) {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(255, 179, 0, 0.6);
+}
+
+.round-btn:disabled {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.3);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.stats-derived {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 14px;
+  opacity: 0.9;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* 인벤토리 패널 */
+.inventory-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+
+.inv-slot {
+  position: relative;
+  aspect-ratio: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+}
+
+.inv-slot.filled {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 213, 79, 0.4);
+  cursor: default;
+}
+
+.inv-qty {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  font-size: 12px;
+  font-weight: bold;
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
+/* 상점 패널 */
+.shop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.shop-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+}
+
+.shop-item.equipped {
+  border-color: rgba(255, 213, 79, 0.6);
+  background: rgba(255, 213, 79, 0.08);
+}
+
+.shop-item-icon {
+  font-size: 28px;
+  width: 44px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.shop-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-item-name {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 3px;
+}
+
+.shop-item-desc {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-bottom: 3px;
+  line-height: 1.35;
+}
+
+.shop-item-stats {
+  font-size: 11.5px;
+  color: #80d8ff;
+}
+
+.buy-btn {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  color: #302400;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  box-shadow: 0 3px 10px rgba(255, 179, 0, 0.35);
+}
+
+.buy-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.buy-btn:disabled {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.4);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 상점 섹션 구분 */
+.shop-section-title {
+  font-size: 15px;
+  font-weight: bold;
+  color: #ffd54f;
+  margin: 4px 0 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.shop-section-title:not(:first-child) {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.shop-section-note {
+  font-size: 11.5px;
+  font-weight: normal;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* 인벤토리 사용 가능 슬롯 */
+.inv-slot.usable {
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.inv-slot.usable:hover {
+  transform: scale(1.08);
+  border-color: rgba(129, 212, 250, 0.9);
+  background: rgba(129, 212, 250, 0.16);
+}
+
+/* 항해 패널 */
+.travel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.travel-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+}
+
+.travel-item.locked {
+  opacity: 0.55;
+}
+
+.travel-item.current {
+  border-color: rgba(129, 212, 250, 0.6);
+  background: rgba(129, 212, 250, 0.1);
+}
+
+.travel-theme {
+  font-size: 13px;
+  width: 74px;
+  flex-shrink: 0;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.travel-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.travel-name {
+  font-size: 16px;
+  font-weight: bold;
+  margin-bottom: 3px;
+}
+
+.travel-req {
+  font-size: 12px;
+  color: #80d8ff;
+}
+
+/* 무장색 사범 대화창 */
+.dialog-panel {
+  width: 480px;
+  border-color: rgba(149, 117, 205, 0.55);
+}
+
+.dialog-body {
+  text-align: center;
+}
+
+.dialog-portrait {
+  width: 72px;
+  height: 72px;
+  margin: 4px auto 16px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #9575cd, #5e35b1);
+  color: #fff;
+  font-size: 34px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 18px rgba(94, 53, 177, 0.45);
+}
+
+.dialog-line {
+  font-size: 14px;
+  line-height: 1.75;
+  opacity: 0.92;
+  margin: 0 0 16px;
+  text-align: left;
+}
+
+.dialog-line b {
+  color: #d1c4e9;
+}
+
+.dialog-question {
+  font-size: 16px;
+  font-weight: bold;
+  margin: 0 0 6px;
+}
+
+.dialog-question b {
+  color: #ffd54f;
+}
+
+.dialog-money {
+  font-size: 13px;
+  opacity: 0.85;
+  margin-bottom: 18px;
+}
+
+.dialog-money.insufficient {
+  color: #ff8a80;
+  opacity: 1;
+}
+
+.dialog-choices {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.choice-btn {
+  flex: 1;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: none;
+  font-size: 15px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.choice-btn.yes {
+  background: linear-gradient(180deg, #b39ddb, #7e57c2);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(126, 87, 194, 0.45);
+}
+
+.choice-btn.no {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.choice-btn:hover:not(:disabled) {
+  transform: scale(1.04);
+}
+
+.choice-btn:disabled {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.35);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 퀘스트 반복 횟수 */
+.quest-repeat {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 4px;
+}
+
+/*
+ * 아래에 내용이 더 있을 때 표시하는 힌트.
+ * 크롬이 오버레이 스크롤바(폭 0px)를 쓰면 스크롤바가 보이지 않아서
+ * 목록이 더 이어진다는 걸 알 수 없기 때문에 명시적으로 알려줍니다.
+ */
+.panel.has-more::after {
+  content: "▾ 아래로 스크롤";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 26px 0 9px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: bold;
+  color: #ffd54f;
+  background: linear-gradient(180deg, rgba(14, 15, 22, 0), rgba(14, 15, 22, 0.96) 55%);
+  border-radius: 0 0 18px 18px;
+  pointer-events: none;
+  animation: scroll-hint 1.8s ease-in-out infinite;
+}
+
+@keyframes scroll-hint {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+
+/* 힌트에 가려지지 않도록 목록 아래에 여백 */
+.panel.has-more .panel-body {
+  padding-bottom: 26px;
+}
+
+/* 인벤토리: 단축바에 올라간 장비 표시 */
+.inv-slot.hotbarred {
+  border-color: rgba(255, 213, 79, 0.9);
+  background: rgba(255, 213, 79, 0.14);
+}
+
+.inv-slot-badge {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  color: #302400;
+  font-size: 11px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── 퀘스트: 사냥할 몬스터 고르기 ─────────────────────────────────────────── */
+.quest-panel {
+  width: min(620px, 92vw);
+}
+
+.quest-intro {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: rgba(79, 195, 247, 0.12);
+  border: 1px solid rgba(79, 195, 247, 0.35);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.quest-species {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.quest-species.risky {
+  border-color: rgba(229, 57, 53, 0.55);
+  background: rgba(229, 57, 53, 0.1);
+}
+
+.quest-species-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(0, 0, 0, 0.35);
+}
+
+.quest-species-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.quest-species-name {
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.quest-species-desc {
+  font-size: 13px;
+  opacity: 0.8;
+  margin-top: 3px;
+}
+
+.quest-species-warn {
+  font-size: 12.5px;
+  margin-top: 4px;
+  color: #ff8a80;
+}
+
+/* ── 현금(원화) 결제 표시 — PG사 미연동, UI 전용 ─────────────────────────── */
+.cash-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: bold;
+  vertical-align: middle;
+  background: linear-gradient(180deg, #ff8a65, #f4511e);
+  color: #fff;
+}
+
+.cash-notice {
+  margin: 10px 0 12px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  background: rgba(244, 81, 30, 0.12);
+  border: 1px solid rgba(244, 81, 30, 0.4);
+}
+
+.cash-notice.blink {
+  animation: cash-blink 0.9s ease-out;
+}
+
+@keyframes cash-blink {
+  0% { background: rgba(244, 81, 30, 0.55); transform: scale(1.015); }
+  100% { background: rgba(244, 81, 30, 0.12); transform: scale(1); }
+}
+
+.shop-item.cash {
+  border-color: rgba(244, 81, 30, 0.35);
+}
+
+.buy-btn.cash-btn {
+  background: linear-gradient(180deg, #ff8a65, #e64a19);
+  border-color: rgba(255, 138, 101, 0.8);
+  color: #fff;
+}
+
+/* ── 중앙 교역섬 열매 상인 ───────────────────────────────────────────────── */
+.dealer-intro {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  font-size: 14.5px;
+  line-height: 1.65;
+  background: rgba(239, 108, 154, 0.12);
+  border: 1px solid rgba(239, 108, 154, 0.35);
+}
+
+/* ── 개발자 모드 패널 ────────────────────────────────────────────────────── */
+.dev-panel {
+  width: min(600px, 92vw);
+}
+
+.dev-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  background: rgba(76, 175, 80, 0.12);
+  border: 1px solid rgba(76, 175, 80, 0.35);
+}
+
+.dev-help {
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.65;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.dev-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.dev-row.here {
+  border-color: rgba(255, 213, 79, 0.8);
+  background: rgba(255, 213, 79, 0.12);
+}
+
+.dev-row-info { flex: 1 1 auto; min-width: 0; }
+.dev-row-name { font-size: 15px; font-weight: bold; }
+.dev-row-sub { font-size: 12.5px; opacity: 0.75; margin-top: 3px; }
+
+.dev-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* ── 열매 뽑기 (정글 섬 도박사) ──────────────────────────────────────────── */
+.gacha-panel { width: min(620px, 92vw); }
+
+.gacha-intro {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  font-size: 14.5px;
+  line-height: 1.65;
+  background: rgba(139, 195, 74, 0.12);
+  border: 1px solid rgba(139, 195, 74, 0.35);
+}
+
+.gacha-status {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  font-size: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.gacha-status.ready {
+  border-color: rgba(255, 213, 79, 0.7);
+  background: rgba(255, 213, 79, 0.13);
+}
+
+.gacha-status.wait {
+  border-color: rgba(144, 164, 174, 0.6);
+  background: rgba(144, 164, 174, 0.12);
+}
+
+.gacha-status.poor {
+  border-color: rgba(229, 57, 53, 0.55);
+  background: rgba(229, 57, 53, 0.12);
+}
+
+.gacha-status-sub {
+  margin-top: 5px;
+  font-size: 12.5px;
+  opacity: 0.78;
+}
+
+.gacha-odds-title {
+  font-size: 13px;
+  font-weight: bold;
+  opacity: 0.75;
+  margin: 4px 0 8px;
+}
+
+.gacha-odd {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 13.5px;
+}
+
+.gacha-odd.equipped { border: 1px solid rgba(255, 213, 79, 0.5); }
+.gacha-odd-icon { font-size: 19px; }
+.gacha-odd-name { flex: 0 0 190px; }
+
+.gacha-odd-bar {
+  flex: 1 1 auto;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.gacha-odd-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #8bc34a, #cddc39);
+}
+
+.gacha-odd-pct { flex: 0 0 52px; text-align: right; opacity: 0.85; }
+
+.gacha-roll-btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 15px;
+  font-size: 18px;
+  font-weight: bold;
+  border-radius: 12px;
+  cursor: pointer;
+  color: #2a2000;
+  border: 1px solid rgba(255, 213, 79, 0.9);
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+}
+
+.gacha-roll-btn:hover:not(:disabled) { filter: brightness(1.08); }
+
+.gacha-roll-btn:disabled {
+  cursor: not-allowed;
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* ── 섬 가이드 ───────────────────────────────────────────────────────────── */
+.guide-panel { width: min(640px, 92vw); }
+
+.guide-summary {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  font-size: 15px;
+  line-height: 1.6;
+  background: rgba(79, 195, 247, 0.12);
+  border: 1px solid rgba(79, 195, 247, 0.35);
+}
+
+.guide-highlight { color: #ffd54f; }
+.guide-next { margin-top: 5px; font-size: 13px; opacity: 0.8; }
+
+.guide-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.guide-row.recommended {
+  border-color: rgba(255, 213, 79, 0.8);
+  background: rgba(255, 213, 79, 0.12);
+}
+
+.guide-row.targeted { border-color: rgba(79, 195, 247, 0.9); }
+.guide-row.locked { opacity: 0.62; }
+.guide-row-info { flex: 1 1 auto; min-width: 0; }
+.guide-row-name { font-size: 15px; font-weight: bold; }
+.guide-row-sub { font-size: 12.5px; opacity: 0.75; margin-top: 3px; }
+
+.guide-tag {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: normal;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.guide-tag.ok { background: rgba(102, 187, 106, 0.3); }
+.guide-tag.locked { background: rgba(229, 57, 53, 0.3); }
+.guide-tag.hub { background: rgba(239, 108, 154, 0.3); }
+
+.guide-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  color: #2a2000;
+}
+
+.buy-btn.cancel {
+  background: rgba(229, 57, 53, 0.25);
+  border-color: rgba(229, 57, 53, 0.7);
+  color: #ffcdd2;
+}
+
+/* ── 랭킹 ────────────────────────────────────────────────────────────────── */
+.rank-panel { width: min(620px, 92vw); }
+
+.rank-loading,
+.rank-notice {
+  padding: 18px 16px;
+  border-radius: 10px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.rank-mine-line {
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  font-size: 14.5px;
+  background: rgba(255, 213, 79, 0.13);
+  border: 1px solid rgba(255, 213, 79, 0.5);
+}
+
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.rank-row.mine {
+  border-color: rgba(255, 213, 79, 0.85);
+  background: rgba(255, 213, 79, 0.12);
+}
+
+.rank-place {
+  flex: 0 0 42px;
+  font-size: 18px;
+  font-weight: bold;
+  text-align: center;
+}
+
+.rank-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-me {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  color: #2a2000;
+}
+
+.rank-stats {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  opacity: 0.82;
+}
+
+/* ── 설인 (얼음 섬 훈련소) ───────────────────────────────────────────────── */
+.trainer-panel { width: min(660px, 92vw); }
+
+.trainer-intro {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  font-size: 14.5px;
+  line-height: 1.65;
+  background: rgba(179, 229, 252, 0.12);
+  border: 1px solid rgba(179, 229, 252, 0.35);
+}
+
+.trainer-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 15px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.trainer-row.locked { opacity: 0.65; }
+
+.trainer-icon {
+  flex: 0 0 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: bold;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.trainer-info { flex: 1 1 auto; min-width: 0; }
+.trainer-name { font-size: 16px; font-weight: bold; }
+.trainer-desc { font-size: 13.5px; opacity: 0.85; margin-top: 4px; line-height: 1.5; }
+.trainer-stats { font-size: 12.5px; color: #81d4fa; margin-top: 4px; }
+.trainer-hint { font-size: 12px; opacity: 0.6; margin-top: 4px; }
+
+.trainer-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: normal;
+  background: rgba(129, 212, 250, 0.25);
+}
+
+/* ── 해적왕 — 두 바다를 잇는 항해 창 ─────────────────────────────────────── */
+.sea-panel { max-width: 520px; }
+
+.sea-intro {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #ffe9b0;
+  background: rgba(255, 213, 79, 0.09);
+  border-left: 3px solid #ffd54f;
+  padding: 12px 15px;
+  border-radius: 0 8px 8px 0;
+  margin-bottom: 14px;
+}
+
+.sea-route {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 15px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.13);
+}
+
+.sea-route-from { font-size: 14px; color: #b9c6d4; }
+.sea-route-arrow { font-size: 22px; color: #ffd54f; }
+
+.sea-route-to {
+  display: flex;
+  flex-direction: column;
+  font-size: 16px;
+  font-weight: bold;
+  color: #fff;
+}
+
+.sea-route-to span {
+  font-size: 12px;
+  font-weight: normal;
+  color: #9fb2c4;
+  margin-top: 3px;
+}
+
+.sea-note {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #a8b8c8;
+  margin-bottom: 12px;
+}
+
+.sea-islands {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.22);
+  margin-bottom: 14px;
+}
+
+.sea-islands-title {
+  font-size: 12px;
+  font-weight: bold;
+  color: #ffd54f;
+  margin-bottom: 7px;
+}
+
+.sea-islands-list {
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: #cdd8e4;
+}
+
+.sea-lv { color: #8fa4b8; font-size: 11px; }
+
+.sea-panel .buy-btn { width: 100%; padding: 12px; font-size: 15px; }
+
+/* 개발자 패널의 바다 구분선 */
+.dev-sea-label {
+  font-size: 12px;
+  font-weight: bold;
+  color: #ffd54f;
+  margin: 14px 0 7px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(255, 213, 79, 0.3);
+}
+
+/* 개발자 패널 — 저장이 꺼져 있다는 경고 */
+.dev-warn {
+  margin-top: 6px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffcc80;
+  font-size: 12px;
+  line-height: 1.5;
+}

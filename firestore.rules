@@ -1,0 +1,51 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------------------
+// Firestore 보안 규칙
+//
+// 파이어베이스 콘솔 → Firestore Database → 규칙 탭에 이 내용을 붙여넣고 "게시"를 누르세요.
+// (기본 규칙은 30일 뒤 전부 막히거나 아무나 쓸 수 있는 상태라, 반드시 바꿔야 합니다)
+//
+// 핵심 원칙
+//   · 세이브는 **본인만** 읽고 쓸 수 있습니다.
+//   · 랭킹은 **누구나 볼 수 있고, 자기 줄만** 쓸 수 있습니다.
+//   · 이름·레벨 같은 값의 타입과 범위를 검사해서 이상한 데이터가 안 들어가게 합니다.
+//
+// ⚠️ 한계: 이 규칙은 "남의 데이터를 건드리는 것"은 막지만, 브라우저를 조작해
+//    자기 레벨을 부풀려 올리는 것까지 막지는 못합니다. 그건 서버(Cloud Functions)에서
+//    검증해야 하는 일이라, 정식 서비스로 갈 때 붙이는 걸 권합니다.
+// ---------------------------------------------------------------------------
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 세이브 — 본인만
+    match /saves/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // 랭킹 — 로그인한 사람은 모두 볼 수 있고, 자기 줄만 쓸 수 있습니다
+    match /leaderboard/{uid} {
+      allow read: if request.auth != null;
+
+      allow write: if request.auth != null
+                   && request.auth.uid == uid
+                   && request.resource.data.name is string
+                   && request.resource.data.name.size() <= 40
+                   && request.resource.data.level is int
+                   && request.resource.data.level >= 1
+                   && request.resource.data.level <= 2000
+                   && request.resource.data.money is int
+                   && request.resource.data.money >= 0
+                   && request.resource.data.fruitLevel is int
+                   && request.resource.data.fruitLevel >= 1
+                   && request.resource.data.fruitLevel <= 100
+                   && request.resource.data.faction in ['pirate', 'marine'];
+    }
+
+    // 그 외에는 전부 금지
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
