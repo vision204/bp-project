@@ -6,6 +6,7 @@ import { boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
+import type { RemotePlayerView } from "../network/MultiplayerClient";
 
 
 const CAMERA_DISTANCE = 6;
@@ -239,6 +240,34 @@ function drawEnemyLabel(
   ctx.fillRect(2, barY + 2, (w - 4) * Math.max(0, ratio), barH - 4);
 }
 
+/** 다른 플레이어 머리 위 이름표 — 이름 + 레벨 + 체력바 (PvP를 켰으면 ⚔️ 표시) */
+function drawPlayerLabel(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  ratio: number,
+  label: string,
+) {
+  const w = canvas.width;
+  const h = canvas.height;
+  const barH = 14;
+  const barY = h - barH;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.font = "bold 22px 'Malgun Gothic', sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.strokeStyle = "rgba(0,0,0,0.75)";
+  ctx.lineWidth = 5;
+  ctx.strokeText(label, w / 2, (h - barH) / 2);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, w / 2, (h - barH) / 2);
+
+  ctx.fillStyle = "#222";
+  ctx.fillRect(0, barY, w, barH);
+  ctx.fillStyle = "#ef5350";
+  ctx.fillRect(2, barY + 2, (w - 4) * Math.max(0, ratio), barH - 4);
+}
+
 function drawMarker(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, symbol: string | null, color: string) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!symbol) return;
@@ -265,6 +294,18 @@ interface NpcVisual {
   marker: ReturnType<typeof buildCanvasSprite>;
   lastSymbol: string | null;
 }
+
+interface RemotePlayerVisual {
+  group: THREE.Group;
+  nameTag: ReturnType<typeof buildCanvasSprite>;
+  lastLabel: string;
+}
+
+/** 다른 플레이어의 색은 진영으로 정합니다 — 몬스터·NPC와는 다른 배색이라 한눈에 구분됩니다. */
+const REMOTE_FACTION_COLORS: Record<string, number> = {
+  pirate: 0xd98b3f,
+  marine: 0x4f83b8,
+};
 
 // 몬스터·NPC를 그리는 거리는 그래픽 품질 설정에서 가져옵니다.
 // (섬 11개에 몬스터가 94마리라, 매 프레임 전부 갱신하면 캔버스 텍스처
@@ -309,6 +350,7 @@ export class SceneRenderer {
   private weaponVisuals = new Map<string, THREE.Group>();
   private enemyVisuals = new Map<string, EnemyVisual>();
   private npcVisuals = new Map<string, NpcVisual>();
+  private remotePlayerVisuals = new Map<string, RemotePlayerVisual>();
 
   private islandVisuals: IslandVisual[] = [];
   private environment: EnvironmentHandle | null = null;
@@ -413,6 +455,55 @@ export class SceneRenderer {
       this.npcVisuals.set(id, visual);
     }
     return visual;
+  }
+
+  private ensureRemotePlayerVisual(id: string, faction: string): RemotePlayerVisual {
+    let visual = this.remotePlayerVisuals.get(id);
+    if (!visual) {
+      const group = buildBlockyCharacter(REMOTE_FACTION_COLORS[faction] ?? 0xcccccc);
+      const nameTag = buildCanvasSprite(220, 46, [2.4, 0.55]);
+      nameTag.sprite.position.y = 2.7;
+      group.add(nameTag.sprite);
+      this.scene.add(group);
+      visual = { group, nameTag, lastLabel: "" };
+      this.remotePlayerVisuals.set(id, visual);
+    }
+    return visual;
+  }
+
+  /**
+   * 다른 플레이어들을 렌더링합니다. main.ts가 매 프레임 별도로 호출합니다
+   * (sync()와 분리해둔 이유: 멀티플레이는 완전히 선택 사항이라, 접속하지
+   * 않았으면 이 함수는 빈 목록으로 호출되어 사실상 아무 일도 하지 않습니다).
+   */
+  syncRemotePlayers(remotePlayers: RemotePlayerView[]) {
+    const seen = new Set<string>();
+    for (const r of remotePlayers) {
+      seen.add(r.snapshot.id);
+      const visual = this.ensureRemotePlayerVisual(r.snapshot.id, r.snapshot.faction);
+      visual.group.visible = true;
+      visual.group.position.set(r.renderX, r.renderY, r.renderZ);
+      visual.group.rotation.y = r.renderYaw;
+
+      const icon = r.snapshot.faction === "marine" ? "⚓" : "🏴‍☠️";
+      const pvpTag = r.snapshot.pvpEnabled ? " ⚔️" : "";
+      const label = `${icon} ${r.snapshot.name} Lv.${r.snapshot.level}${pvpTag}`;
+      const ratio = r.snapshot.maxHp > 0 ? r.snapshot.hp / r.snapshot.maxHp : 0;
+      const sig = `${label}|${ratio.toFixed(2)}`;
+      if (sig !== visual.lastLabel) {
+        visual.lastLabel = sig;
+        drawPlayerLabel(visual.nameTag.ctx, visual.nameTag.canvas, ratio, label);
+        visual.nameTag.sprite.material.map!.needsUpdate = true;
+      }
+      visual.nameTag.sprite.lookAt(this.camera.position);
+    }
+
+    // 접속이 끊긴 플레이어는 지웁니다.
+    for (const [id, visual] of this.remotePlayerVisuals) {
+      if (seen.has(id)) continue;
+      this.scene.remove(visual.group);
+      this.remotePlayerVisuals.delete(id);
+    }
   }
 
   sync(state: GameState, playerController: PlayerController) {

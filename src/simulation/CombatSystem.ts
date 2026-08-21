@@ -6,53 +6,27 @@ import { effectiveMeleeDamage } from "./HakiSystem";
 import { fruitExpFromEnemy, fruitLevelDamageMultiplier, grantFruitExp } from "./FruitLeveling";
 import { isSlotUnlocked, skillsForFruit, type SkillDef } from "./skills";
 import { weaponAttackSpeedMultiplier, weaponBonusRange, weaponDamageMultiplier } from "./WeaponSystem";
+import { dist2D, pointInShape } from "./ShapeMath";
 
 /** 데미지의 출처 — 열매 경험치는 출처가 "fruit"인 막타에만 들어옵니다. */
 export type DamageSource = "melee" | "fruit";
 
-function dist2D(ax: number, az: number, bx: number, bz: number) {
-  return Math.hypot(ax - bx, az - bz);
-}
-
 /**
  * 몬스터가 스킬 판정 범위 안에 있는지 검사합니다.
  * 조준 방향은 카메라 방향(player.aimYaw) 기준이며, 이동 방향과 무관합니다.
+ *
+ * 실제 기하 계산은 ShapeMath.ts로 옮겼습니다 — 멀티플레이 PvP가 "플레이어 vs
+ * 다른 플레이어"에도 똑같은 판정을 써야 하기 때문입니다 (클라 후보 필터링과
+ * 서버 검증이 서로 다른 계산식을 쓰면 "분명 맞았는데 서버가 인정 안 해준다"
+ * 같은 어긋남이 생깁니다). 여기서는 몬스터 좌표를 그대로 넘길 뿐입니다.
  */
 function isInShape(player: PlayerState, enemy: EnemyState, skill: SkillDef): boolean {
-  const dx = enemy.position.x - player.position.x;
-  const dz = enemy.position.z - player.position.z;
-  const dist = Math.hypot(dx, dz);
-  const shape = skill.shape;
-
-  switch (shape.kind) {
-    case "self":
-      return false;
-
-    case "radial":
-      return dist <= shape.radius;
-
-    case "cone": {
-      if (dist > shape.range) return false;
-      if (dist < 0.001) return true;
-      // 이동 벡터와 같은 규약: forward = (sin(yaw), cos(yaw))
-      const fx = Math.sin(player.aimYaw);
-      const fz = Math.cos(player.aimYaw);
-      const cos = (dx * fx + dz * fz) / dist;
-      const angleDeg = (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI;
-      return angleDeg <= shape.halfAngleDeg;
-    }
-
-    case "line": {
-      const fx = Math.sin(player.aimYaw);
-      const fz = Math.cos(player.aimYaw);
-      // 전방 축 투영 거리 (뒤쪽이면 음수 → 제외)
-      const along = dx * fx + dz * fz;
-      if (along < 0 || along > shape.range) return false;
-      // 축에서 좌우로 벗어난 거리
-      const perp = Math.abs(dx * fz - dz * fx);
-      return perp <= shape.width / 2;
-    }
-  }
+  return pointInShape(
+    { x: player.position.x, z: player.position.z, aimYaw: player.aimYaw },
+    enemy.position.x,
+    enemy.position.z,
+    skill.shape,
+  );
 }
 
 /** 열매 스킬의 최종 데미지 = 기본값 × 열매스텟 배율 × 열매레벨 배율 × 자기강화 버프 */
@@ -207,6 +181,11 @@ export function stepCombat(dt: number, input: InputSnapshot, player: PlayerState
   if (input.attackPressed && player.meleeRemainingCooldownSec <= 0) {
     player.meleeRemainingCooldownSec = totalMeleeCooldown(player);
     applyMelee(player, enemies, player.events);
+    // 몬스터를 한 마리도 맞히지 못했어도 "공격이 나갔다"는 사실 자체는 필요합니다.
+    // 멀티플레이 PvP 레이어가 이 이벤트를 보고 "혹시 사거리 안에 다른 플레이어가
+    // 있었는지" 별도로 검사합니다 (GameState/CombatSystem은 다른 플레이어의
+    // 존재를 전혀 모릅니다 — 싱글플레이 로직은 그대로 두고 그 위에 얹은 구조).
+    player.events.push({ type: "melee_attack_fired" });
   }
 
   const skills = skillsForFruit(player.equippedFruit);
@@ -230,5 +209,6 @@ export function stepCombat(dt: number, input: InputSnapshot, player: PlayerState
     player.skillCooldowns[slot] = skill.cooldownSec;
     player.mana -= skill.manaCost;
     applySkill(player, enemies, skill, player.events);
+    player.events.push({ type: "skill_fired", slot });
   }
 }

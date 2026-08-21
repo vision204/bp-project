@@ -1,4 +1,10 @@
 import { chromium } from "playwright";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(__dirname, "..");
 
 const browser = await chromium.launch({
   executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
@@ -2556,6 +2562,208 @@ console.log("  재출항(Lv.5):", JSON.stringify(reopen));
 assert(!!reopen.btn && !reopen.disabled, "한 번 연 뒤에는 레벨이 낮아도 다시 건너갈 수 있음");
 await page.evaluate(() => window.__game.panels.closeAll());
 await page.evaluate(() => localStorage.removeItem("bloxfruits-web/save-v1"));
+
+// ---------------------------------------------------------------------------
+// 멀티플레이 · PvP — 진짜로 서버를 띄우고, 브라우저 두 개(해적 · 해군)를
+// 각각 접속시켜 서로를 실제로 때립니다. server/state.ts가 데미지를 "다시
+// 계산"해서 판정하므로, 여기서 hp가 실제로 줄어드는 걸 확인하면 서버 검증
+// 로직이 클라이언트와 정확히 같은 결과를 낸다는 뜻입니다.
+// ---------------------------------------------------------------------------
+section("멀티플레이 · PvP");
+
+const MP_PORT = 8799;
+const MP_URL = `ws://localhost:${MP_PORT}`;
+const tsxBin = join(REPO_ROOT, "node_modules", ".bin", "tsx");
+const mpServer = spawn(tsxBin, ["server/index.ts"], {
+  cwd: REPO_ROOT,
+  env: { ...process.env, PORT: String(MP_PORT) },
+  stdio: ["ignore", "pipe", "pipe"],
+});
+let mpServerLog = "";
+mpServer.stdout.on("data", (d) => (mpServerLog += d.toString()));
+mpServer.stderr.on("data", (d) => (mpServerLog += d.toString()));
+// 아래에서 어떤 assert가 예상 밖으로 예외를 던져 스크립트가 중간에 죽더라도,
+// 자식 프로세스(서버)가 좀비로 남지 않도록 안전망을 걸어둡니다.
+process.on("exit", () => {
+  try { mpServer.kill(); } catch { /* noop */ }
+});
+
+async function waitForServer(url, timeoutMs = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) return true;
+    } catch {
+      /* 아직 안 떴음 */
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
+
+const serverUp = await waitForServer(`http://localhost:${MP_PORT}/healthz`);
+assert(serverUp, "멀티플레이 서버(server/index.ts)가 실제로 뜸");
+if (!serverUp) console.log("  서버 로그:", mpServerLog);
+
+const page2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+const errors2 = [];
+page2.on("console", (msg) => {
+  if (msg.type() === "error") errors2.push(msg.text());
+});
+page2.on("pageerror", (err) => errors2.push(String(err)));
+
+// 해적 하나(page), 해군 하나(page2) — 서로 다른 진영이라야 PvP가 허용됩니다.
+await page.goto("http://localhost:4173/?faction=pirate&mode=fast&guest=1", { waitUntil: "load" });
+await page.evaluate(() => { try { localStorage.clear(); } catch {} });
+await page.goto("http://localhost:4173/?faction=pirate&mode=fast&guest=1", { waitUntil: "load" });
+await waitUntil(() => typeof window.__game !== "undefined", { label: "page(해적) 로드" });
+
+await page2.goto("http://localhost:4173/?faction=marine&mode=fast&guest=1", { waitUntil: "load" });
+await page2.evaluate(() => { try { localStorage.clear(); } catch {} });
+await page2.goto("http://localhost:4173/?faction=marine&mode=fast&guest=1", { waitUntil: "load" });
+await page2.waitForFunction(() => typeof window.__game !== "undefined", null, { timeout: 20000 });
+
+// 두 시작 섬은 수백 미터 떨어져 있으므로, 근접 사거리 안으로 순간이동시켜 둡니다.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  sim.state.player.position = { x: 0, y: 2, z: 0 };
+  sim.playerController.teleport(sim.state.player.position);
+});
+await page2.evaluate(() => {
+  const sim = window.__game.simulation;
+  sim.state.player.position = { x: 1.4, y: 2, z: 0 };
+  sim.playerController.teleport(sim.state.player.position);
+});
+
+// 멀티플레이 패널을 실제로 열고, 서버 주소를 넣고, 실제 마우스로 접속 버튼을 누릅니다.
+async function connectMultiplayer(pg, url, name) {
+  await pg.evaluate((sel) => document.querySelector(sel)?.scrollIntoView(), "#btn-multiplayer");
+  const clicked = await pg.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return false;
+    el.click();
+    return true;
+  }, "#btn-multiplayer");
+  if (!clicked) return false;
+  await pg.waitForTimeout(150);
+  await pg.evaluate(
+    ({ url, name }) => {
+      const urlInput = document.querySelector("#mp-url");
+      const nameInput = document.querySelector("#mp-name");
+      if (urlInput) urlInput.value = url;
+      if (nameInput) nameInput.value = name;
+    },
+    { url, name },
+  );
+  await pg.evaluate(() => document.querySelector("#mp-connect-btn")?.click());
+  return true;
+}
+
+assert(await connectMultiplayer(page, MP_URL, "해적테스터"), "해적 쪽 멀티플레이 패널 열고 접속 시도");
+assert(await connectMultiplayer(page2, MP_URL, "해군테스터"), "해군 쪽 멀티플레이 패널 열고 접속 시도");
+
+async function waitConnected(pg, label) {
+  return waitUntil(() => window.__game.multiplayer.connected, { timeoutMs: 8000, label }).catch(() => false);
+}
+// waitUntil은 위에서 `page` 기준 클로저로 정의돼 있으므로, page2용은 직접 폴링합니다.
+async function waitConnected2(pg) {
+  const start = Date.now();
+  while (Date.now() - start < 8000) {
+    if (await pg.evaluate(() => window.__game.multiplayer.connected)) return true;
+    await pg.waitForTimeout(150);
+  }
+  return false;
+}
+assert(await waitConnected(page, "해적 접속"), "해적 쪽이 실제로 서버에 연결됨");
+assert(await waitConnected2(page2), "해군 쪽이 실제로 서버에 연결됨");
+
+// 서로를 인식하는지 (presence)
+const seesEachOther = await waitUntil(
+  () => window.__game.multiplayer.players.length >= 1,
+  { timeoutMs: 8000, label: "서로 인식" },
+).catch(() => false);
+assert(seesEachOther, "해적 클라이언트가 해군 플레이어를 목록에서 봄 (presence 동기화)");
+
+// PvP 체크박스를 실제로 클릭해서 켭니다 — 서버는 양쪽 다 켜져 있어야 데미지를 인정합니다.
+await page.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.click());
+await page2.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.click());
+await page.waitForTimeout(500);
+const pvpBothOn = await page.evaluate(() => window.__game.simulation.state.player.pvpEnabled)
+  && (await page2.evaluate(() => window.__game.simulation.state.player.pvpEnabled));
+assert(pvpBothOn, "양쪽 다 PvP 체크박스로 실제로 켜짐");
+
+// 패널을 닫아 입력을 가리지 않게 하고, 좌클릭으로 근접 공격을 날립니다.
+await page.evaluate(() => document.querySelector("#mp-close")?.click());
+await page2.evaluate(() => document.querySelector("#mp-close")?.click());
+
+const mpHpBefore = await page2.evaluate(() => window.__game.simulation.state.player.hp);
+
+let mpHit = false;
+let mpAckToast = false;
+for (let i = 0; i < 15 && !mpHit; i++) {
+  await page.mouse.click(640, 400);
+  // 토스트는 2.9초 뒤 DOM에서 사라지므로(hud.ts), hp를 확인하기 전에 먼저 짧게
+  // 여러 번 폴링해서 "뜬 순간"을 놓치지 않게 합니다.
+  for (let j = 0; j < 4; j++) {
+    await page.waitForTimeout(100);
+    const seen = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("#hud-toasts .toast")).some((el) => el.textContent.includes("피해")),
+    );
+    if (seen) mpAckToast = true;
+  }
+  const mpHpNow = await page2.evaluate(() => window.__game.simulation.state.player.hp);
+  if (mpHpNow < mpHpBefore) mpHit = true;
+}
+const mpHpAfter = await page2.evaluate(() => window.__game.simulation.state.player.hp);
+console.log(`  PvP 근접 공격: hp ${mpHpBefore} → ${mpHpAfter}`);
+assert(mpHpAfter < mpHpBefore, "서버가 판정한 근접 공격이 실제로 상대 hp를 깎음 (server/state.ts 재계산 경로)");
+assert(mpAckToast, "공격자 화면에 피해 토스트가 뜸 (pvp_hit_ack)");
+
+// 같은 진영끼리는 맞아도 안 되는지도 확인합니다 — 해적 두 명을 붙여봅니다.
+const page3 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+const errors3 = [];
+page3.on("console", (msg) => { if (msg.type() === "error") errors3.push(msg.text()); });
+page3.on("pageerror", (err) => errors3.push(String(err)));
+await page3.goto("http://localhost:4173/?faction=pirate&mode=fast&guest=1", { waitUntil: "load" });
+await page3.evaluate(() => { try { localStorage.clear(); } catch {} });
+await page3.goto("http://localhost:4173/?faction=pirate&mode=fast&guest=1", { waitUntil: "load" });
+await page3.waitForFunction(() => typeof window.__game !== "undefined", null, { timeout: 20000 });
+await page3.evaluate(() => {
+  const sim = window.__game.simulation;
+  sim.state.player.position = { x: 0.5, y: 2, z: 0 };
+  sim.playerController.teleport(sim.state.player.position);
+});
+await connectMultiplayer(page3, MP_URL, "같은편해적");
+const p3Connected = await (async () => {
+  const start = Date.now();
+  while (Date.now() - start < 8000) {
+    if (await page3.evaluate(() => window.__game.multiplayer.connected)) return true;
+    await page3.waitForTimeout(150);
+  }
+  return false;
+})();
+assert(p3Connected, "세 번째(같은 진영) 클라이언트도 접속됨");
+await page3.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.click());
+await page3.waitForTimeout(400);
+await page3.evaluate(() => document.querySelector("#mp-close")?.click());
+
+const pirateHpBefore = await page.evaluate(() => window.__game.simulation.state.player.hp);
+for (let i = 0; i < 6; i++) {
+  await page3.mouse.click(640, 400);
+  await page3.waitForTimeout(300);
+}
+const pirateHpAfter = await page.evaluate(() => window.__game.simulation.state.player.hp);
+assert(pirateHpAfter === pirateHpBefore, "같은 진영끼리는 서버가 피해를 인정하지 않음 (same_faction 거부)");
+
+await page2.close();
+await page3.close();
+mpServer.kill();
+
+console.log("  page2(해군) 콘솔 에러:", JSON.stringify(errors2));
+console.log("  page3(같은편) 콘솔 에러:", JSON.stringify(errors3));
+for (const e of errors2) errors.push(`[page2] ${e}`);
+for (const e of errors3) errors.push(`[page3] ${e}`);
 
 console.log("\nCONSOLE_ERRORS:", JSON.stringify(errors, null, 2));
 console.log(failures === 0 ? "\n모든 브라우저 검증 통과 ✅" : `\n${failures}개 실패 ❌`);

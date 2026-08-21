@@ -17,6 +17,9 @@ import { islandArrivalPosition, getIsland } from "./world/islands";
 import { totalMeleeCooldown, meleeDps } from "./simulation/CombatSystem";
 import { devDenyMessage, devDenyReason } from "./core/DevAccess";
 import { applyDevLoadout } from "./simulation/DevLoadout";
+import { MultiplayerClient } from "./network/MultiplayerClient";
+import { buildCombatStatsSnapshot, drawnWeaponId, processPvpAttacks } from "./network/PvpCombat";
+import { MultiplayerUI } from "./ui/MultiplayerUI";
 
 export interface StartChoice {
   faction: Faction;
@@ -300,6 +303,11 @@ async function main() {
       return { entries, myUid: user.uid, notice: null };
     },
   });
+  // 멀티플레이 — 완전히 선택 사항입니다. 버튼을 눌러 접속하기 전까지는
+  // 소켓을 열지 않고, 싱글플레이 동작에 아무 영향도 주지 않습니다.
+  const multiplayer = new MultiplayerClient(simulation.state);
+  const multiplayerUI = new MultiplayerUI(appEl, multiplayer, simulation.state);
+
   const hud = new Hud(appEl, {
     onShop: () => panels.toggle("shop"),
     onInventory: () => panels.toggle("inventory"),
@@ -307,6 +315,7 @@ async function main() {
     onGuide: () => panels.toggle("guide"),
     onCancelGuide: () => simulation.setGuide(null),
     onRank: () => panels.toggle("rank"),
+    onMultiplayer: () => multiplayerUI.toggle(),
   });
 
   // 개발자 모드는 **세이브를 건드리지 않습니다.** 내 진짜 캐릭터를 만렙 테스트본으로
@@ -354,6 +363,8 @@ async function main() {
     islands: islandHelpers,
     // 무기에 따라 실제 공격 간격이 얼마나 짧아지는지 콘솔/테스트에서 확인용
     combat: { totalMeleeCooldown, meleeDps },
+    multiplayer,
+    multiplayerUI,
   };
 
   hideStartScreen();
@@ -384,6 +395,11 @@ async function main() {
     simulation.step(dt, gameplaySnapshot);
     world.step();
 
+    // 이번 프레임에 근접/스킬 공격이 나갔다면, PvP가 켜진 다른 진영 플레이어가
+    // 사거리 안에 있는지 확인해서 서버에 공격 요청을 보냅니다. CombatSystem은
+    // 여전히 몬스터만 알기 때문에 이 확인은 시뮬레이션 바깥, 여기서 합니다.
+    processPvpAttacks(simulation.state, multiplayer);
+
     // 상점 NPC 앞이나 배 위에서 E를 누르면 시뮬레이션이 "요청"만 남기고,
     // 실제 패널을 여는 건 UI 레이어인 여기서 처리합니다.
     if (simulation.state.uiRequest) {
@@ -403,6 +419,11 @@ async function main() {
     // 패널 버튼에서 발생한 이벤트도 여기까지 살아남아야 알림이 보입니다.
     simulation.clearEvents();
     saves.tick(Date.now());
+
+    // 멀티플레이 — 접속 중이 아니면 사실상 no-op입니다 (보간할 원격 플레이어가 없음).
+    multiplayer.tick(dt, Date.now(), drawnWeaponId(simulation.state), buildCombatStatsSnapshot(simulation.state));
+    renderer.syncRemotePlayers(multiplayer.players);
+    multiplayerUI.update();
 
     requestAnimationFrame(tick);
   }

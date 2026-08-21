@@ -1,0 +1,149 @@
+/* 멀티플레이 접속 패널 — PanelManager를 쓰지 않는 독립 위젯이라 별도 파일로 뺐습니다.
+   (게임 이동/전투 입력을 막지 않습니다 — 접속 주소를 입력하는 동안에도 움직일 수 있습니다) */
+
+.mp-panel {
+  position: absolute;
+  right: 26px;
+  top: 20px;
+  width: 260px;
+  background: rgba(14, 18, 28, 0.92);
+  border: 1px solid rgba(129, 212, 250, 0.45);
+  border-radius: 14px;
+  padding: 14px 16px 16px;
+  color: #e3f2fd;
+  font-size: 13px;
+  pointer-events: auto;
+  z-index: 30;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.mp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: bold;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.mp-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: #e3f2fd;
+  cursor: pointer;
+  font-size: 12px;
+}
+.mp-close:hover { background: rgba(229, 57, 53, 0.4); }
+
+.mp-status {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  margin-bottom: 10px;
+  font-size: 12.5px;
+}
+.mp-status.connected { background: rgba(129, 199, 132, 0.22); color: #c8e6c9; }
+.mp-status.connecting { background: rgba(255, 213, 79, 0.22); color: #ffe082; }
+
+.mp-field {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.mp-field input[type="text"],
+.mp-field input:not([type]) {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.mp-connect-btn {
+  width: 100%;
+  padding: 8px 0;
+  border-radius: 10px;
+  border: 1px solid rgba(79, 195, 247, 0.6);
+  background: rgba(79, 195, 247, 0.22);
+  color: #e3f2fd;
+  font-family: inherit;
+  font-weight: bold;
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+.mp-connect-btn:hover { background: rgba(79, 195, 247, 0.35); }
+.mp-connect-btn.disconnect {
+  border-color: rgba(229, 115, 115, 0.6);
+  background: rgba(229, 57, 53, 0.2);
+}
+.mp-connect-btn.disconnect:hover { background: rgba(229, 57, 53, 0.32); }
+
+.mp-pvp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.mp-pvp-toggle input[type="checkbox"]:disabled + span { opacity: 0.5; }
+.mp-pvp-toggle.active {
+  background: rgba(239, 83, 80, 0.25);
+  border: 1px solid rgba(239, 83, 80, 0.6);
+}
+
+.mp-players {
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
+.mp-player-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.mp-player-row .mp-hp-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.mp-player-row .mp-hp-fill {
+  height: 100%;
+  background: #ef5350;
+}
+.mp-player-empty {
+  opacity: 0.6;
+  font-size: 12px;
+  padding: 6px 2px;
+}
+
+.mp-note {
+  font-size: 11px;
+  opacity: 0.65;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── 다른 플레이어 머리 위 이름표 (SceneRenderer가 그리는 캔버스 스프라이트와 별개로,
+     플레이어 목록/상태 표시에서 진영 색을 맞추기 위한 배지) ────────────────── */
+.mp-faction-pirate { color: #ffcc80; }
+.mp-faction-marine { color: #90caf9; }

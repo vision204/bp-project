@@ -54,6 +54,7 @@ export class Hud {
       onGuide: () => void;
       onCancelGuide: () => void;
       onRank: () => void;
+      onMultiplayer: () => void;
     },
   ) {
     this.root = document.createElement("div");
@@ -75,6 +76,7 @@ export class Hud {
         <button class="ui-btn" id="btn-stats">📊 캐릭터</button>
         <button class="ui-btn small guide" id="btn-guide">🧭 섬 가이드</button>
         <button class="ui-btn small rank" id="btn-rank">🏆 랭킹</button>
+        <button class="ui-btn small multiplayer" id="btn-multiplayer">🌐 멀티플레이</button>
       </div>
       <div class="guide-hud" id="hud-guide" hidden>
         <div class="guide-hud-arrow" id="hud-guide-arrow">▲</div>
@@ -175,6 +177,7 @@ export class Hud {
     this.root.querySelector<HTMLButtonElement>("#btn-stats")!.addEventListener("click", buttons.onStats);
     this.root.querySelector<HTMLButtonElement>("#btn-guide")!.addEventListener("click", buttons.onGuide);
     this.root.querySelector<HTMLButtonElement>("#btn-rank")!.addEventListener("click", buttons.onRank);
+    this.root.querySelector<HTMLButtonElement>("#btn-multiplayer")!.addEventListener("click", buttons.onMultiplayer);
     this.guideHud = this.root.querySelector("#hud-guide")!;
     this.guideArrow = this.root.querySelector("#hud-guide-arrow")!;
     this.guideName = this.root.querySelector("#hud-guide-name")!;
@@ -481,6 +484,25 @@ export class Hud {
           break;
         case "player_respawned":
           this.pushToast("쓰러졌습니다… 가까운 섬에서 부활했습니다", "red");
+          break;
+        case "pvp_connected":
+          this.pushToast("🌐 멀티플레이 서버에 접속했습니다", "blue");
+          break;
+        case "pvp_disconnected":
+          this.pushToast(`🌐 ${ev.reason}`, "red");
+          break;
+        case "pvp_hit_landed":
+          this.pushToast(`⚔️ ${ev.targetName}에게 피해 ${Math.round(ev.damage).toLocaleString()}!`, "gold");
+          break;
+        case "pvp_damage_taken":
+          this.flashDamage();
+          this.pushToast(`⚔️ ${ev.attackerName}에게 피해 ${Math.round(ev.damage).toLocaleString()}를 받았습니다`, "red");
+          break;
+        case "pvp_defeated":
+          this.pushToast(`💀 ${ev.byName}에게 쓰러졌습니다`, "red");
+          break;
+        case "pvp_rejected":
+          // 사거리 밖/쿨다운처럼 흔한 사유는 조용히 넘기고, 눈에 띄는 것만 알립니다.
           break;
       }
     }

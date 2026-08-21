@@ -237,6 +237,14 @@ export interface PlayerState {
   guideTargetIslandId: string | null;
 
   /**
+   * 멀티플레이 PvP를 허용할지. 기본은 꺼짐이고, 저장되지 않습니다(매 접속마다
+   * 다시 켜야 함) — 개발자 모드처럼 "실수로 계속 켜진 채 있는" 사고를 막기
+   * 위해서입니다. 서버는 공격자·대상 양쪽이 이 값을 켰고 서로 다른 진영일
+   * 때만 피해를 인정합니다 (자세한 내용은 src/network/protocol.ts 참고).
+   */
+  pvpEnabled: boolean;
+
+  /**
    * 공중에서 몇 번까지 점프할 수 있는지 (1 = 보통 점프만).
    * 얼음 섬 설인에게 Lv.125부터 2단을 배우고, 이후 100레벨마다 한 단씩 늘립니다.
    */
@@ -283,7 +291,20 @@ export type GameEvent =
   | { type: "guide_arrived"; islandName: string }
   | { type: "boat_boarded" }
   | { type: "boat_left"; landed: boolean }
-  | { type: "island_entered"; islandName: string; recommendedLevel: number };
+  | { type: "island_entered"; islandName: string; recommendedLevel: number }
+  // --- 멀티플레이 / PvP ---------------------------------------------------
+  // CombatSystem은 다른 플레이어의 존재를 전혀 모릅니다(싱글플레이 로직은
+  // 그대로 유지). 이 이벤트들은 근접/스킬 공격이 "나갔다"는 사실만 알리고,
+  // 실제로 다른 플레이어를 맞혔는지는 src/network/PvpCombat.ts가 이 이벤트를
+  // 보고 별도로 판정합니다.
+  | { type: "melee_attack_fired" }
+  | { type: "skill_fired"; slot: number }
+  | { type: "pvp_connected" }
+  | { type: "pvp_disconnected"; reason: string }
+  | { type: "pvp_hit_landed"; targetName: string; damage: number }
+  | { type: "pvp_damage_taken"; attackerName: string; damage: number }
+  | { type: "pvp_defeated"; byName: string }
+  | { type: "pvp_rejected"; reason: string };
 
 export interface EnemyState {
   id: string;
@@ -422,6 +443,7 @@ export function createInitialGameState(
       flying: devMode, // 개발자 모드로 들어오면 바로 날 수 있게
       lastGachaAtMs: null,
       guideTargetIslandId: null,
+      pvpEnabled: false,
       maxJumps: 1,
       unlockedSecondSea: false,
       events: [],

@@ -8,15 +8,23 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "firebase:setup": "node scripts/setup-firebase.mjs",
-    "firebase:check": "node scripts/setup-firebase.mjs --check"
+    "firebase:check": "node scripts/setup-firebase.mjs --check",
+    "verify": "tsx scripts/verify-logic.mjs",
+    "e2e": "node scripts/e2e.mjs",
+    "server": "tsx server/index.ts",
+    "server:dev": "tsx watch server/index.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.14.0",
     "firebase": "^12.18.0",
-    "three": "^0.169.0"
+    "three": "^0.169.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/three": "^0.169.0",
+    "@types/ws": "^8.5.12",
+    "playwright": "^1.62.1",
+    "tsx": "^4.23.12",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }
