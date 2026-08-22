@@ -16,14 +16,30 @@ import type { SkillShape } from "../simulation/skills";
 import { dist2D, pointInShape } from "../simulation/ShapeMath";
 import {
   COMBAT_STATS_SYNC_HZ,
+  ENEMY_GHOST_TTL_MS,
+  ENEMY_SYNC_HZ,
+  MAX_ENEMY_SYNC_ENTRIES,
   PVP_REJECT_MESSAGES,
   STATE_SYNC_HZ,
   type AnimState,
   type ClientMessage,
   type CombatStatsSnapshot,
+  type EnemySyncEntry,
   type RemotePlayerSnapshot,
   type ServerMessage,
 } from "./protocol";
+
+/** 다른 사람이 지금 쫓기고 있는 몬스터 하나를 화면에 그리기 위한 최소 정보. */
+export interface RemoteEnemyGhost {
+  x: number;
+  z: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  /** 이 몬스터가 지금 쫓고 있는 상대(다른 플레이어)의 id — 그 방향을 바라보게 그릴 때 씁니다. */
+  fromId: string;
+  updatedAtMs: number;
+}
 
 const SMOOTHING_PER_SEC = 10;
 
@@ -73,12 +89,17 @@ export class MultiplayerClient {
   private readonly state: GameState;
   private myId: string | null = null;
   private readonly remotePlayers = new Map<string, RemotePlayerView>();
+  private readonly remoteEnemyGhosts = new Map<string, RemoteEnemyGhost>();
   private lastStateSentAtMs = 0;
   private lastStatsSentAtMs = 0;
   private lastStatsSig = "";
+  private lastEnemySyncAtMs = 0;
 
   status: MultiplayerStatus = "disconnected";
   serverUrl = "";
+  /** 서버가 배정해준 방 — 같은 방 사람들끼리만 서로 보이고 PvP도 됩니다 (방마다 최대 인원 있음). */
+  roomId: string | null = null;
+  roomSize = 0;
 
   constructor(state: GameState) {
     this.state = state;
@@ -94,6 +115,11 @@ export class MultiplayerClient {
 
   get players(): RemotePlayerView[] {
     return [...this.remotePlayers.values()];
+  }
+
+  /** 렌더러가 몬스터를 그릴 때 참고하는, 다른 사람이 보고한 "지금 쫓기는 몬스터" 목록. */
+  get enemyGhosts(): ReadonlyMap<string, RemoteEnemyGhost> {
+    return this.remoteEnemyGhosts;
   }
 
   connect(url: string, name: string) {
@@ -142,7 +168,10 @@ export class MultiplayerClient {
     this.ws = null;
     this.status = "disconnected";
     this.myId = null;
+    this.roomId = null;
+    this.roomSize = 0;
     this.remotePlayers.clear();
+    this.remoteEnemyGhosts.clear();
     this.state.player.pvpEnabled = false;
   }
 
@@ -173,6 +202,8 @@ export class MultiplayerClient {
     switch (msg.type) {
       case "welcome":
         this.myId = msg.id;
+        this.roomId = msg.roomId;
+        this.roomSize = msg.roomSize;
         this.remotePlayers.clear();
         for (const p of msg.players) this.upsert(p);
         break;
@@ -207,12 +238,49 @@ export class MultiplayerClient {
           reason: PVP_REJECT_MESSAGES[msg.reason] ?? msg.reason,
         });
         break;
+
+      case "enemy_states": {
+        const now = Date.now();
+        for (const e of msg.enemies) {
+          this.remoteEnemyGhosts.set(e.id, {
+            x: e.x,
+            z: e.z,
+            hp: e.hp,
+            maxHp: e.maxHp,
+            alive: e.alive,
+            fromId: msg.fromId,
+            updatedAtMs: now,
+          });
+        }
+        break;
+      }
     }
+  }
+
+  /** 몬스터 유령이 이 시간 넘게 갱신이 없으면 지웁니다 (추적을 그만뒀거나 상대가 나감). */
+  private pruneEnemyGhosts(nowMs: number) {
+    for (const [id, ghost] of this.remoteEnemyGhosts) {
+      if (nowMs - ghost.updatedAtMs > ENEMY_GHOST_TTL_MS) this.remoteEnemyGhosts.delete(id);
+    }
+  }
+
+  /** 지금 내 어그로 범위 안에 있는(=나를 쫓고 있는) 몬스터들만 골라 보고합니다. */
+  private buildEnemySyncSnapshot(): EnemySyncEntry[] {
+    const p = this.state.player;
+    const out: EnemySyncEntry[] = [];
+    for (const enemy of this.state.enemies) {
+      if (!enemy.alive) continue;
+      if (dist2D(enemy.position.x, enemy.position.z, p.position.x, p.position.z) > enemy.aggroRange) continue;
+      out.push({ id: enemy.id, x: enemy.position.x, z: enemy.position.z, hp: enemy.hp, maxHp: enemy.maxHp, alive: enemy.alive });
+      if (out.length >= MAX_ENEMY_SYNC_ENTRIES) break;
+    }
+    return out;
   }
 
   /** 매 프레임 호출: 보간 갱신 + (연결 중이면) 주기적으로 상태를 서버에 보냅니다. */
   tick(dt: number, nowMs: number, drawnWeaponId: string | null, combatStats: CombatStatsSnapshot) {
     for (const view of this.remotePlayers.values()) view.step(dt);
+    this.pruneEnemyGhosts(nowMs);
     if (!this.connected) return;
 
     const p = this.state.player;
@@ -238,6 +306,12 @@ export class MultiplayerClient {
       this.lastStatsSentAtMs = nowMs;
       this.lastStatsSig = sig;
       this.send({ type: "combat_stats", stats: combatStats });
+    }
+
+    if (nowMs - this.lastEnemySyncAtMs >= 1000 / ENEMY_SYNC_HZ) {
+      this.lastEnemySyncAtMs = nowMs;
+      const enemies = this.buildEnemySyncSnapshot();
+      if (enemies.length > 0) this.send({ type: "enemy_states", enemies });
     }
   }
 

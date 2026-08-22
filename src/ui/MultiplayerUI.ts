@@ -104,7 +104,7 @@ export class MultiplayerUI {
     const status = this.mp.status;
     this.statusEl.textContent =
       status === "connected"
-        ? `✅ 접속됨 — ${this.mp.players.length + 1}명과 함께 플레이 중`
+        ? `✅ ${this.mp.roomId ?? "방"} — ${this.mp.players.length + 1}명과 함께 플레이 중`
         : status === "connecting"
           ? "⏳ 접속 중…"
           : "⚪ 연결 안 됨";

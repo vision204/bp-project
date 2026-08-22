@@ -27,8 +27,12 @@ const world = new World();
 // "HTTP로 살아있는지 확인"을 요구하므로 WebSocket 서버만으로는 부족합니다.
 const httpServer = createServer((req, res) => {
   if (req.url === "/healthz") {
+    const rooms = world.roomSummary();
+    const roomsText = Object.entries(rooms)
+      .map(([id, n]) => `${id}:${n}`)
+      .join(", ") || "없음";
     res.writeHead(200, { "content-type": "text/plain" });
-    res.end(`ok — ${world.count()} players`);
+    res.end(`ok — ${world.count()} players (${roomsText})`);
     return;
   }
   res.writeHead(404);
@@ -41,7 +45,7 @@ wss.on("connection", (ws) => {
   // hello 메시지가 오기 전까지는 이름/진영을 모르므로 기본값으로 방에 넣고,
   // hello가 도착하면 handleMessage 안에서 즉시 갱신합니다.
   const conn = world.join(ws, "여행자", "pirate");
-  console.log(`[mp] 접속: ${conn.id} (현재 ${world.count()}명)`);
+  console.log(`[mp] 접속: ${conn.id} → ${conn.roomId} (전체 ${world.count()}명)`);
 
   ws.on("message", (data) => {
     world.handleMessage(conn, data.toString());

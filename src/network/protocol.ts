@@ -10,13 +10,20 @@
 
 import type { Faction } from "../world/islands";
 
-/** 지금은 방을 나누지 않고 서버 프로세스 하나 = 월드 하나입니다 (README 참고). */
+/** 서버 프로세스 하나 = 여러 방(room). 방 하나가 이 인원으로 꽉 차면 다음 방을 만듭니다. */
 export const DEFAULT_MULTIPLAYER_PORT = 8787;
+export const ROOM_CAPACITY = 14;
 
 /** 위치·전투 동기화 메시지를 보내는 목표 주기 (초당 횟수) */
 export const STATE_SYNC_HZ = 12;
 /** 무기/스텟처럼 자주 안 바뀌는 값은 훨씬 느리게 보냅니다 */
 export const COMBAT_STATS_SYNC_HZ = 2;
+/** 내가 지금 어그로 끌고 있는 몬스터 위치를 다른 사람에게 보내는 주기 */
+export const ENEMY_SYNC_HZ = 8;
+/** 이 시간 동안 갱신이 없으면(추적을 그만뒀거나 상대가 나감) 그 몬스터의 "유령"을 지웁니다 */
+export const ENEMY_GHOST_TTL_MS = 2500;
+/** 한 번에 보고하는 몬스터 수 상한 — 어그로 범위가 좁아 실제로는 몇 마리 안 되지만, 안전장치로 잘라둠 */
+export const MAX_ENEMY_SYNC_ENTRIES = 24;
 
 export interface Vec3Like {
   x: number;
@@ -69,6 +76,21 @@ export interface RemotePlayerSnapshot {
   pvpEnabled: boolean;
 }
 
+/**
+ * "지금 이 몬스터가 나를 쫓아오고 있다"는 걸 다른 사람에게 보여주기 위한 최소 정보.
+ * 몬스터 id(`${speciesId}_enemy_${i}`)는 섬 배치가 결정론적이라 모든 클라이언트에서
+ * 항상 똑같습니다 — 그래서 서버가 새로 뭘 계산할 필요 없이 그대로 중계만 해도
+ * "같은 몬스터"를 가리킨다는 게 보장됩니다.
+ */
+export interface EnemySyncEntry {
+  id: string;
+  x: number;
+  z: number;
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // 클라이언트 → 서버
 // ---------------------------------------------------------------------------
@@ -92,6 +114,7 @@ export type ClientMessage =
   | { type: "pvp_toggle"; enabled: boolean }
   | { type: "melee_attack"; targetId: string }
   | { type: "skill_attack"; targetId: string; slot: number }
+  | { type: "enemy_states"; enemies: EnemySyncEntry[] }
   | { type: "ping" };
 
 // ---------------------------------------------------------------------------
@@ -99,9 +122,11 @@ export type ClientMessage =
 // ---------------------------------------------------------------------------
 
 export type ServerMessage =
-  | { type: "welcome"; id: string; players: RemotePlayerSnapshot[] }
+  | { type: "welcome"; id: string; players: RemotePlayerSnapshot[]; roomId: string; roomSize: number }
   | { type: "player_state"; player: RemotePlayerSnapshot }
   | { type: "player_left"; id: string }
+  /** 같은 방의 다른 사람이 지금 쫓기고 있는 몬스터들의 위치 — 순수 중계, 그대로 뿌립니다. */
+  | { type: "enemy_states"; fromId: string; enemies: EnemySyncEntry[] }
   /** 내가 맞았을 때 — 이 메시지를 받은 클라이언트가 자기 hp를 직접 깎습니다. */
   | { type: "pvp_damage"; attackerId: string; attackerName: string; damage: number; kind: "melee" | "skill" }
   /** 내가 때렸을 때 — 서버가 실제로 적용한 데미지를 알려줘서 즉시 화면 피드백을 줍니다. */
@@ -118,6 +143,7 @@ export const PVP_REJECT_MESSAGES: Record<string, string> = {
   self_pvp_off: "PvP를 먼저 켜야 합니다.",
   same_faction: "같은 진영은 공격할 수 없습니다.",
   different_sea: "서로 다른 바다에 있습니다.",
+  different_room: "서로 다른 방에 있습니다.",
   target_down: "이미 쓰러진 상대입니다.",
   out_of_range: "사거리 밖입니다.",
   on_cooldown: "아직 쿨다운 중입니다.",

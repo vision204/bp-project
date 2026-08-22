@@ -6,7 +6,8 @@ import { boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
-import type { RemotePlayerView } from "../network/MultiplayerClient";
+import type { RemoteEnemyGhost, RemotePlayerView } from "../network/MultiplayerClient";
+import { dist2D } from "../simulation/ShapeMath";
 
 
 const CAMERA_DISTANCE = 6;
@@ -506,7 +507,12 @@ export class SceneRenderer {
     }
   }
 
-  sync(state: GameState, playerController: PlayerController) {
+  sync(
+    state: GameState,
+    playerController: PlayerController,
+    enemyGhosts?: ReadonlyMap<string, RemoteEnemyGhost>,
+    remotePlayers?: RemotePlayerView[],
+  ) {
     // 조명과 안개 — 태양은 플레이어를 따라다니고(어느 바다에서든 그림자가 나오도록),
     // 하늘·안개는 지금 있는 바다의 것을 씁니다.
     if (this.environment) {
@@ -598,9 +604,25 @@ export class SceneRenderer {
       }
     }
 
+    // 다른 사람이 지금 쫓기고 있다고 보고한 몬스터 위치를 찾을 때 씁니다 (그쪽을 바라보게 하려고).
+    const remotePlayerPos = new Map<string, { x: number; z: number }>();
+    if (remotePlayers) for (const r of remotePlayers) remotePlayerPos.set(r.snapshot.id, { x: r.renderX, z: r.renderZ });
+
     // 적들 (쫓아올 때 플레이어 쪽을 바라보도록 회전도 같이 갱신)
     for (const enemy of state.enemies) {
-      const visible = enemy.alive && nearPlayer(enemy.position.x, enemy.position.z);
+      // 내가 지금 직접 어그로를 끌고 있으면 내 시뮬레이션을 그대로 신뢰합니다 —
+      // 다른 사람의 보고(유령)는 "나와 무관하게 다른 사람을 쫓고 있는" 경우에만 씁니다.
+      const iAmAggroing = enemy.alive && dist2D(enemy.position.x, enemy.position.z, px, pz) <= enemy.aggroRange;
+      const ghost = !iAmAggroing ? enemyGhosts?.get(enemy.id) : undefined;
+      const useGhost = !!ghost && ghost.alive;
+
+      const ex = useGhost ? ghost!.x : enemy.position.x;
+      const ez = useGhost ? ghost!.z : enemy.position.z;
+      const alive = useGhost ? ghost!.alive : enemy.alive;
+      const hp = useGhost ? ghost!.hp : enemy.hp;
+      const maxHp = useGhost ? ghost!.maxHp : enemy.maxHp;
+
+      const visible = alive && nearPlayer(ex, ez);
       // 몬스터가 180마리가 넘으므로, 한 번도 보이지 않은 개체는 아예 만들지 않습니다.
       const existing = this.enemyVisuals.get(enemy.id);
       if (!visible && !existing) continue;
@@ -608,11 +630,12 @@ export class SceneRenderer {
       visual.group.visible = visible;
       if (!visible) continue;
 
-      visual.group.position.set(enemy.position.x, enemy.position.y, enemy.position.z);
-      visual.group.lookAt(px, enemy.position.y, pz);
+      visual.group.position.set(ex, enemy.position.y, ez);
+      const lookTarget = (useGhost && remotePlayerPos.get(ghost!.fromId)) || { x: px, z: pz };
+      visual.group.lookAt(lookTarget.x, enemy.position.y, lookTarget.z);
 
       // 체력이 변했을 때만 캔버스를 다시 그리고 텍스처를 업로드
-      const ratio = enemy.hp / enemy.maxHp;
+      const ratio = maxHp > 0 ? hp / maxHp : 0;
       if (ratio !== visual.lastRatio) {
         visual.lastRatio = ratio;
         drawEnemyLabel(visual.healthBar.ctx, visual.healthBar.canvas, ratio, visual.name);

@@ -2756,6 +2756,66 @@ for (let i = 0; i < 6; i++) {
 const pirateHpAfter = await page.evaluate(() => window.__game.simulation.state.player.hp);
 assert(pirateHpAfter === pirateHpBefore, "같은 진영끼리는 서버가 피해를 인정하지 않음 (same_faction 거부)");
 
+section("멀티플레이 — 몬스터(NPC) 동기화");
+// page(해적)가 몬스터를 실제로 어그로 끌면, page2(해군)는 그 몬스터한테서 멀리
+// 떨어져 있어도(=page2 로컬 시뮬레이션은 그 몬스터를 전혀 인식 못함) 서버가
+// 중계해주는 위치("유령")를 받아서 화면에 그대로 반영해야 합니다.
+const enemyInfo = await page.evaluate(() => {
+  const e = window.__game.simulation.state.enemies.find((x) => x.alive);
+  return e ? { id: e.id, x: e.position.x, z: e.position.z } : null;
+});
+assert(enemyInfo !== null, "테스트용 몬스터를 하나 찾음");
+
+await page.evaluate((pos) => {
+  const sim = window.__game.simulation;
+  sim.state.player.position = { x: pos.x + 2, y: 2, z: pos.z };
+  sim.playerController.teleport(sim.state.player.position);
+}, enemyInfo);
+// page2는 어그로 범위(6m) 밖이지만 시야 거리(fast 모드 85m) 안쪽에 둡니다 —
+// 자기 로컬 시뮬레이션으로는 이 몬스터를 못 쫓지만, 화면에는 보여야 정상입니다.
+await page2.evaluate((pos) => {
+  const sim = window.__game.simulation;
+  sim.state.player.position = { x: pos.x + 20, y: 2, z: pos.z };
+  sim.playerController.teleport(sim.state.player.position);
+}, enemyInfo);
+
+const myIdOnPage = await page.evaluate(() => window.__game.multiplayer.id);
+
+async function waitForGhost(pg, id, timeoutMs = 6000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const g = await pg.evaluate((eid) => {
+      const ghost = window.__game.multiplayer.enemyGhosts.get(eid);
+      return ghost ? { x: ghost.x, z: ghost.z, alive: ghost.alive, fromId: ghost.fromId } : null;
+    }, id);
+    if (g) return g;
+    await pg.waitForTimeout(200);
+  }
+  return null;
+}
+const ghostSeen = await waitForGhost(page2, enemyInfo.id);
+assert(ghostSeen !== null, "page(해적)이 어그로 끈 몬스터를 page2(해군)가 서버 중계로 실제로 받음");
+assert(ghostSeen?.fromId === myIdOnPage, "받은 유령이 실제로 page(해적)한테서 왔다고 정확히 표시됨");
+assert(ghostSeen?.alive === true, "받은 유령 몬스터가 생존 상태로 표시됨");
+
+// 렌더러가 그 유령 위치를 실제로 그림에 반영하는지 — ghost·visual을 같은 순간에
+// 함께 읽어서, 둘 사이에 타이밍 차이로 인한 오탐을 없앱니다.
+await page2.waitForTimeout(300);
+const combined = await page2.evaluate((id) => {
+  const ghost = window.__game.multiplayer.enemyGhosts.get(id);
+  const visual = window.__game.renderer.enemyVisuals.get(id);
+  return {
+    ghost: ghost ? { x: ghost.x, z: ghost.z } : null,
+    visual: visual ? { visible: visual.group.visible, x: visual.group.position.x, z: visual.group.position.z } : null,
+  };
+}, enemyInfo.id);
+assert(combined.visual?.visible === true, "원래는 너무 멀어서 안 보여야 할 몬스터가, 유령 덕분에 page2 화면에 실제로 보임");
+const posMatches =
+  combined.ghost && combined.visual &&
+  Math.abs(combined.ghost.x - combined.visual.x) < 0.05 &&
+  Math.abs(combined.ghost.z - combined.visual.z) < 0.05;
+assert(posMatches, "화면에 그려진 몬스터 위치가 (page2 자신의 시뮬레이션이 아니라) 받은 유령 좌표와 정확히 일치함");
+
 await page2.close();
 await page3.close();
 mpServer.kill();

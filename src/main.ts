@@ -418,7 +418,7 @@ async function main() {
 
     ocean.update(simulation.state.elapsedSec);
 
-    renderer.sync(simulation.state, simulation.playerController);
+    renderer.sync(simulation.state, simulation.playerController, multiplayer.enemyGhosts, multiplayer.players);
     renderer.render();
     hud.update(simulation.state, panels.isBlocking());
     panels.update(simulation.state);

@@ -38,6 +38,8 @@ const { GACHA_COOLDOWN_MS, GACHA_COST_RATIO, GACHA_MIN_COST, GACHA_MIN_MONEY,
         gachaOdds, pickFruit, rollGacha } = await import("../src/simulation/GachaSystem.ts");
 const { GUIDE_ARRIVE_MARGIN, recommendedIsland, nextGoalIsland, guideInfo, setGuideTarget, stepGuide } =
   await import("../src/simulation/GuideSystem.ts");
+const { World } = await import("../server/state.ts");
+const { ROOM_CAPACITY } = await import("../src/network/protocol.ts");
 const { GACHA_ISLAND_ID } = await import("../src/simulation/QuestSystem.ts");
 const { DEV_EMAILS, normalizeEmail, isDevEmail, isLocalHost, devDenyReason, devModeAllowed,
         devDenyMessage } = await import("../src/core/DevAccess.ts");
@@ -1908,6 +1910,105 @@ section("개발자 모드 — 허용 계정만 · 만렙 테스트 캐릭터 · 
 
   // 개발자 모드로 만든 캐릭터도 두 번째 바다에 바로 갈 수 있어야 합니다
   assert(canTravelSea(state) === true, "만렙이라 해적왕이 바로 보내줌");
+}
+
+section("멀티플레이 서버 — 방 나누기 (ROOM_CAPACITY명씩)");
+{
+  // 진짜 WebSocket 없이, World가 요구하는 최소한의 모양(readyState/OPEN/send/close)만
+  // 흉내 낸 가짜 소켓으로 서버 로직(server/state.ts)만 그대로 검증합니다 —
+  // verify-logic.mjs답게 브라우저도 실제 네트워크도 필요 없습니다.
+  function fakeConn(world, name, faction) {
+    const sent = [];
+    const sock = { readyState: 1, OPEN: 1, send: (d) => sent.push(JSON.parse(d)), close() {} };
+    const conn = world.join(sock, name, faction);
+    return { conn, sent };
+  }
+
+  const world = new World();
+  const many = [];
+  for (let i = 0; i < 15; i++) many.push(fakeConn(world, `p${i}`, i % 2 === 0 ? "pirate" : "marine"));
+
+  assert(many.slice(0, 14).every((m) => m.conn.roomId === "room1"), "처음 14명은 room1에 배정됨");
+  assert(many[14].conn.roomId === "room2", "15번째 접속자는 room1이 꽉 차서 room2로 배정됨");
+  const summaryFull = world.roomSummary();
+  assert(summaryFull.room1 === 14 && summaryFull.room2 === 1, `방별 인원 집계 정확함 (room1:${summaryFull.room1}, room2:${summaryFull.room2})`);
+
+  world.leave(many[0].conn.id);
+  const late = fakeConn(world, "늦게옴", "pirate");
+  assert(late.conn.roomId === "room1", "room1에 자리가 생기면 새 접속자가 그 방부터 채움");
+
+  const checker = fakeConn(world, "확인용", "marine");
+  assert(checker.conn.roomId === "room2", "room1이 다시 꽉 차면 그다음 접속자는 room2로");
+  const welcomeMsg = checker.sent.find((m) => m.type === "welcome");
+  assert(welcomeMsg.roomId === "room2", "welcome 메시지에 배정된 방 이름이 들어있음");
+  assert(
+    welcomeMsg.players.length === 1 && welcomeMsg.players[0].name === "p14",
+    "room2 신규 입장자에게는 room2 사람만 보임 — 다른 방(room1) 사람은 안 섞임",
+  );
+
+  late.conn.pvpEnabled = true;
+  many[14].conn.pvpEnabled = true;
+  world.handleMessage(late.conn, JSON.stringify({ type: "melee_attack", targetId: many[14].conn.id }));
+  const rejected = late.sent.find((m) => m.type === "pvp_rejected");
+  assert(rejected?.reason === "different_room", "다른 방 사람은 서버가 공격 자체를 거부함 (different_room)");
+}
+
+section("멀티플레이 서버 — 몬스터(NPC) 위치 중계");
+{
+  function fakeConn(world, name, faction) {
+    const sent = [];
+    const sock = { readyState: 1, OPEN: 1, send: (d) => sent.push(JSON.parse(d)), close() {} };
+    const conn = world.join(sock, name, faction);
+    return { conn, sent };
+  }
+
+  const world = new World();
+  const a = fakeConn(world, "쫓기는사람", "pirate"); // room1
+  const b = fakeConn(world, "같은방구경꾼", "marine"); // room1
+  a.sent.length = 0;
+  b.sent.length = 0;
+
+  world.handleMessage(
+    a.conn,
+    JSON.stringify({
+      type: "enemy_states",
+      enemies: [{ id: "wolf_enemy_3", x: 12.5, z: -4, hp: 30, maxHp: 50, alive: true }],
+    }),
+  );
+  const relayed = b.sent.find((m) => m.type === "enemy_states");
+  assert(relayed?.fromId === a.conn.id, "같은 방 사람에게는 몬스터 위치가 누구한테서 왔는지와 함께 중계됨");
+  assert(
+    relayed?.enemies?.[0]?.id === "wolf_enemy_3" && relayed.enemies[0].x === 12.5 && relayed.enemies[0].alive === true,
+    "중계된 몬스터 위치·생존 여부가 보낸 값 그대로임",
+  );
+  const echoedBackToSender = a.sent.some((m) => m.type === "enemy_states");
+  assert(!echoedBackToSender, "보낸 사람 본인에게는 자기 보고가 다시 오지 않음");
+
+  // 이상한 값(무한대·너무 긴 배열)을 보내도 서버가 상식적인 범위로 잘라내는지
+  const c = fakeConn(world, "확인용2", "pirate"); // room1
+  b.sent.length = 0;
+  const junk = Array.from({ length: 100 }, (_, i) => ({ id: `x${i}`, x: Infinity, z: -Infinity, hp: -5, maxHp: 0, alive: "yes" }));
+  world.handleMessage(c.conn, JSON.stringify({ type: "enemy_states", enemies: junk }));
+  const relayedJunk = b.sent.find((m) => m.type === "enemy_states");
+  assert(relayedJunk?.enemies?.length === 24, `배열 길이가 상한선(24)으로 잘림 (${relayedJunk?.enemies?.length})`);
+  assert(
+    Number.isFinite(relayedJunk.enemies[0].x) && Number.isFinite(relayedJunk.enemies[0].z),
+    "무한대 좌표가 상식적인 범위로 잘림",
+  );
+  assert(relayedJunk.enemies[0].alive === false, "boolean이 아닌 값은 안전하게 false로 처리됨");
+
+  // 방을 꽉 채워서(room1) 다음 사람이 room2로 밀려나게 한 뒤, room2 사람에게는
+  // room1의 몬스터 보고가 전혀 안 가는지 확인합니다.
+  while (Object.values(world.roomSummary()).reduce((s, n) => s + n, 0) < ROOM_CAPACITY) {
+    fakeConn(world, "채우기", "pirate");
+  }
+  const other = fakeConn(world, "다른방사람", "marine"); // room2로 배정됨
+  other.sent.length = 0;
+  world.handleMessage(
+    a.conn,
+    JSON.stringify({ type: "enemy_states", enemies: [{ id: "wolf_enemy_9", x: 0, z: 0, hp: 1, maxHp: 1, alive: true }] }),
+  );
+  assert(other.sent.length === 0, "다른 방 사람에게는 몬스터 위치 보고가 전혀 안 감");
 }
 
 section("섬 판정");

@@ -1,9 +1,17 @@
 // ---------------------------------------------------------------------------
-// 멀티플레이 서버의 방(room) 상태 — 지금은 프로세스 하나 = 방 하나입니다.
+// 멀티플레이 서버의 방(room) 상태 — 프로세스 하나 안에 방이 여러 개 있습니다.
 //
-// 여기서 하는 일은 딱 두 가지입니다.
-//   1) 누가 어디에 있는지 모아서 다른 사람들에게 뿌리기 (presence)
+// 방은 접속하는 순서대로 채워집니다: room1이 ROOM_CAPACITY(기본 14)명으로
+// 꽉 차면 room2가 자동으로 생기고, 그다음 접속자부터는 room2로 들어갑니다.
+// 같은 방 사람들끼리만 서로 보이고(presence) PvP도 같은 방 안에서만 됩니다 —
+// 방을 나누는 이유가 그거예요, 한 화면에 너무 많은 사람이 몰리지 않게.
+//
+// 여기서 하는 일은 세 가지입니다.
+//   1) 누가 어디에 있는지 같은 방끼리 모아서 뿌리기 (presence)
 //   2) PvP 공격이 들어오면 "진짜로 맞았는지"를 서버가 다시 계산해서 판정하기
+//   3) 누군가 몬스터한테 쫓기고 있으면, 그 몬스터 위치를 같은 방 사람들에게 그대로 중계하기
+//      (몬스터 id가 모든 클라이언트에서 결정론적으로 같으므로, 서버는 계산 없이 순수
+//      중계만 합니다 — 전투 판정과 달리 "누가 이기냐"에 영향이 없는 시각 정보라서요.)
 //
 // 2번이 핵심입니다. 공격자가 보낸 "데미지 12"라는 숫자를 그대로 믿지 않고,
 // src/simulation/CombatSystem.ts의 totalMeleeDamage/skillDamage를 서버에서
@@ -28,10 +36,13 @@ import { isSlotUnlocked, skillsForFruit } from "../src/simulation/skills";
 import { dist2D, pointInShape } from "../src/simulation/ShapeMath";
 import {
   CONE_LATENCY_BUFFER_DEG,
+  MAX_ENEMY_SYNC_ENTRIES,
   RANGE_LATENCY_BUFFER_M,
+  ROOM_CAPACITY,
   type AnimState,
   type ClientMessage,
   type CombatStatsSnapshot,
+  type EnemySyncEntry,
   type RemotePlayerSnapshot,
   type ServerMessage,
 } from "../src/network/protocol";
@@ -97,9 +108,31 @@ function asPlayerStateForCombat(stats: CombatStatsSnapshot, aimYaw: number): Pla
   } as unknown as PlayerState;
 }
 
+/** 몬스터 동기화는 전투 판정에 안 쓰이는 순수 시각 정보라, 서버는 상식적인
+ *  범위로만 잘라내고 그대로 중계합니다 (누가 이겼는지에는 영향이 없습니다). */
+function clampEnemySyncEntries(raw: unknown): EnemySyncEntry[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_ENEMY_SYNC_ENTRIES).flatMap((e): EnemySyncEntry[] => {
+    if (!e || typeof e !== "object") return [];
+    const entry = e as Record<string, unknown>;
+    if (typeof entry.id !== "string" || !entry.id || entry.id.length > 64) return [];
+    return [
+      {
+        id: entry.id,
+        x: clampFinite(entry.x, -20000, 20000, 0),
+        z: clampFinite(entry.z, -20000, 20000, 0),
+        hp: clampFinite(entry.hp, 0, 10_000_000, 0),
+        maxHp: clampFinite(entry.maxHp, 1, 10_000_000, 1),
+        alive: entry.alive === true,
+      },
+    ];
+  });
+}
+
 export interface Connection {
   id: string;
   ws: WebSocket;
+  roomId: string;
   name: string;
   faction: Faction;
   position: { x: number; y: number; z: number };
@@ -157,10 +190,26 @@ export class World {
     }
   }
 
-  private broadcast(msg: ServerMessage, exceptId?: string) {
+  /** 같은 방(room) 안에만 뿌립니다 — 방마다 최대 ROOM_CAPACITY명, 다른 방 사람들은 서로 안 보여야 합니다. */
+  private broadcastRoom(roomId: string, msg: ServerMessage, exceptId?: string) {
     for (const conn of this.connections.values()) {
       if (conn.id === exceptId) continue;
+      if (conn.roomId !== roomId) continue;
       this.send(conn, msg);
+    }
+  }
+
+  private roomSize(roomId: string): number {
+    let n = 0;
+    for (const conn of this.connections.values()) if (conn.roomId === roomId) n++;
+    return n;
+  }
+
+  /** 자리가 있는(=ROOM_CAPACITY 미만) 가장 앞 번호 방을 찾고, 없으면 새 번호로 만듭니다. */
+  private assignRoom(): string {
+    for (let n = 1; ; n++) {
+      const roomId = `room${n}`;
+      if (this.roomSize(roomId) < ROOM_CAPACITY) return roomId;
     }
   }
 
@@ -173,9 +222,11 @@ export class World {
   }
 
   join(ws: WebSocket, name: string, faction: Faction): Connection {
+    const roomId = this.assignRoom();
     const conn: Connection = {
       id: makeId(),
       ws,
+      roomId,
       name: name.slice(0, 24) || "이름없음",
       faction,
       position: { x: 0, y: 0, z: 0 },
@@ -212,19 +263,32 @@ export class World {
     this.send(conn, {
       type: "welcome",
       id: conn.id,
-      players: [...this.connections.values()].filter((c) => c.id !== conn.id).map(snapshotOf),
+      players: [...this.connections.values()].filter((c) => c.id !== conn.id && c.roomId === roomId).map(snapshotOf),
+      roomId,
+      roomSize: this.roomSize(roomId),
     });
-    this.broadcast({ type: "player_state", player: snapshotOf(conn) }, conn.id);
+    this.broadcastRoom(roomId, { type: "player_state", player: snapshotOf(conn) }, conn.id);
     return conn;
   }
 
   leave(id: string) {
-    if (!this.connections.delete(id)) return;
-    this.broadcast({ type: "player_left", id });
+    const conn = this.connections.get(id);
+    if (!conn) return;
+    this.connections.delete(id);
+    this.broadcastRoom(conn.roomId, { type: "player_left", id });
   }
 
   count() {
     return this.connections.size;
+  }
+
+  /** 헬스체크·로그용 — 방마다 몇 명 있는지 (예: {room1: 14, room2: 3}). */
+  roomSummary(): Record<string, number> {
+    const summary: Record<string, number> = {};
+    for (const conn of this.connections.values()) {
+      summary[conn.roomId] = (summary[conn.roomId] ?? 0) + 1;
+    }
+    return summary;
   }
 
   /** 25초 넘게 조용한 연결은 죽은 것으로 보고 정리합니다 (탭 강제 종료 등 close 이벤트가 안 오는 경우 대비). */
@@ -282,7 +346,7 @@ export class World {
         conn.hakiActive = msg.hakiActive === true;
         conn.drawnWeaponId = typeof msg.drawnWeaponId === "string" ? msg.drawnWeaponId : null;
         conn.alive = conn.hp > 0;
-        this.broadcast({ type: "player_state", player: snapshotOf(conn) }, conn.id);
+        this.broadcastRoom(conn.roomId, { type: "player_state", player: snapshotOf(conn) }, conn.id);
         break;
       }
 
@@ -302,6 +366,14 @@ export class World {
         this.resolveSkillAttack(conn, msg.targetId, msg.slot, nowMs);
         break;
 
+      case "enemy_states": {
+        const enemies = clampEnemySyncEntries(msg.enemies);
+        if (enemies.length > 0) {
+          this.broadcastRoom(conn.roomId, { type: "enemy_states", fromId: conn.id, enemies }, conn.id);
+        }
+        break;
+      }
+
       case "ping":
         this.send(conn, { type: "pong" });
         break;
@@ -311,6 +383,7 @@ export class World {
   /** 공격 가능 여부의 공통 조건 (진영·PvP 켜짐·같은 바다·생존) */
   private basicPvpCheck(attacker: Connection, target: Connection | undefined): string | null {
     if (!target) return "not_connected";
+    if (attacker.roomId !== target.roomId) return "different_room";
     if (!attacker.pvpEnabled) return "self_pvp_off";
     if (!target.pvpEnabled) return "pvp_off";
     if (attacker.faction === target.faction) return "same_faction";
@@ -327,8 +400,8 @@ export class World {
 
     this.send(target, { type: "pvp_damage", attackerId: attacker.id, attackerName: attacker.name, damage, kind });
     this.send(attacker, { type: "pvp_hit_ack", targetId: target.id, targetName: target.name, damage });
-    // 다른 사람들도 체력 변화를 볼 수 있도록 갱신된 스냅샷을 뿌립니다.
-    this.broadcast({ type: "player_state", player: snapshotOf(target) });
+    // 같은 방의 다른 사람들도 체력 변화를 볼 수 있도록 갱신된 스냅샷을 뿌립니다.
+    this.broadcastRoom(target.roomId, { type: "player_state", player: snapshotOf(target) });
   }
 
   private resolveMeleeAttack(attacker: Connection, targetId: string, nowMs: number) {
