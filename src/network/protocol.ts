@@ -95,6 +95,13 @@ export interface EnemySyncEntry {
 export const MAX_TRADE_SLOTS = 9;
 
 /**
+ * 양쪽 다 승낙한 뒤 실제로 아이템이 오가기까지 기다리는 유예 시간(ms).
+ * 이 사이에 누구든 승낙을 취소하면 성사되지 않습니다 — 마지막 순간의
+ * 실수(잘못 눌렀거나, 제안이 바뀐 걸 못 봤거나)를 되돌릴 기회를 줍니다.
+ */
+export const TRADE_CONFIRM_DELAY_MS = 5000;
+
+/**
  * 거래·선물로 오가는 아이템 하나. src/core/GameState.ts의 InventoryItem과
  * 모양이 같지만, quantity는 "내가 가진 전체 개수"가 아니라 "이번에 제안하는
  * 개수"입니다. 서버는 인벤토리를 동기화하지 않으므로(원래부터 각자 로컬)
@@ -119,7 +126,8 @@ export type TradeCloseReason =
   | "not_connected"
   | "different_room"
   | "self"
-  | "busy";
+  | "busy"
+  | "declined";
 
 // ---------------------------------------------------------------------------
 // 클라이언트 → 서버
@@ -146,7 +154,10 @@ export type ClientMessage =
   | { type: "skill_attack"; targetId: string; slot: number }
   | { type: "enemy_states"; enemies: EnemySyncEntry[] }
   // --- 거래 / 선물 ---------------------------------------------------------
+  /** 거래를 신청합니다 — 곧바로 거래창이 열리지 않고, 상대에게 "초대"만 갑니다. */
   | { type: "trade_request"; targetId: string }
+  /** 받은 초대에 응답합니다 — accept가 true여야 양쪽 다 거래창이 열립니다. */
+  | { type: "trade_invite_respond"; accept: boolean }
   | { type: "trade_offer"; items: TradeItem[] }
   | { type: "trade_accept"; accepted: boolean }
   | { type: "trade_cancel" }
@@ -170,13 +181,19 @@ export type ServerMessage =
   /** 공격이 거부됐을 때 (사거리 밖, 쿨다운 중, PvP 꺼짐, 다른 진영 아님 등) */
   | { type: "pvp_rejected"; reason: string }
   // --- 거래 / 선물 ---------------------------------------------------------
-  /** 거래 요청을 보냈거나(나) 받았을 때(상대) — 양쪽 다 이 메시지로 거래창을 엽니다. */
+  /** 거래 신청이 상대에게 도착했을 때 — 상대만 받습니다 (수락/거절 버튼을 보여줌). */
+  | { type: "trade_invite"; fromId: string; fromName: string }
+  /** 내가 보낸 신청이 상대에게 전달됐다는 확인(응답 대기 중) — 신청한 나만 받습니다. */
+  | { type: "trade_invite_sent"; toId: string; toName: string }
+  /** 상대가 초대를 수락해서 실제로 거래가 시작됐을 때 — 양쪽 다 이 메시지로 거래창을 엽니다. */
   | { type: "trade_started"; partnerId: string; partnerName: string }
-  /** 상대가 제안을 바꾸거나 승낙 상태를 바꿀 때마다. */
-  | { type: "trade_update"; partnerOffer: TradeItem[]; partnerAccepted: boolean }
-  /** 양쪽 다 승낙 — 각자에게 "네가 받을 아이템"만 알려줍니다. */
+  /** 상대가 제안을 바꾸거나 승낙 상태를 바꿀 때마다. confirmDeadlineMs는 양쪽 다 승낙해서
+   *  자동 성사 카운트다운이 도는 중이면 그 마감 시각(epoch ms), 아니면 null. */
+  | { type: "trade_update"; partnerOffer: TradeItem[]; partnerAccepted: boolean; confirmDeadlineMs: number | null }
+  /** 양쪽 다 승낙하고 TRADE_CONFIRM_DELAY_MS 동안 아무도 취소하지 않아 실제로 성사 —
+   *  각자에게 "네가 받을 아이템"만 알려줍니다. */
   | { type: "trade_complete"; receivedItems: TradeItem[] }
-  /** 거래가 성사 없이 끝남 (취소·상대 나감·거부 등). */
+  /** 거래가 성사 없이 끝남 (취소·상대 나감·거부·거절 등). */
   | { type: "trade_closed"; reason: TradeCloseReason }
   | { type: "gift_received"; fromId: string; fromName: string; item: TradeItem }
   /** 내가 보낸 선물이 실제로 전달됐는지 — 실패하면 내 인벤토리에서 빼면 안 됩니다. */
@@ -208,4 +225,5 @@ export const TRADE_CLOSE_MESSAGES: Record<TradeCloseReason, string> = {
   different_room: "서로 다른 방에 있습니다.",
   self: "자기 자신과는 거래할 수 없습니다.",
   busy: "상대가 이미 다른 거래 중입니다.",
+  declined: "상대가 거래 요청을 거절했습니다.",
 };

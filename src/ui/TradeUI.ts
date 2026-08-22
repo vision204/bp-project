@@ -45,6 +45,8 @@ export class TradeUI {
   private menuEl: HTMLDivElement;
   private tradeWindowEl: HTMLDivElement;
   private giftPickerEl: HTMLDivElement;
+  private inviteEl: HTMLDivElement;
+  private outgoingEl: HTMLDivElement;
 
   private menuTargetId: string | null = null;
   private giftTargetId: string | null = null;
@@ -52,12 +54,13 @@ export class TradeUI {
   private hoveredId: string | null = null;
   private rightDown = false;
   private rightDownAt = { x: 0, y: 0 };
-  private rightDownHoverId: string | null = null;
   private dragAccumPx = 0;
 
   /** 화면에 마지막으로 그린 내용 서명 — 값이 바뀔 때만 다시 그립니다 (버튼이 매프레임 사라져 클릭이 씹히는 사고 방지). */
   private lastTradeSig = "";
   private lastGiftSig = "";
+  private lastInviteSig = "";
+  private lastOutgoingSig = "";
 
   constructor(
     container: HTMLElement,
@@ -84,6 +87,16 @@ export class TradeUI {
     this.giftPickerEl.hidden = true;
     container.appendChild(this.giftPickerEl);
 
+    this.inviteEl = document.createElement("div");
+    this.inviteEl.className = "trade-invite";
+    this.inviteEl.hidden = true;
+    container.appendChild(this.inviteEl);
+
+    this.outgoingEl = document.createElement("div");
+    this.outgoingEl.className = "trade-outgoing";
+    this.outgoingEl.hidden = true;
+    container.appendChild(this.outgoingEl);
+
     this.menuEl.querySelector<HTMLButtonElement>("#trade-menu-trade")!.addEventListener("click", () => {
       if (this.menuTargetId) this.mp.sendTradeRequest(this.menuTargetId);
       this.closeMenu();
@@ -103,11 +116,13 @@ export class TradeUI {
 
   /** main.ts가 매 프레임 확인해서, 열려 있는 동안은 이동/전투 입력을 막습니다. */
   isBlocking(): boolean {
-    return !this.menuEl.hidden || !this.tradeWindowEl.hidden || !this.giftPickerEl.hidden;
+    return !this.menuEl.hidden || !this.tradeWindowEl.hidden || !this.giftPickerEl.hidden || !this.inviteEl.hidden;
   }
 
   /** 매 프레임 호출 — 거래창 내용을 최신 상태로 맞춥니다. */
   update() {
+    this.renderTradeInvite();
+    this.renderOutgoingInvite();
     this.renderTradeWindow();
     if (!this.giftPickerEl.hidden) this.renderGiftPicker();
   }
@@ -125,7 +140,6 @@ export class TradeUI {
     if (e.button !== 2) return;
     this.rightDown = true;
     this.rightDownAt = { x: e.clientX, y: e.clientY };
-    this.rightDownHoverId = this.hoveredId;
     this.dragAccumPx = 0;
   };
 
@@ -137,10 +151,14 @@ export class TradeUI {
   private onWindowMouseUp = (e: MouseEvent) => {
     if (e.button !== 2 || !this.rightDown) return;
     this.rightDown = false;
-    const targetId = this.rightDownHoverId;
     const wasClick = this.dragAccumPx < DRAG_THRESHOLD_PX;
-    this.rightDownHoverId = null;
-    if (wasClick && targetId) {
+    if (!wasClick) return;
+    // 대상은 "누르는 순간의 마지막 mousemove 호버 상태"를 캐시해서 쓰지 않고, 뗀 그 자리
+    // 좌표로 다시 한번 직접 레이캐스트합니다. 클릭과 무관한 mousemove 이벤트 누락·지연
+    // (브라우저/입력 장치별로 빈도가 다를 수 있음)에 클릭 인식이 좌우되지 않도록 하기
+    // 위해서입니다 — 짧게 누르고 뗀 자리이므로 mousedown 때와 사실상 같은 위치입니다.
+    const targetId = this.renderer.pickRemotePlayerAt(e.clientX, e.clientY);
+    if (targetId) {
       this.openMenu(targetId, this.rightDownAt.x, this.rightDownAt.y);
     }
   };
@@ -172,6 +190,55 @@ export class TradeUI {
   private closeGiftPicker() {
     this.giftPickerEl.hidden = true;
     this.giftTargetId = null;
+  }
+
+  /** 상대가 보낸 거래 신청 팝업 — 수락해야만 양쪽 다 거래창이 열립니다.
+   *  실수로 다른 곳을 눌러 놓치지 않도록 바깥 클릭으로는 닫히지 않고, 수락/거절 버튼으로만 닫힙니다. */
+  private renderTradeInvite() {
+    const invite = this.mp.incomingTradeInvite;
+    if (!invite) {
+      if (!this.inviteEl.hidden) {
+        this.inviteEl.hidden = true;
+        this.lastInviteSig = "";
+      }
+      return;
+    }
+    const sig = `${invite.fromId}|${invite.fromName}`;
+    if (sig === this.lastInviteSig && !this.inviteEl.hidden) return;
+    this.lastInviteSig = sig;
+    this.inviteEl.hidden = false;
+    this.inviteEl.innerHTML = `
+      <div class="trade-invite-header">🤝 ${escapeHtml(invite.fromName)}님이 거래를 신청했습니다</div>
+      <div class="trade-invite-actions">
+        <button class="trade-invite-accept-btn" id="trade-invite-accept">수락</button>
+        <button class="trade-invite-decline-btn" id="trade-invite-decline">거절</button>
+      </div>
+    `;
+    this.inviteEl.querySelector<HTMLButtonElement>("#trade-invite-accept")!.addEventListener("click", () => {
+      this.mp.respondTradeInvite(true);
+    });
+    this.inviteEl.querySelector<HTMLButtonElement>("#trade-invite-decline")!.addEventListener("click", () => {
+      this.mp.respondTradeInvite(false);
+    });
+  }
+
+  /** 내가 보낸 거래 신청이 아직 응답 대기 중일 때 보여주는 작은 표시 — 클릭할 건 없고 상태만 알려줍니다. */
+  private renderOutgoingInvite() {
+    const invite = this.mp.outgoingTradeInvite;
+    // 거래창이 이미 열렸다면(수락됨) 대기 표시는 더 보여줄 필요가 없습니다.
+    const shouldShow = invite && !this.mp.tradeSession;
+    if (!shouldShow) {
+      if (!this.outgoingEl.hidden) {
+        this.outgoingEl.hidden = true;
+        this.lastOutgoingSig = "";
+      }
+      return;
+    }
+    const sig = `${invite.toId}|${invite.toName}`;
+    if (sig === this.lastOutgoingSig && !this.outgoingEl.hidden) return;
+    this.lastOutgoingSig = sig;
+    this.outgoingEl.hidden = false;
+    this.outgoingEl.innerHTML = `<div class="trade-outgoing-text">🤝 ${escapeHtml(invite.toName)}님에게 거래를 신청했습니다 — 응답을 기다리는 중...</div>`;
   }
 
   private renderGiftPicker() {
@@ -226,17 +293,27 @@ export class TradeUI {
     }
 
     const inv = this.state.player.inventory;
+    // confirmDeadlineMs가 잡혀 있는 동안은(양쪽 다 승낙 → 자동 성사 카운트다운 중)
+    // 1초 단위 구간을 서명에 포함해서, 그 사이에만 초당 한 번씩 다시 그려 숫자가
+    // 줄어드는 걸 보여줍니다. 그 외에는(카운트다운이 없을 때) 매프레임 다시 그리지
+    // 않아야 실제 마우스 클릭(mousedown→130ms→mouseup)이 버튼 DOM 교체에 씹히지 않습니다.
+    const confirmSecondBucket = session.confirmDeadlineMs ? Math.floor(Date.now() / 1000) : "none";
     const sig = [
       session.partnerName,
       session.myOffer.map((i) => `${i.id}x${i.quantity}`).join(","),
       session.partnerOffer.map((i) => `${i.id}x${i.quantity}`).join(","),
       session.myAccepted,
       session.partnerAccepted,
+      confirmSecondBucket,
       inv.map((i) => `${i.id}x${i.quantity}`).join(","),
     ].join("|");
     if (sig === this.lastTradeSig && !this.tradeWindowEl.hidden) return;
     this.lastTradeSig = sig;
     this.tradeWindowEl.hidden = false;
+
+    const confirmSecondsLeft = session.confirmDeadlineMs
+      ? Math.max(0, Math.ceil((session.confirmDeadlineMs - Date.now()) / 1000))
+      : null;
 
     const offerSlots = (offer: TradeItem[], removable: boolean) => {
       let html = "";
@@ -281,6 +358,11 @@ export class TradeUI {
       </div>
       <div class="trade-inv-label">내 인벤토리 — 클릭해서 제안에 담기</div>
       <div class="trade-inv-grid">${invRows}</div>
+      ${
+        confirmSecondsLeft !== null
+          ? `<div class="trade-confirm-countdown">🤝 ${confirmSecondsLeft}초 후 자동으로 거래가 성사됩니다 — 취소하려면 승낙 버튼을 다시 눌러 취소하세요</div>`
+          : ""
+      }
       <div class="trade-actions">
         <button class="trade-accept-btn ${session.myAccepted ? "accepted" : ""}" id="trade-accept-btn">
           ${session.myAccepted ? "✅ 승낙함 (취소하려면 다시 클릭)" : "승낙"}

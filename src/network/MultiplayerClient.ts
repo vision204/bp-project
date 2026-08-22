@@ -40,6 +40,20 @@ export interface TradeSession {
   myAccepted: boolean;
   partnerOffer: TradeItem[];
   partnerAccepted: boolean;
+  /** 양쪽 다 승낙해서 자동 성사 카운트다운이 도는 중이면 그 마감 시각(epoch ms), 아니면 null. */
+  confirmDeadlineMs: number | null;
+}
+
+/** 상대가 나에게 보낸, 아직 응답하지 않은 거래 신청. */
+export interface IncomingTradeInvite {
+  fromId: string;
+  fromName: string;
+}
+
+/** 내가 상대에게 보내서 응답을 기다리는 중인 거래 신청. */
+export interface OutgoingTradeInvite {
+  toId: string;
+  toName: string;
 }
 
 /** 다른 사람이 지금 쫓기고 있는 몬스터 하나를 화면에 그리기 위한 최소 정보. */
@@ -108,6 +122,8 @@ export class MultiplayerClient {
   private lastStatsSig = "";
   private lastEnemySyncAtMs = 0;
   private _tradeSession: TradeSession | null = null;
+  private _incomingTradeInvite: IncomingTradeInvite | null = null;
+  private _outgoingTradeInvite: OutgoingTradeInvite | null = null;
 
   status: MultiplayerStatus = "disconnected";
   serverUrl = "";
@@ -141,6 +157,16 @@ export class MultiplayerClient {
     return this._tradeSession;
   }
 
+  /** 상대가 나에게 보낸, 아직 응답하지 않은 거래 신청 — 없으면 null. */
+  get incomingTradeInvite(): IncomingTradeInvite | null {
+    return this._incomingTradeInvite;
+  }
+
+  /** 내가 상대에게 보내서 응답을 기다리는 중인 거래 신청 — 없으면 null. */
+  get outgoingTradeInvite(): OutgoingTradeInvite | null {
+    return this._outgoingTradeInvite;
+  }
+
   connect(url: string, name: string) {
     this.disconnect();
     this.serverUrl = url;
@@ -168,6 +194,8 @@ export class MultiplayerClient {
       this.myId = null;
       this.remotePlayers.clear();
       this._tradeSession = null;
+      this._incomingTradeInvite = null;
+      this._outgoingTradeInvite = null;
       if (wasConnected) {
         this.state.player.events.push({ type: "pvp_disconnected", reason: "연결이 끊어졌습니다" });
       }
@@ -193,6 +221,8 @@ export class MultiplayerClient {
     this.remotePlayers.clear();
     this.remoteEnemyGhosts.clear();
     this._tradeSession = null;
+    this._incomingTradeInvite = null;
+    this._outgoingTradeInvite = null;
     this.state.player.pvpEnabled = false;
   }
 
@@ -276,7 +306,18 @@ export class MultiplayerClient {
         break;
       }
 
+      case "trade_invite":
+        this._incomingTradeInvite = { fromId: msg.fromId, fromName: msg.fromName };
+        break;
+
+      case "trade_invite_sent":
+        this._outgoingTradeInvite = { toId: msg.toId, toName: msg.toName };
+        break;
+
       case "trade_started":
+        // 초대가 수락돼서 실제로 시작된 것이므로, 대기 중이던 초대 상태는 이제 의미가 없습니다.
+        this._incomingTradeInvite = null;
+        this._outgoingTradeInvite = null;
         this._tradeSession = {
           partnerId: msg.partnerId,
           partnerName: msg.partnerName,
@@ -284,6 +325,7 @@ export class MultiplayerClient {
           myAccepted: false,
           partnerOffer: [],
           partnerAccepted: false,
+          confirmDeadlineMs: null,
         };
         this.state.player.events.push({ type: "trade_started", partnerName: msg.partnerName });
         break;
@@ -292,6 +334,7 @@ export class MultiplayerClient {
         if (this._tradeSession) {
           this._tradeSession.partnerOffer = msg.partnerOffer;
           this._tradeSession.partnerAccepted = msg.partnerAccepted;
+          this._tradeSession.confirmDeadlineMs = msg.confirmDeadlineMs ?? null;
         }
         break;
 
@@ -321,6 +364,8 @@ export class MultiplayerClient {
 
       case "trade_closed":
         this._tradeSession = null;
+        this._incomingTradeInvite = null;
+        this._outgoingTradeInvite = null;
         this.state.player.events.push({ type: "trade_closed", reason: TRADE_CLOSE_MESSAGES[msg.reason] ?? msg.reason });
         break;
 
@@ -407,9 +452,16 @@ export class MultiplayerClient {
 
   // --- 거래 / 선물 -----------------------------------------------------------
 
-  /** 다른 플레이어에게 거래를 겁니다 — 상대가 거래 중이 아니면 곧바로 양쪽 다 거래창이 열립니다. */
+  /** 다른 플레이어에게 거래를 겁니다 — 곧바로 거래창이 열리지 않고, 상대가 수락해야 양쪽 다 열립니다. */
   sendTradeRequest(targetId: string) {
     this.send({ type: "trade_request", targetId });
+  }
+
+  /** 받은 거래 신청에 응답합니다 — accept가 true여야 양쪽 다 거래창이 열립니다. */
+  respondTradeInvite(accept: boolean) {
+    if (!this._incomingTradeInvite) return;
+    this._incomingTradeInvite = null; // 응답 즉시 팝업을 닫습니다 (서버 응답을 기다리지 않음)
+    this.send({ type: "trade_invite_respond", accept });
   }
 
   /** 내 거래창에 담긴 아이템을 통째로 다시 보냅니다 (드래그로 넣거나 뺄 때마다). */

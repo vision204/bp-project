@@ -2830,6 +2830,9 @@ assert(combined.visual?.visible === true, "원래는 너무 멀어서 안 보여
 assert(posMatches, "화면에 그려진 몬스터 위치가 (page2 자신의 시뮬레이션이 아니라) 받은 유령 좌표와 정확히 일치함");
 
 section("멀티플레이 — P2P 거래·선물");
+// src/network/protocol.ts의 TRADE_CONFIRM_DELAY_MS(5000ms)와 맞춰 둡니다 — 여기서 값을
+// 다시 import하지 않는 대신, 실제 지연시간·타이머 오차를 여유있게 버틸 버퍼를 더합니다.
+const TRADE_CONFIRM_WAIT_MS = 5400;
 // page(해적)가 page2(해군)에게 실제로 마우스를 올리고 우클릭해서 거래/선물
 // 메뉴를 띄웁니다. 화면 어디를 눌러야 상대가 있는지는 카메라가 어느 쪽을
 // 보고 있느냐에 달려 있으므로, 고정 좌표(예: 640,400) 대신 SceneRenderer의
@@ -2951,17 +2954,57 @@ assert(screenAfterReset !== null, "카메라를 되돌리면 해군이 다시 �
 sx = screenAfterReset?.x ?? sx;
 sy = screenAfterReset?.y ?? sy;
 
-// 다시 짧게 우클릭해서 메뉴를 띄우고, "거래하기"를 실제로 클릭
+// 다시 짧게 우클릭해서 메뉴를 띄우고, "거래하기"를 실제로 클릭 —
+// 이제는 곧바로 거래창이 열리지 않고, 상대에게 "수락/거절" 팝업이 먼저 떠야 합니다.
 await page.mouse.move(sx, sy);
 await page.mouse.down({ button: "right" });
 await page.mouse.up({ button: "right" });
 await page.waitForTimeout(100);
 assert(await humanClickOn(page, "#trade-menu-trade"), "거래하기 버튼을 실제 마우스로 클릭");
 
+const inviteSeenOnB = await waitUntilOn(page2, () => window.__game.multiplayer.incomingTradeInvite !== null);
+assert(inviteSeenOnB, "거래하기를 누르면 상대(해군) 쪽에 거래 신청이 도착함");
+const outgoingSeenOnA = await waitUntilOn(page, () => window.__game.multiplayer.outgoingTradeInvite !== null);
+assert(outgoingSeenOnA, "신청한 쪽(해적)은 '응답 대기 중' 상태를 앎");
+assert(
+  (await page.evaluate(() => window.__game.multiplayer.tradeSession)) === null &&
+    (await page2.evaluate(() => window.__game.multiplayer.tradeSession)) === null,
+  "응답 전에는 양쪽 다 거래창이 열리지 않음",
+);
+await page2.waitForTimeout(100);
+const inviteVisibleOnB = await page2.evaluate(() => !document.querySelector(".trade-invite")?.hidden);
+assert(inviteVisibleOnB, "해군 화면에 수락/거절 팝업 DOM이 실제로 보임");
+
+// 먼저 "거절"을 실제로 눌러서 — 아무것도 시작되지 않고, 신청한 쪽에 거절 알림만 가는지 확인합니다.
+assert(await humanClickOn(page2, "#trade-invite-decline"), "거절 버튼을 실제 마우스로 클릭");
+const declinedOnA = await waitUntilOn(page, () =>
+  Array.from(document.querySelectorAll("#hud-toasts .toast")).some((el) => el.textContent.includes("거절")),
+);
+assert(declinedOnA, "거절하면 신청한 쪽 화면에 거절 토스트가 뜸");
+assert(
+  (await page.evaluate(() => window.__game.multiplayer.tradeSession)) === null &&
+    (await page2.evaluate(() => window.__game.multiplayer.tradeSession)) === null,
+  "거절되면 거래창은 열리지 않음",
+);
+assert(
+  (await page2.evaluate(() => window.__game.multiplayer.incomingTradeInvite)) === null,
+  "거절한 쪽의 팝업도 닫힘",
+);
+
+// 다시 신청하고, 이번엔 "수락"을 실제로 눌러서 그제서야 양쪽 다 거래창이 열리는지 확인합니다.
+await page.mouse.move(sx, sy);
+await page.mouse.down({ button: "right" });
+await page.mouse.up({ button: "right" });
+await page.waitForTimeout(100);
+assert(await humanClickOn(page, "#trade-menu-trade"), "거래하기 버튼을 다시 실제 마우스로 클릭");
+await waitUntilOn(page2, () => window.__game.multiplayer.incomingTradeInvite !== null);
+await page2.waitForTimeout(100);
+assert(await humanClickOn(page2, "#trade-invite-accept"), "수락 버튼을 실제 마우스로 클릭");
+
 const tradeStartedOnA = await waitUntilOn(page, () => window.__game.multiplayer.tradeSession !== null);
 const tradeStartedOnB = await waitUntilOn(page2, () => window.__game.multiplayer.tradeSession !== null);
-assert(tradeStartedOnA, "거래하기를 누르면 해적 쪽에 거래창이 열림");
-assert(tradeStartedOnB, "동시에 해군 쪽에도 거래창이 열림 (요청 즉시 양쪽 다 시작)");
+assert(tradeStartedOnA, "수락하면 신청한 쪽(해적)에도 거래창이 열림");
+assert(tradeStartedOnB, "수락한 쪽(해군)에도 거래창이 열림");
 await page.waitForTimeout(100);
 await page2.waitForTimeout(100);
 const windowVisibleA = await page.evaluate(() => !document.querySelector(".trade-window")?.hidden);
@@ -3019,6 +3062,28 @@ async function addToOfferAndVerify(pg, expectedItemId, label) {
   return false;
 }
 
+/**
+ * 승낙 버튼도 인벤토리 칸과 같은 이유로 재시도가 필요합니다 — 자동 성사
+ * 카운트다운이 도는 동안은 거래창이 1초에 한 번씩 다시 그려지므로(숫자를
+ * 보여주기 위해), 그 순간과 실제 마우스 다운/업 사이가 겹치면 클릭이 씹힐
+ * 수 있습니다. 클릭 직후 로컬 myAccepted 값으로 실제로 반영됐는지 확인합니다.
+ */
+async function clickAcceptAndVerify(pg, expectedAccepted) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const clicked = await humanClickOn(pg, "#trade-accept-btn");
+    if (clicked) {
+      const ok = await waitUntilOn(
+        pg,
+        (want) => window.__game.multiplayer.tradeSession?.myAccepted === want,
+        { timeoutMs: 1500, arg: expectedAccepted },
+      );
+      if (ok) return true;
+    }
+    await pg.waitForTimeout(200);
+  }
+  return false;
+}
+
 assert(await addToOfferAndVerify(page, "potion_small"), "해적 쪽 인벤토리 칸 클릭 → 실제로 내 제안에 담김");
 assert(await addToOfferAndVerify(page2, "sword_yoru"), "해군 쪽 인벤토리 칸 클릭 → 실제로 내 제안에 담김");
 
@@ -3031,15 +3096,46 @@ const offerSyncedOnB = await waitUntilOn(page2, () =>
 assert(offerSyncedOnA, "해적이 인벤토리 칸을 클릭하면 상대(해군) 화면에 그 제안이 실시간으로 뜸");
 assert(offerSyncedOnB, "해군이 넣은 요루도 해적 쪽에 실시간으로 보임");
 
-// 승낙 버튼을 양쪽 다 실제로 클릭 → 거래 성사 → 서로 아이템이 실제로 바뀜
+// 승낙 버튼을 양쪽 다 실제로 클릭 → 곧바로 성사되지 않고 5초 자동 성사 유예가 걸림
 await page.waitForTimeout(150);
 await page2.waitForTimeout(150);
-assert(await humanClickOn(page, "#trade-accept-btn"), "해적 쪽 승낙 버튼 클릭");
-assert(await humanClickOn(page2, "#trade-accept-btn"), "해군 쪽 승낙 버튼 클릭");
+assert(await clickAcceptAndVerify(page, true), "해적 쪽 승낙 버튼 클릭");
+assert(await clickAcceptAndVerify(page2, true), "해군 쪽 승낙 버튼 클릭");
 
-const closedOnA = await waitUntilOn(page, () => window.__game.multiplayer.tradeSession === null, { timeoutMs: 6000 });
+const confirmingOnA = await waitUntilOn(page, () => window.__game.multiplayer.tradeSession?.confirmDeadlineMs != null);
+assert(confirmingOnA, "양쪽 다 승낙하면 자동 성사 카운트다운이 시작됨 (confirmDeadlineMs가 잡힘)");
+await page.waitForTimeout(300);
+const stillOpenRightAfterAccept =
+  (await page.evaluate(() => window.__game.multiplayer.tradeSession)) !== null &&
+  (await page2.evaluate(() => window.__game.multiplayer.tradeSession)) !== null;
+assert(stillOpenRightAfterAccept, "양쪽 다 승낙해도 곧바로 성사되지 않음 (유예 시간 동안은 거래창이 열려 있음)");
+const countdownVisible = await page.evaluate(() => !!document.querySelector(".trade-confirm-countdown"));
+assert(countdownVisible, "거래창에 자동 성사까지 남은 시간이 실제로 표시됨");
+
+// 유예 시간 안에 한쪽이 승낙을 취소하면(승낙 버튼을 다시 클릭) 자동 성사가 취소되고,
+// 원래 마감 시각이 지나도 거래가 성사되지 않아야 합니다.
+assert(await clickAcceptAndVerify(page2, false), "해군 쪽이 유예 시간 안에 승낙을 다시 취소 클릭");
+const confirmCancelledOnA = await waitUntilOn(page, () => window.__game.multiplayer.tradeSession?.confirmDeadlineMs == null);
+assert(confirmCancelledOnA, "한쪽이 취소하면 자동 성사 카운트다운도 취소됨");
+await page.waitForTimeout(TRADE_CONFIRM_WAIT_MS);
+const notCompletedAfterCancel =
+  (await page.evaluate(() => window.__game.multiplayer.tradeSession)) !== null &&
+  (await page2.evaluate(() => window.__game.multiplayer.tradeSession)) !== null;
+assert(notCompletedAfterCancel, "유예 중 취소했으면 원래 마감 시각이 지나도 거래가 성사되지 않음");
+
+// 다시 양쪽 다 승낙 + 이번엔 아무도 취소하지 않고 유예 시간을 다 기다리면 그제서야 실제로 성사됨
+assert(await clickAcceptAndVerify(page2, true), "해군 쪽 다시 승낙 클릭");
+assert(await clickAcceptAndVerify(page, true), "해적 쪽 다시 승낙 클릭 (이번엔 끝까지 기다림)");
+await waitUntilOn(page, () => window.__game.multiplayer.tradeSession?.confirmDeadlineMs != null);
+await page.waitForTimeout(300);
+const stillOpenBeforeWait = (await page.evaluate(() => window.__game.multiplayer.tradeSession)) !== null;
+assert(stillOpenBeforeWait, "다시 승낙해도 즉시 성사되지 않고 유예가 다시 걸림");
+
+const closedOnA = await waitUntilOn(page, () => window.__game.multiplayer.tradeSession === null, {
+  timeoutMs: TRADE_CONFIRM_WAIT_MS + 6000,
+});
 const closedOnB = await waitUntilOn(page2, () => window.__game.multiplayer.tradeSession === null, { timeoutMs: 6000 });
-assert(closedOnA && closedOnB, "양쪽 다 승낙하면 거래가 성사되어 거래창이 자동으로 닫힘");
+assert(closedOnA && closedOnB, "유예 시간을 다 기다리면(아무도 취소 안 함) 그제서야 거래가 성사되어 거래창이 자동으로 닫힘");
 
 const aInvIds = await page.evaluate(() => window.__game.simulation.state.player.inventory.map((i) => i.id));
 const bInvIds = await page2.evaluate(() => window.__game.simulation.state.player.inventory.map((i) => i.id));

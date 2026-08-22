@@ -39,7 +39,8 @@ const { GACHA_COOLDOWN_MS, GACHA_COST_RATIO, GACHA_MIN_COST, GACHA_MIN_MONEY,
 const { GUIDE_ARRIVE_MARGIN, recommendedIsland, nextGoalIsland, guideInfo, setGuideTarget, stepGuide } =
   await import("../src/simulation/GuideSystem.ts");
 const { World } = await import("../server/state.ts");
-const { ROOM_CAPACITY, MAX_TRADE_SLOTS: PROTOCOL_MAX_TRADE_SLOTS } = await import("../src/network/protocol.ts");
+const { ROOM_CAPACITY, MAX_TRADE_SLOTS: PROTOCOL_MAX_TRADE_SLOTS, TRADE_CONFIRM_DELAY_MS } =
+  await import("../src/network/protocol.ts");
 const { MAX_TRADE_SLOTS, clampTradeOffer, removeFromInventory, applyReceivedItems, offerIsAffordable } =
   await import("../src/simulation/TradeSystem.ts");
 const { GACHA_ISLAND_ID } = await import("../src/simulation/QuestSystem.ts");
@@ -2064,6 +2065,12 @@ section("멀티플레이 서버 — 거래·선물 중계 (신뢰 경계: 서버
     return { conn, sent };
   }
   const sampleItem = (id, qty) => ({ id, name: id, description: "", icon: "🧪", usable: true, quantity: qty });
+  /** 초대→수락까지 밟아서 곧바로 거래 세션을 시작합니다 (아래 여러 테스트의 공통 준비 단계). */
+  function startTrade(world, x, y) {
+    world.handleMessage(x.conn, JSON.stringify({ type: "trade_request", targetId: y.conn.id }));
+    world.handleMessage(y.conn, JSON.stringify({ type: "trade_invite_respond", accept: true }));
+  }
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const world = new World();
   const a = fakeConn(world, "가", "pirate"); // room1
@@ -2071,12 +2078,30 @@ section("멀티플레이 서버 — 거래·선물 중계 (신뢰 경계: 서버
   a.sent.length = 0;
   b.sent.length = 0;
 
-  // 거래를 걸면 양쪽 다 trade_started를 받고, 서로를 파트너로 기억함
+  // 거래를 걸면 "초대"만 상대에게 가고, 신청한 쪽은 아직 거래창이 열리지 않음(응답 대기)
   world.handleMessage(a.conn, JSON.stringify({ type: "trade_request", targetId: b.conn.id }));
+  const invite = b.sent.find((m) => m.type === "trade_invite");
+  assert(invite?.fromId === a.conn.id && invite?.fromName === "가", "거래를 신청하면 상대만 trade_invite를 받음");
+  assert(!a.sent.some((m) => m.type === "trade_started") && !b.sent.some((m) => m.type === "trade_started"), "응답 전에는 양쪽 다 거래창이 열리지 않음");
+  const sentAck = a.sent.find((m) => m.type === "trade_invite_sent");
+  assert(sentAck?.toId === b.conn.id && sentAck?.toName === "나", "신청한 쪽은 trade_invite_sent로 '전달됐다'는 확인만 받음");
+
+  // 거절하면 신청한 쪽에 declined로 알려주고, 거래는 시작되지 않음
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(b.conn, JSON.stringify({ type: "trade_invite_respond", accept: false }));
+  assert(a.sent.find((m) => m.type === "trade_closed")?.reason === "declined", "거절하면 신청한 쪽이 trade_closed(declined)를 받음");
+  assert(!a.sent.some((m) => m.type === "trade_started") && !b.sent.some((m) => m.type === "trade_started"), "거절되면 거래창이 열리지 않음");
+
+  // 수락하면 그제서야 양쪽 다 trade_started — 서로를 파트너로 기억함
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_request", targetId: b.conn.id }));
+  world.handleMessage(b.conn, JSON.stringify({ type: "trade_invite_respond", accept: true }));
   const aStarted = a.sent.find((m) => m.type === "trade_started");
   const bStarted = b.sent.find((m) => m.type === "trade_started");
-  assert(aStarted?.partnerId === b.conn.id && aStarted?.partnerName === "나", "거래를 건 쪽도 trade_started를 받음");
-  assert(bStarted?.partnerId === a.conn.id && bStarted?.partnerName === "가", "거래를 받은 쪽도 곧바로 trade_started를 받음");
+  assert(aStarted?.partnerId === b.conn.id && aStarted?.partnerName === "나", "수락하면 신청한 쪽도 trade_started를 받음");
+  assert(bStarted?.partnerId === a.conn.id && bStarted?.partnerName === "가", "수락한 쪽도 곧바로 trade_started를 받음");
 
   // 이미 거래 중인 사람에게 또 걸면 거부됨
   const c = fakeConn(world, "다", "pirate");
@@ -2084,6 +2109,16 @@ section("멀티플레이 서버 — 거래·선물 중계 (신뢰 경계: 서버
   world.handleMessage(c.conn, JSON.stringify({ type: "trade_request", targetId: a.conn.id }));
   const busy = c.sent.find((m) => m.type === "trade_closed");
   assert(busy?.reason === "busy", "이미 거래 중인 사람에게 걸면 busy로 거부됨");
+
+  // 응답 대기 중인(아직 수락/거절 안 한) 사람에게 또 걸어도 거부됨
+  const c2 = fakeConn(world, "다2", "pirate");
+  const f = fakeConn(world, "바", "marine");
+  world.handleMessage(c2.conn, JSON.stringify({ type: "trade_request", targetId: f.conn.id })); // f는 아직 응답 안 함 → pendingTradeInviteFrom
+  c2.sent.length = 0;
+  const c3 = fakeConn(world, "다3", "pirate");
+  world.handleMessage(c3.conn, JSON.stringify({ type: "trade_request", targetId: f.conn.id }));
+  assert(c3.sent.find((m) => m.type === "trade_closed")?.reason === "busy", "이미 다른 초대에 응답 대기 중인 사람에게 걸어도 busy로 거부됨");
+  world.handleMessage(f.conn, JSON.stringify({ type: "trade_invite_respond", accept: false })); // 정리
 
   // 자기 자신에게는 거래를 걸 수 없음
   c.sent.length = 0;
@@ -2118,26 +2153,46 @@ section("멀티플레이 서버 — 거래·선물 중계 (신뢰 경계: 서버
   world.handleMessage(b.conn, JSON.stringify({ type: "trade_accept", accepted: true }));
   assert(!a.sent.some((m) => m.type === "trade_complete"), "제안이 바뀐 뒤에는 예전 승낙이 무효화되어 다시 눌러야 성사됨");
 
-  // 양쪽 다 (다시) 승낙하면 성사 — 각자 "상대가" 제안한 아이템을 받음
+  // 양쪽 다 (다시) 승낙해도, 곧바로 성사되지는 않고 5초 자동 성사 유예가 걸림
   // (지금 시점: a의 제안은 그대로 potion_small x3, b의 제안은 방금 바꾼 sword_yoru x1)
   a.sent.length = 0;
   b.sent.length = 0;
   world.handleMessage(a.conn, JSON.stringify({ type: "trade_accept", accepted: true }));
+  assert(!a.sent.some((m) => m.type === "trade_complete") && !b.sent.some((m) => m.type === "trade_complete"), "양쪽 다 승낙해도 곧바로 성사되지 않음 (취소 유예 시작)");
+  const confirmUpdate = a.sent.find((m) => m.type === "trade_update");
+  assert(typeof confirmUpdate?.confirmDeadlineMs === "number" && confirmUpdate.confirmDeadlineMs > Date.now(), "trade_update에 자동 성사 마감 시각이 실림");
+
+  // 유예 시간 안에 한쪽이 승낙을 취소하면(다시 눌러 false) 자동 성사가 취소되고, 원래 마감 시각이 지나도 성사되지 않음
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(b.conn, JSON.stringify({ type: "trade_accept", accepted: false }));
+  const cancelUpdate = a.sent.find((m) => m.type === "trade_update");
+  assert(cancelUpdate?.confirmDeadlineMs === null, "취소하면 마감 시각도 다시 null로 돌아옴");
+  await wait(TRADE_CONFIRM_DELAY_MS + 300);
+  assert(!a.sent.some((m) => m.type === "trade_complete") && !b.sent.some((m) => m.type === "trade_complete"), "유예 중 취소했으면 원래 마감 시각이 지나도 성사되지 않음");
+
+  // 다시 양쪽 다 승낙 + 아무도 취소하지 않고 5초를 다 기다리면 그제서야 실제로 성사됨
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(b.conn, JSON.stringify({ type: "trade_accept", accepted: true }));
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_accept", accepted: true }));
+  assert(!a.sent.some((m) => m.type === "trade_complete"), "다시 승낙해도 즉시 성사되지 않고 유예가 다시 걸림");
+  await wait(TRADE_CONFIRM_DELAY_MS + 300);
   const aComplete = a.sent.find((m) => m.type === "trade_complete");
   const bComplete = b.sent.find((m) => m.type === "trade_complete");
-  assert(aComplete?.receivedItems?.[0]?.id === "sword_yoru", "a는 b가 제안했던 sword_yoru를 받음 (자기가 준 potion_small이 아님)");
+  assert(aComplete?.receivedItems?.[0]?.id === "sword_yoru", "5초를 다 기다리면 a는 b가 제안했던 sword_yoru를 받음 (자기가 준 potion_small이 아님)");
   assert(bComplete?.receivedItems?.[0]?.id === "potion_small" && bComplete.receivedItems[0].quantity === 3, "b는 a가 제안했던 potion_small x3을 받음");
 
   // 거래가 끝났으니 더 이상 서로를 거래 상대로 붙잡고 있지 않아야 함 (다음 거래를 바로 시작할 수 있게)
   a.sent.length = 0;
   world.handleMessage(a.conn, JSON.stringify({ type: "trade_request", targetId: c.conn.id }));
-  assert(a.sent.some((m) => m.type === "trade_started"), "거래가 끝난 뒤에는 곧바로 다른 사람과 새 거래를 시작할 수 있음");
+  assert(a.sent.some((m) => m.type === "trade_invite_sent"), "거래가 끝난 뒤에는 곧바로 다른 사람에게 새로 거래를 신청할 수 있음");
   world.handleMessage(a.conn, JSON.stringify({ type: "trade_cancel" }));
 
   // 취소 — 양쪽 다 trade_closed를 받고 세션이 풀림
   const d1 = fakeConn(world, "라1", "pirate");
   const d2 = fakeConn(world, "라2", "marine");
-  world.handleMessage(d1.conn, JSON.stringify({ type: "trade_request", targetId: d2.conn.id }));
+  startTrade(world, d1, d2);
   d1.sent.length = 0;
   d2.sent.length = 0;
   world.handleMessage(d1.conn, JSON.stringify({ type: "trade_cancel" }));
@@ -2147,10 +2202,22 @@ section("멀티플레이 서버 — 거래·선물 중계 (신뢰 경계: 서버
   // 거래 중 상대가 접속을 끊으면 남은 쪽에게 partner_left로 알림
   const e1 = fakeConn(world, "마1", "pirate");
   const e2 = fakeConn(world, "마2", "marine");
-  world.handleMessage(e1.conn, JSON.stringify({ type: "trade_request", targetId: e2.conn.id }));
+  startTrade(world, e1, e2);
   e1.sent.length = 0;
   world.leave(e2.conn.id);
   assert(e1.sent.find((m) => m.type === "trade_closed")?.reason === "partner_left", "거래 상대가 나가면 partner_left로 거래가 자동 종료됨");
+
+  // 초대에 아직 응답하지 않은 사이에 신청한 쪽이 나가면, 응답 대기 중이던 쪽에도 partner_left로 알림
+  const e3 = fakeConn(world, "마3", "pirate");
+  const e4 = fakeConn(world, "마4", "marine");
+  world.handleMessage(e3.conn, JSON.stringify({ type: "trade_request", targetId: e4.conn.id }));
+  e4.sent.length = 0;
+  world.leave(e3.conn.id);
+  assert(e4.sent.find((m) => m.type === "trade_closed")?.reason === "partner_left", "응답하기 전에 신청한 쪽이 나가면 partner_left로 알림 (응답 대기 화면이 안 남게)");
+  // 이제 e4는 더 이상 대기 중인 초대가 없어야 하므로, 응답해도 조용히 무시됨 (에러 없이)
+  e4.sent.length = 0;
+  world.handleMessage(e4.conn, JSON.stringify({ type: "trade_invite_respond", accept: true }));
+  assert(e4.sent.length === 0, "이미 정리된 초대에 응답해도 아무 일도 일어나지 않음");
 
   // 다른 방 사람과는 거래를 걸 수 없음 — room1을 꽉 채운 뒤, 그다음 접속자는 room2로 밀려남.
   // (room1을 채우기 전부터 있던 a는 계속 room1에 남아있으므로, a로 다른 방 사람과의 거절을 확인합니다)

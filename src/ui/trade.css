@@ -137,6 +137,88 @@
   grid-column: 1 / -1;
 }
 
+.trade-confirm-countdown {
+  margin: -4px 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 213, 74, 0.15);
+  border: 1px solid rgba(255, 213, 74, 0.4);
+  font-size: 12px;
+  color: #ffe082;
+  text-align: center;
+}
+
+/* ── 거래 신청 받음 (상대가 나에게 걸었을 때) ───────────────────────────── */
+.trade-invite {
+  position: fixed;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  z-index: 62;
+  min-width: 280px;
+  background: rgba(14, 18, 28, 0.97);
+  border: 1px solid rgba(255, 213, 74, 0.6);
+  border-radius: 14px;
+  padding: 14px 16px;
+  color: #fff3e0;
+  font-size: 13px;
+  pointer-events: auto;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+.trade-invite-header {
+  font-weight: bold;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.trade-invite-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.trade-invite-accept-btn,
+.trade-invite-decline-btn {
+  padding: 8px 18px;
+  border-radius: 10px;
+  font-family: inherit;
+  font-weight: bold;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.trade-invite-accept-btn {
+  border: 1px solid rgba(129, 199, 132, 0.6);
+  background: rgba(129, 199, 132, 0.22);
+  color: #e8f5e9;
+}
+.trade-invite-accept-btn:hover { background: rgba(129, 199, 132, 0.35); }
+
+.trade-invite-decline-btn {
+  border: 1px solid rgba(229, 115, 115, 0.5);
+  background: rgba(229, 115, 115, 0.15);
+  color: #ffcdd2;
+}
+.trade-invite-decline-btn:hover { background: rgba(229, 115, 115, 0.28); }
+
+/* ── 거래 신청 보냄 (응답 대기 중) — 클릭할 건 없는 작은 안내 ───────────── */
+.trade-outgoing {
+  position: fixed;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  z-index: 61;
+  pointer-events: none;
+  background: rgba(14, 18, 28, 0.9);
+  border: 1px solid rgba(255, 213, 74, 0.35);
+  border-radius: 10px;
+  padding: 8px 14px;
+  color: #fff3e0;
+  font-size: 12.5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
 /* ── 선물 고르기 창 ───────────────────────────────────────────────────── */
 .trade-gift-picker {
   position: absolute;

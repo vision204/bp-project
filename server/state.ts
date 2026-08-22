@@ -40,6 +40,7 @@ import {
   MAX_TRADE_SLOTS,
   RANGE_LATENCY_BUFFER_M,
   ROOM_CAPACITY,
+  TRADE_CONFIRM_DELAY_MS,
   type AnimState,
   type ClientMessage,
   type CombatStatsSnapshot,
@@ -179,8 +180,14 @@ export interface Connection {
   lastSkillAtMs: Record<number, number>;
   lastSeenMs: number;
   msgTimestamps: number[];
-  /** 지금 진행 중인 거래(있으면). 거래 중이 아니면 null. */
-  trade: { partnerId: string; myOffer: TradeItem[]; myAccepted: boolean } | null;
+  /** 지금 진행 중인 거래(있으면). 거래 중이 아니면 null.
+   *  confirmDeadlineMs는 양쪽 다 승낙해서 자동 성사 카운트다운이 도는 중이면
+   *  그 마감 시각(epoch ms), 아니면 null. */
+  trade: { partnerId: string; myOffer: TradeItem[]; myAccepted: boolean; confirmDeadlineMs: number | null } | null;
+  /** 내가 상대에게 거래를 신청해서 아직 상대의 수락/거절을 기다리는 중이면 그 상대 id. */
+  pendingTradeInviteTo: string | null;
+  /** 상대가 나에게 거래를 신청해서 내가 아직 응답하지 않은 상태면 그 상대 정보. */
+  pendingTradeInviteFrom: { id: string; name: string } | null;
 }
 
 function snapshotOf(conn: Connection): RemotePlayerSnapshot {
@@ -287,6 +294,8 @@ export class World {
       lastSeenMs: Date.now(),
       msgTimestamps: [],
       trade: null,
+      pendingTradeInviteTo: null,
+      pendingTradeInviteFrom: null,
     };
     this.connections.set(conn.id, conn);
 
@@ -307,9 +316,27 @@ export class World {
     this.connections.delete(id);
     if (conn.trade) {
       const partner = this.connections.get(conn.trade.partnerId);
+      this.clearTradeConfirm(conn.id, conn.trade.partnerId);
       if (partner?.trade?.partnerId === conn.id) {
         this.send(partner, { type: "trade_closed", reason: "partner_left" });
         partner.trade = null;
+      }
+    }
+    // 내가 보낸 초대가 아직 응답 대기 중이었다면, 상대가 들고 있는 "받은 초대" 상태를 지우고
+    // 알려줍니다 — 그러지 않으면 상대 화면에 이미 사라진 사람의 수락/거절 팝업이 그대로 남습니다.
+    if (conn.pendingTradeInviteTo) {
+      const target = this.connections.get(conn.pendingTradeInviteTo);
+      if (target?.pendingTradeInviteFrom?.id === conn.id) {
+        target.pendingTradeInviteFrom = null;
+        this.send(target, { type: "trade_closed", reason: "partner_left" });
+      }
+    }
+    // 내가 아직 응답하지 않은 초대를 받아둔 상태였다면, 보낸 사람에게 알려서 "응답 대기" 화면이 안 남게 합니다.
+    if (conn.pendingTradeInviteFrom) {
+      const requester = this.connections.get(conn.pendingTradeInviteFrom.id);
+      if (requester?.pendingTradeInviteTo === conn.id) {
+        requester.pendingTradeInviteTo = null;
+        this.send(requester, { type: "trade_closed", reason: "partner_left" });
       }
     }
     this.broadcastRoom(conn.roomId, { type: "player_left", id });
@@ -317,8 +344,57 @@ export class World {
 
   /** 거래창에 서로의 최신 제안·승낙 상태를 보여줍니다 — 양쪽 다에게 각자 "상대방" 기준으로 보냅니다. */
   private sendTradeUpdate(a: Connection, b: Connection) {
-    this.send(a, { type: "trade_update", partnerOffer: b.trade?.myOffer ?? [], partnerAccepted: b.trade?.myAccepted ?? false });
-    this.send(b, { type: "trade_update", partnerOffer: a.trade?.myOffer ?? [], partnerAccepted: a.trade?.myAccepted ?? false });
+    this.send(a, {
+      type: "trade_update",
+      partnerOffer: b.trade?.myOffer ?? [],
+      partnerAccepted: b.trade?.myAccepted ?? false,
+      confirmDeadlineMs: a.trade?.confirmDeadlineMs ?? null,
+    });
+    this.send(b, {
+      type: "trade_update",
+      partnerOffer: a.trade?.myOffer ?? [],
+      partnerAccepted: a.trade?.myAccepted ?? false,
+      confirmDeadlineMs: b.trade?.confirmDeadlineMs ?? null,
+    });
+  }
+
+  /** a·b 쌍을 순서 상관없이 하나의 키로 — 양쪽 Connection 객체에 타이머를 중복 보관하지
+   *  않고 World 하나가 대표로 들고 있기 위해서입니다(정리를 한 번만 하면 되도록). */
+  private static confirmKey(aId: string, bId: string): string {
+    return aId < bId ? `${aId}|${bId}` : `${bId}|${aId}`;
+  }
+
+  private pendingTradeConfirms = new Map<string, ReturnType<typeof setTimeout>>();
+
+  /** 예약된 자동 성사 타이머가 있으면 취소합니다 — 취소·재협상·연결 끊김 등 "더는
+   *  자동으로 성사되면 안 되는" 모든 경우에 호출합니다. */
+  private clearTradeConfirm(aId: string, bId: string) {
+    const key = World.confirmKey(aId, bId);
+    const timer = this.pendingTradeConfirms.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      this.pendingTradeConfirms.delete(key);
+    }
+  }
+
+  /** TRADE_CONFIRM_DELAY_MS가 지나서 실제로 아이템을 교환합니다. 그 사이 한쪽이
+   *  나갔거나, 취소했거나, 제안을 바꿔서 세션이 더 이상 그때 그 모양이 아니면
+   *  아무 일도 하지 않습니다(안전하게 조용히 무시) — trade_accept/trade_cancel/
+   *  trade_offer/leave가 이런 경우 이미 clearTradeConfirm으로 타이머 자체를
+   *  지우려 하지만, 타이밍이 겹쳐 이미 큐에 들어간 콜백에 대비한 이중 안전장치입니다. */
+  private finalizeTrade(aId: string, bId: string) {
+    this.pendingTradeConfirms.delete(World.confirmKey(aId, bId));
+    const a = this.connections.get(aId);
+    const b = this.connections.get(bId);
+    if (!a || !b) return;
+    const aSession = a.trade;
+    const bSession = b.trade;
+    if (!aSession || !bSession || aSession.partnerId !== bId || bSession.partnerId !== aId) return;
+    if (!aSession.myAccepted || !bSession.myAccepted) return;
+    this.send(a, { type: "trade_complete", receivedItems: bSession.myOffer });
+    this.send(b, { type: "trade_complete", receivedItems: aSession.myOffer });
+    a.trade = null;
+    b.trade = null;
   }
 
   count() {
@@ -431,14 +507,48 @@ export class World {
           this.send(conn, { type: "trade_closed", reason: "different_room" });
           break;
         }
-        if (conn.trade || target.trade) {
+        // "거래 중" 또는 "이미 초대를 보냈거나 받은 채로 응답 대기 중"이면 둘 다 busy로 거부합니다 —
+        // 신청자가 중복으로 여러 명에게 걸거나, 이미 바쁜 상대에게 걸어서 초대가 덮어써지는 걸 막습니다.
+        if (conn.trade || conn.pendingTradeInviteTo || conn.pendingTradeInviteFrom) {
           this.send(conn, { type: "trade_closed", reason: "busy" });
           break;
         }
-        conn.trade = { partnerId: target.id, myOffer: [], myAccepted: false };
-        target.trade = { partnerId: conn.id, myOffer: [], myAccepted: false };
-        this.send(conn, { type: "trade_started", partnerId: target.id, partnerName: target.name });
-        this.send(target, { type: "trade_started", partnerId: conn.id, partnerName: conn.name });
+        if (target.trade || target.pendingTradeInviteTo || target.pendingTradeInviteFrom) {
+          this.send(conn, { type: "trade_closed", reason: "busy" });
+          break;
+        }
+        conn.pendingTradeInviteTo = target.id;
+        target.pendingTradeInviteFrom = { id: conn.id, name: conn.name };
+        this.send(target, { type: "trade_invite", fromId: conn.id, fromName: conn.name });
+        this.send(conn, { type: "trade_invite_sent", toId: target.id, toName: target.name });
+        break;
+      }
+
+      case "trade_invite_respond": {
+        const pending = conn.pendingTradeInviteFrom;
+        if (!pending) break; // 대기 중인 초대가 없으면(이미 취소됐거나 만료) 조용히 무시
+        conn.pendingTradeInviteFrom = null;
+        const requester = this.connections.get(pending.id);
+        if (requester?.pendingTradeInviteTo === conn.id) requester.pendingTradeInviteTo = null;
+        if (msg.accept !== true) {
+          if (requester) this.send(requester, { type: "trade_closed", reason: "declined" });
+          break;
+        }
+        if (!requester || requester.roomId !== conn.roomId) {
+          this.send(conn, { type: "trade_closed", reason: "not_connected" });
+          break;
+        }
+        // 응답을 기다리는 사이 둘 중 하나가 이미 다른 거래를 시작했으면(동시에 여러 초대에
+        // 응답하는 등의 경합) 안전하게 거부합니다.
+        if (conn.trade || requester.trade) {
+          this.send(conn, { type: "trade_closed", reason: "busy" });
+          this.send(requester, { type: "trade_closed", reason: "busy" });
+          break;
+        }
+        conn.trade = { partnerId: requester.id, myOffer: [], myAccepted: false, confirmDeadlineMs: null };
+        requester.trade = { partnerId: conn.id, myOffer: [], myAccepted: false, confirmDeadlineMs: null };
+        this.send(conn, { type: "trade_started", partnerId: requester.id, partnerName: requester.name });
+        this.send(requester, { type: "trade_started", partnerId: conn.id, partnerName: conn.name });
         break;
       }
 
@@ -447,10 +557,13 @@ export class World {
         if (!session) break;
         session.myOffer = clampTradeItems(msg.items);
         session.myAccepted = false;
+        session.confirmDeadlineMs = null;
         const partner = this.connections.get(session.partnerId);
         const partnerSession = partner?.trade;
         if (partner && partnerSession && partnerSession.partnerId === conn.id) {
           partnerSession.myAccepted = false;
+          partnerSession.confirmDeadlineMs = null;
+          this.clearTradeConfirm(conn.id, partner.id);
           this.sendTradeUpdate(conn, partner);
         }
         break;
@@ -467,14 +580,20 @@ export class World {
           break;
         }
         session.myAccepted = msg.accepted === true;
+        // 승낙 상태가 바뀔 때마다(승낙이든 취소든) 예약돼 있던 자동 성사 타이머는 일단 지웁니다 —
+        // 아래에서 "둘 다 승낙"이면 새로 하나 겁니다.
+        this.clearTradeConfirm(conn.id, partner.id);
         if (session.myAccepted && partnerSession.myAccepted) {
-          this.send(conn, { type: "trade_complete", receivedItems: partnerSession.myOffer });
-          this.send(partner, { type: "trade_complete", receivedItems: session.myOffer });
-          conn.trade = null;
-          partner.trade = null;
+          const deadline = Date.now() + TRADE_CONFIRM_DELAY_MS;
+          session.confirmDeadlineMs = deadline;
+          partnerSession.confirmDeadlineMs = deadline;
+          const timer = setTimeout(() => this.finalizeTrade(conn.id, partner.id), TRADE_CONFIRM_DELAY_MS);
+          this.pendingTradeConfirms.set(World.confirmKey(conn.id, partner.id), timer);
         } else {
-          this.sendTradeUpdate(conn, partner);
+          session.confirmDeadlineMs = null;
+          partnerSession.confirmDeadlineMs = null;
         }
+        this.sendTradeUpdate(conn, partner);
         break;
       }
 
@@ -482,6 +601,7 @@ export class World {
         const session = conn.trade;
         if (!session) break;
         const partner = this.connections.get(session.partnerId);
+        this.clearTradeConfirm(conn.id, session.partnerId);
         this.send(conn, { type: "trade_closed", reason: "cancelled" });
         const partnerSession = partner?.trade;
         if (partner && partnerSession && partnerSession.partnerId === conn.id) {
