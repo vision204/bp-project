@@ -20,6 +20,7 @@ import { applyDevLoadout } from "./simulation/DevLoadout";
 import { MultiplayerClient } from "./network/MultiplayerClient";
 import { buildCombatStatsSnapshot, drawnWeaponId, processPvpAttacks } from "./network/PvpCombat";
 import { MultiplayerUI } from "./ui/MultiplayerUI";
+import { TradeUI } from "./ui/TradeUI";
 
 export interface StartChoice {
   faction: Faction;
@@ -312,6 +313,9 @@ async function main() {
   // 동작에는 아무 영향이 없습니다.
   const multiplayer = new MultiplayerClient(simulation.state);
   const multiplayerUI = new MultiplayerUI(appEl, multiplayer, simulation.state);
+  // 다른 플레이어에게 마우스를 올리고 짧게 우클릭하면 거래/선물 메뉴가 뜹니다.
+  // (InputManager.ts의 우클릭-드래그 카메라 회전은 건드리지 않고, 별도로 판정합니다)
+  const tradeUI = new TradeUI(appEl, multiplayer, simulation.state, renderer);
   const env = typeof import.meta !== "undefined" ? (import.meta as { env?: Record<string, string> }).env : undefined;
   if (env?.VITE_MULTIPLAYER_AUTOCONNECT && env?.VITE_MULTIPLAYER_URL) {
     const autoName = (user?.name?.trim() || "여행자").slice(0, 12);
@@ -375,6 +379,7 @@ async function main() {
     combat: { totalMeleeCooldown, meleeDps },
     multiplayer,
     multiplayerUI,
+    tradeUI,
   };
 
   hideStartScreen();
@@ -396,7 +401,8 @@ async function main() {
 
     // 패널이 열려 있는 동안은 이동·전투·상호작용 입력을 무시해서
     // 마우스로 버튼을 누르는 도중 캐릭터가 움직이거나 공격이 나가지 않게 함.
-    const gameplaySnapshot = panels.isBlocking()
+    // 거래창·거래 메뉴가 열려 있을 때도 마찬가지입니다.
+    const gameplaySnapshot = (panels.isBlocking() || tradeUI.isBlocking())
       ? { ...snapshot, moveForward: false, moveBackward: false, moveLeft: false, moveRight: false,
           jumpPressed: false, jumpHeld: false, attackPressed: false, abilityPressed: false,
           interactPressed: false, mouseDeltaX: 0, mouseDeltaY: 0 }
@@ -434,6 +440,7 @@ async function main() {
     multiplayer.tick(dt, Date.now(), drawnWeaponId(simulation.state), buildCombatStatsSnapshot(simulation.state));
     renderer.syncRemotePlayers(multiplayer.players);
     multiplayerUI.update();
+    tradeUI.update();
 
     requestAnimationFrame(tick);
   }

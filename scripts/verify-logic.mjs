@@ -39,7 +39,9 @@ const { GACHA_COOLDOWN_MS, GACHA_COST_RATIO, GACHA_MIN_COST, GACHA_MIN_MONEY,
 const { GUIDE_ARRIVE_MARGIN, recommendedIsland, nextGoalIsland, guideInfo, setGuideTarget, stepGuide } =
   await import("../src/simulation/GuideSystem.ts");
 const { World } = await import("../server/state.ts");
-const { ROOM_CAPACITY } = await import("../src/network/protocol.ts");
+const { ROOM_CAPACITY, MAX_TRADE_SLOTS: PROTOCOL_MAX_TRADE_SLOTS } = await import("../src/network/protocol.ts");
+const { MAX_TRADE_SLOTS, clampTradeOffer, removeFromInventory, applyReceivedItems, offerIsAffordable } =
+  await import("../src/simulation/TradeSystem.ts");
 const { GACHA_ISLAND_ID } = await import("../src/simulation/QuestSystem.ts");
 const { DEV_EMAILS, normalizeEmail, isDevEmail, isLocalHost, devDenyReason, devModeAllowed,
         devDenyMessage } = await import("../src/core/DevAccess.ts");
@@ -2009,6 +2011,172 @@ section("멀티플레이 서버 — 몬스터(NPC) 위치 중계");
     JSON.stringify({ type: "enemy_states", enemies: [{ id: "wolf_enemy_9", x: 0, z: 0, hp: 1, maxHp: 1, alive: true }] }),
   );
   assert(other.sent.length === 0, "다른 방 사람에게는 몬스터 위치 보고가 전혀 안 감");
+}
+
+section("TradeSystem — 거래·선물 순수 로직");
+{
+  assert(MAX_TRADE_SLOTS === PROTOCOL_MAX_TRADE_SLOTS, "TradeSystem과 protocol의 MAX_TRADE_SLOTS가 일치함 (진실은 하나)");
+  assert(clampTradeOffer(Array.from({ length: 20 }, (_, i) => i)).length === MAX_TRADE_SLOTS, "제안 목록이 최대 슬롯 수로 잘림");
+
+  const st = createInitialGameState("pirate");
+  st.player.inventory.push({ id: "potion_small", name: "회복 물약", description: "체력 회복", icon: "🧪", quantity: 5, usable: true });
+  st.player.inventory.push({ id: "sword_yoru", name: "요루", description: "검", icon: "⚔️", quantity: 1, usable: false, equippable: true });
+  st.player.hotbar[0] = "sword_yoru";
+  st.player.activeHotbarSlot = 0;
+
+  const taken = removeFromInventory(st.player, "potion_small", 2);
+  assert(taken === 2, `일부만 빼면 뺀 개수를 그대로 돌려줌 (${taken})`);
+  assert(st.player.inventory.find((i) => i.id === "potion_small").quantity === 3, "남은 개수가 정확히 줄어듦");
+
+  const takenAll = removeFromInventory(st.player, "sword_yoru", 1);
+  assert(takenAll === 1, "가진 만큼 요청하면 그만큼 빠짐");
+  assert(!st.player.inventory.some((i) => i.id === "sword_yoru"), "0개가 되면 인벤토리에서 아예 사라짐");
+  assert(st.player.hotbar[0] === null, "단축바에 있던 칸도 함께 비워짐 (없는 아이템이 손에 남지 않도록)");
+  assert(st.player.activeHotbarSlot === null, "손에 들고 있던 상태였다면 그것도 함께 해제됨");
+
+  const overTaken = removeFromInventory(st.player, "potion_small", 999);
+  assert(overTaken === 3, `가진 것보다 많이 요청해도 가진 만큼만 빠짐 (${overTaken})`);
+  assert(!st.player.inventory.some((i) => i.id === "potion_small"), "다 빠지면 인벤토리에서 사라짐");
+
+  const notFound = removeFromInventory(st.player, "potion_exp", 1);
+  assert(notFound === 0, "없는 아이템은 0개 빠짐 (음수가 되지 않음)");
+
+  applyReceivedItems(st.player, [
+    { id: "potion_exp", name: "경험치 물약", description: "경험치 획득", icon: "🍾", quantity: 2, usable: true },
+  ]);
+  assert(st.player.inventory.find((i) => i.id === "potion_exp")?.quantity === 2, "받은 아이템이 인벤토리에 새로 생김");
+  applyReceivedItems(st.player, [
+    { id: "potion_exp", name: "경험치 물약", description: "경험치 획득", icon: "🍾", quantity: 3, usable: true },
+  ]);
+  assert(st.player.inventory.find((i) => i.id === "potion_exp")?.quantity === 5, "같은 아이템을 또 받으면 기존 개수 위에 쌓임");
+
+  assert(offerIsAffordable(st.player, [{ id: "potion_exp", quantity: 5 }]) === true, "실제로 가진 만큼 제안하면 통과");
+  assert(offerIsAffordable(st.player, [{ id: "potion_exp", quantity: 6 }]) === false, "가진 것보다 많이 제안하면 거부");
+  assert(offerIsAffordable(st.player, [{ id: "potion_exp", quantity: 0 }]) === false, "0개 제안은 무효");
+}
+
+section("멀티플레이 서버 — 거래·선물 중계 (신뢰 경계: 서버는 인벤토리를 모름, 그대로 중계만)");
+{
+  function fakeConn(world, name, faction) {
+    const sent = [];
+    const sock = { readyState: 1, OPEN: 1, send: (d) => sent.push(JSON.parse(d)), close() {} };
+    const conn = world.join(sock, name, faction);
+    return { conn, sent };
+  }
+  const sampleItem = (id, qty) => ({ id, name: id, description: "", icon: "🧪", usable: true, quantity: qty });
+
+  const world = new World();
+  const a = fakeConn(world, "가", "pirate"); // room1
+  const b = fakeConn(world, "나", "marine"); // room1
+  a.sent.length = 0;
+  b.sent.length = 0;
+
+  // 거래를 걸면 양쪽 다 trade_started를 받고, 서로를 파트너로 기억함
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_request", targetId: b.conn.id }));
+  const aStarted = a.sent.find((m) => m.type === "trade_started");
+  const bStarted = b.sent.find((m) => m.type === "trade_started");
+  assert(aStarted?.partnerId === b.conn.id && aStarted?.partnerName === "나", "거래를 건 쪽도 trade_started를 받음");
+  assert(bStarted?.partnerId === a.conn.id && bStarted?.partnerName === "가", "거래를 받은 쪽도 곧바로 trade_started를 받음");
+
+  // 이미 거래 중인 사람에게 또 걸면 거부됨
+  const c = fakeConn(world, "다", "pirate");
+  a.sent.length = 0;
+  world.handleMessage(c.conn, JSON.stringify({ type: "trade_request", targetId: a.conn.id }));
+  const busy = c.sent.find((m) => m.type === "trade_closed");
+  assert(busy?.reason === "busy", "이미 거래 중인 사람에게 걸면 busy로 거부됨");
+
+  // 자기 자신에게는 거래를 걸 수 없음
+  c.sent.length = 0;
+  world.handleMessage(c.conn, JSON.stringify({ type: "trade_request", targetId: c.conn.id }));
+  assert(c.sent.find((m) => m.type === "trade_closed")?.reason === "self", "자기 자신과는 거래할 수 없음");
+
+  // 제안을 보내면 상대에게 trade_update로 전달되고, 승낙 상태는 false로 초기화됨
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_offer", items: [sampleItem("potion_small", 3)] }));
+  const bUpdate = b.sent.find((m) => m.type === "trade_update");
+  assert(bUpdate?.partnerOffer?.[0]?.id === "potion_small" && bUpdate.partnerOffer[0].quantity === 3, "상대에게 내 제안 내용이 그대로 중계됨");
+  assert(bUpdate?.partnerAccepted === false, "제안을 보내면 내 승낙 상태가 false로 초기화됨");
+
+  // 승낙 — 한쪽만 눌렀을 때는 아직 성사되지 않음
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_accept", accepted: true }));
+  assert(!b.sent.some((m) => m.type === "trade_complete"), "한쪽만 승낙하면 아직 거래가 성사되지 않음");
+  assert(b.sent.find((m) => m.type === "trade_update")?.partnerAccepted === true, "상대는 내가 승낙했다는 걸 trade_update로 알 수 있음");
+
+  // 상대가 제안을 바꾸면(offer) 이미 눌렀던 내 승낙도 서버가 되돌림 (마지막에 몰래 바꿔치기 방지)
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(b.conn, JSON.stringify({ type: "trade_offer", items: [sampleItem("sword_yoru", 1)] }));
+  const aResetUpdate = a.sent.find((m) => m.type === "trade_update");
+  assert(aResetUpdate?.partnerOffer?.[0]?.id === "sword_yoru", "상대의 새 제안이 반영됨");
+  // a는 이미 accept:true를 보낸 상태였지만, b의 제안 변경으로 서버가 양쪽 accepted를 리셋했으므로
+  // 다시 accept를 눌러야 함 — 그 사실을 아래에서 확인합니다.
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(b.conn, JSON.stringify({ type: "trade_accept", accepted: true }));
+  assert(!a.sent.some((m) => m.type === "trade_complete"), "제안이 바뀐 뒤에는 예전 승낙이 무효화되어 다시 눌러야 성사됨");
+
+  // 양쪽 다 (다시) 승낙하면 성사 — 각자 "상대가" 제안한 아이템을 받음
+  // (지금 시점: a의 제안은 그대로 potion_small x3, b의 제안은 방금 바꾼 sword_yoru x1)
+  a.sent.length = 0;
+  b.sent.length = 0;
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_accept", accepted: true }));
+  const aComplete = a.sent.find((m) => m.type === "trade_complete");
+  const bComplete = b.sent.find((m) => m.type === "trade_complete");
+  assert(aComplete?.receivedItems?.[0]?.id === "sword_yoru", "a는 b가 제안했던 sword_yoru를 받음 (자기가 준 potion_small이 아님)");
+  assert(bComplete?.receivedItems?.[0]?.id === "potion_small" && bComplete.receivedItems[0].quantity === 3, "b는 a가 제안했던 potion_small x3을 받음");
+
+  // 거래가 끝났으니 더 이상 서로를 거래 상대로 붙잡고 있지 않아야 함 (다음 거래를 바로 시작할 수 있게)
+  a.sent.length = 0;
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_request", targetId: c.conn.id }));
+  assert(a.sent.some((m) => m.type === "trade_started"), "거래가 끝난 뒤에는 곧바로 다른 사람과 새 거래를 시작할 수 있음");
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_cancel" }));
+
+  // 취소 — 양쪽 다 trade_closed를 받고 세션이 풀림
+  const d1 = fakeConn(world, "라1", "pirate");
+  const d2 = fakeConn(world, "라2", "marine");
+  world.handleMessage(d1.conn, JSON.stringify({ type: "trade_request", targetId: d2.conn.id }));
+  d1.sent.length = 0;
+  d2.sent.length = 0;
+  world.handleMessage(d1.conn, JSON.stringify({ type: "trade_cancel" }));
+  assert(d1.sent.find((m) => m.type === "trade_closed")?.reason === "cancelled", "취소한 쪽도 trade_closed를 받음");
+  assert(d2.sent.find((m) => m.type === "trade_closed")?.reason === "cancelled", "상대도 trade_closed를 받음");
+
+  // 거래 중 상대가 접속을 끊으면 남은 쪽에게 partner_left로 알림
+  const e1 = fakeConn(world, "마1", "pirate");
+  const e2 = fakeConn(world, "마2", "marine");
+  world.handleMessage(e1.conn, JSON.stringify({ type: "trade_request", targetId: e2.conn.id }));
+  e1.sent.length = 0;
+  world.leave(e2.conn.id);
+  assert(e1.sent.find((m) => m.type === "trade_closed")?.reason === "partner_left", "거래 상대가 나가면 partner_left로 거래가 자동 종료됨");
+
+  // 다른 방 사람과는 거래를 걸 수 없음 — room1을 꽉 채운 뒤, 그다음 접속자는 room2로 밀려남.
+  // (room1을 채우기 전부터 있던 a는 계속 room1에 남아있으므로, a로 다른 방 사람과의 거절을 확인합니다)
+  while (Object.values(world.roomSummary()).reduce((s, n) => s + n, 0) < ROOM_CAPACITY) {
+    fakeConn(world, "채우기", "pirate");
+  }
+  const otherRoom = fakeConn(world, "다른방", "marine"); // room1이 꽉 찼으니 room2로 배정됨
+  assert(a.conn.roomId !== otherRoom.conn.roomId, "테스트 전제 확인 — a와 다른방은 실제로 다른 방임");
+  a.sent.length = 0;
+  world.handleMessage(a.conn, JSON.stringify({ type: "trade_request", targetId: otherRoom.conn.id }));
+  assert(a.sent.find((m) => m.type === "trade_closed")?.reason === "different_room", "다른 방 사람과는 거래를 걸 수 없음");
+
+  // 선물 — 거래창 없이 곧바로 전달되고, 보낸 사람은 gift_ack로 성공 여부를 앎
+  const g1 = fakeConn(world, "사1", "pirate");
+  const g2 = fakeConn(world, "사2", "marine");
+  g1.sent.length = 0;
+  g2.sent.length = 0;
+  world.handleMessage(g1.conn, JSON.stringify({ type: "gift_send", targetId: g2.conn.id, item: sampleItem("potion_small", 2) }));
+  const giftReceived = g2.sent.find((m) => m.type === "gift_received");
+  assert(giftReceived?.fromId === g1.conn.id && giftReceived?.item?.quantity === 2, "선물이 상대에게 그대로 전달됨");
+  assert(g1.sent.find((m) => m.type === "gift_ack")?.delivered === true, "보낸 사람은 전달 성공을 gift_ack로 확인함");
+
+  g1.sent.length = 0;
+  world.handleMessage(g1.conn, JSON.stringify({ type: "gift_send", targetId: "없는아이디", item: sampleItem("potion_small", 1) }));
+  const failedAck = g1.sent.find((m) => m.type === "gift_ack");
+  assert(failedAck?.delivered === false && failedAck?.reason === "not_connected", "없는 상대에게 선물을 보내면 실패로 알려줌 (인벤토리에서 빼면 안 되는 신호)");
 }
 
 section("섬 판정");

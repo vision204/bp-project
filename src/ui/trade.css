@@ -1,0 +1,205 @@
+/* P2P 거래·선물 UI — PanelManager를 쓰지 않는 독립 위젯이라 별도 파일로 뺐습니다
+   (MultiplayerUI.ts·multiplayer.css와 같은 결). 인벤토리 슬롯(.inv-slot 등)은
+   panels.css의 것과 같은 클래스명을 그대로 재사용해 시각적으로 통일합니다. */
+
+/* ── 우클릭 컨텍스트 메뉴 (거래하기 / 선물 주기) ─────────────────────────── */
+.trade-menu {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: rgba(14, 18, 28, 0.96);
+  border: 1px solid rgba(255, 213, 74, 0.55);
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+.trade-menu-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #fff3e0;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.trade-menu-btn:hover { background: rgba(255, 213, 74, 0.22); }
+
+/* ── 거래창 ───────────────────────────────────────────────────────────── */
+.trade-window {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 560px;
+  max-width: 92vw;
+  max-height: 82vh;
+  overflow-y: auto;
+  background: rgba(14, 18, 28, 0.96);
+  border: 1px solid rgba(255, 213, 74, 0.5);
+  border-radius: 16px;
+  padding: 16px 18px 18px;
+  color: #fff3e0;
+  font-size: 13px;
+  pointer-events: auto;
+  z-index: 55;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+}
+
+.trade-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: bold;
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+.trade-close-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff3e0;
+  cursor: pointer;
+  font-size: 12px;
+}
+.trade-close-btn:hover { background: rgba(229, 57, 53, 0.4); }
+
+.trade-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.trade-col-label {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-bottom: 6px;
+}
+
+.trade-grid,
+.trade-inv-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 5px;
+}
+
+.trade-inv-label {
+  font-size: 12px;
+  opacity: 0.7;
+  margin: 10px 0 6px;
+}
+
+.trade-inv-grid {
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: 14px;
+}
+
+.trade-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.trade-accept-btn {
+  padding: 9px 18px;
+  border-radius: 10px;
+  border: 1px solid rgba(129, 199, 132, 0.6);
+  background: rgba(129, 199, 132, 0.22);
+  color: #e8f5e9;
+  font-family: inherit;
+  font-weight: bold;
+  cursor: pointer;
+}
+.trade-accept-btn:hover { background: rgba(129, 199, 132, 0.35); }
+.trade-accept-btn.accepted {
+  border-color: rgba(255, 213, 74, 0.7);
+  background: rgba(255, 213, 74, 0.25);
+  color: #fff3e0;
+}
+
+.trade-empty {
+  opacity: 0.6;
+  font-size: 12px;
+  padding: 10px 2px;
+  grid-column: 1 / -1;
+}
+
+/* ── 선물 고르기 창 ───────────────────────────────────────────────────── */
+.trade-gift-picker {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 380px;
+  max-width: 90vw;
+  max-height: 70vh;
+  overflow-y: auto;
+  background: rgba(14, 18, 28, 0.96);
+  border: 1px solid rgba(255, 213, 74, 0.5);
+  border-radius: 16px;
+  padding: 14px 16px 16px;
+  color: #fff3e0;
+  font-size: 13px;
+  pointer-events: auto;
+  z-index: 58;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+}
+
+.trade-gift-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: bold;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+
+.trade-gift-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.trade-gift-row .inv-icon { font-size: 18px; }
+
+.trade-gift-info { flex: 1; min-width: 0; }
+.trade-gift-name { font-size: 12.5px; }
+.trade-gift-qty { font-size: 11px; opacity: 0.65; }
+
+.trade-gift-amount {
+  width: 46px;
+  padding: 4px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.trade-gift-send-btn {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(79, 195, 247, 0.6);
+  background: rgba(79, 195, 247, 0.22);
+  color: #e3f2fd;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.trade-gift-send-btn:hover { background: rgba(79, 195, 247, 0.35); }

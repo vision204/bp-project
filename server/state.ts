@@ -37,6 +37,7 @@ import { dist2D, pointInShape } from "../src/simulation/ShapeMath";
 import {
   CONE_LATENCY_BUFFER_DEG,
   MAX_ENEMY_SYNC_ENTRIES,
+  MAX_TRADE_SLOTS,
   RANGE_LATENCY_BUFFER_M,
   ROOM_CAPACITY,
   type AnimState,
@@ -45,6 +46,8 @@ import {
   type EnemySyncEntry,
   type RemotePlayerSnapshot,
   type ServerMessage,
+  type TradeCloseReason,
+  type TradeItem,
 } from "../src/network/protocol";
 
 /** 데미지 상한선 — 정상적인 만렙 캐릭터의 최고 한 방(대략 수백~수천 단위)보다
@@ -108,6 +111,30 @@ function asPlayerStateForCombat(stats: CombatStatsSnapshot, aimYaw: number): Pla
   } as unknown as PlayerState;
 }
 
+/** 거래·선물 아이템 검증 — "정말 가지고 있는지"는 서버가 확인할 방법이
+ *  없으므로(신뢰 경계, TradeSystem.ts 주석 참고), 모양만 정상적인 값으로
+ *  잘라내고 그대로 중계합니다. */
+function clampTradeItems(raw: unknown): TradeItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_TRADE_SLOTS).flatMap((it): TradeItem[] => {
+    if (!it || typeof it !== "object") return [];
+    const item = it as Record<string, unknown>;
+    if (typeof item.id !== "string" || !item.id || item.id.length > 64) return [];
+    if (typeof item.name !== "string" || item.name.length > 64) return [];
+    return [
+      {
+        id: item.id,
+        name: item.name,
+        description: typeof item.description === "string" ? item.description.slice(0, 200) : "",
+        icon: typeof item.icon === "string" ? item.icon.slice(0, 16) : "❔",
+        usable: item.usable === true,
+        equippable: item.equippable === true ? true : undefined,
+        quantity: clampFinite(item.quantity, 1, 9999, 1),
+      },
+    ];
+  });
+}
+
 /** 몬스터 동기화는 전투 판정에 안 쓰이는 순수 시각 정보라, 서버는 상식적인
  *  범위로만 잘라내고 그대로 중계합니다 (누가 이겼는지에는 영향이 없습니다). */
 function clampEnemySyncEntries(raw: unknown): EnemySyncEntry[] {
@@ -152,6 +179,8 @@ export interface Connection {
   lastSkillAtMs: Record<number, number>;
   lastSeenMs: number;
   msgTimestamps: number[];
+  /** 지금 진행 중인 거래(있으면). 거래 중이 아니면 null. */
+  trade: { partnerId: string; myOffer: TradeItem[]; myAccepted: boolean } | null;
 }
 
 function snapshotOf(conn: Connection): RemotePlayerSnapshot {
@@ -257,6 +286,7 @@ export class World {
       lastSkillAtMs: {},
       lastSeenMs: Date.now(),
       msgTimestamps: [],
+      trade: null,
     };
     this.connections.set(conn.id, conn);
 
@@ -275,7 +305,20 @@ export class World {
     const conn = this.connections.get(id);
     if (!conn) return;
     this.connections.delete(id);
+    if (conn.trade) {
+      const partner = this.connections.get(conn.trade.partnerId);
+      if (partner?.trade?.partnerId === conn.id) {
+        this.send(partner, { type: "trade_closed", reason: "partner_left" });
+        partner.trade = null;
+      }
+    }
     this.broadcastRoom(conn.roomId, { type: "player_left", id });
+  }
+
+  /** 거래창에 서로의 최신 제안·승낙 상태를 보여줍니다 — 양쪽 다에게 각자 "상대방" 기준으로 보냅니다. */
+  private sendTradeUpdate(a: Connection, b: Connection) {
+    this.send(a, { type: "trade_update", partnerOffer: b.trade?.myOffer ?? [], partnerAccepted: b.trade?.myAccepted ?? false });
+    this.send(b, { type: "trade_update", partnerOffer: a.trade?.myOffer ?? [], partnerAccepted: a.trade?.myAccepted ?? false });
   }
 
   count() {
@@ -371,6 +414,105 @@ export class World {
         if (enemies.length > 0) {
           this.broadcastRoom(conn.roomId, { type: "enemy_states", fromId: conn.id, enemies }, conn.id);
         }
+        break;
+      }
+
+      case "trade_request": {
+        const target = this.connections.get(msg.targetId);
+        if (!target) {
+          this.send(conn, { type: "trade_closed", reason: "not_connected" });
+          break;
+        }
+        if (target.id === conn.id) {
+          this.send(conn, { type: "trade_closed", reason: "self" });
+          break;
+        }
+        if (conn.roomId !== target.roomId) {
+          this.send(conn, { type: "trade_closed", reason: "different_room" });
+          break;
+        }
+        if (conn.trade || target.trade) {
+          this.send(conn, { type: "trade_closed", reason: "busy" });
+          break;
+        }
+        conn.trade = { partnerId: target.id, myOffer: [], myAccepted: false };
+        target.trade = { partnerId: conn.id, myOffer: [], myAccepted: false };
+        this.send(conn, { type: "trade_started", partnerId: target.id, partnerName: target.name });
+        this.send(target, { type: "trade_started", partnerId: conn.id, partnerName: conn.name });
+        break;
+      }
+
+      case "trade_offer": {
+        const session = conn.trade;
+        if (!session) break;
+        session.myOffer = clampTradeItems(msg.items);
+        session.myAccepted = false;
+        const partner = this.connections.get(session.partnerId);
+        const partnerSession = partner?.trade;
+        if (partner && partnerSession && partnerSession.partnerId === conn.id) {
+          partnerSession.myAccepted = false;
+          this.sendTradeUpdate(conn, partner);
+        }
+        break;
+      }
+
+      case "trade_accept": {
+        const session = conn.trade;
+        if (!session) break;
+        const partner = this.connections.get(session.partnerId);
+        const partnerSession = partner?.trade;
+        if (!partner || !partnerSession || partnerSession.partnerId !== conn.id) {
+          this.send(conn, { type: "trade_closed", reason: "partner_left" });
+          conn.trade = null;
+          break;
+        }
+        session.myAccepted = msg.accepted === true;
+        if (session.myAccepted && partnerSession.myAccepted) {
+          this.send(conn, { type: "trade_complete", receivedItems: partnerSession.myOffer });
+          this.send(partner, { type: "trade_complete", receivedItems: session.myOffer });
+          conn.trade = null;
+          partner.trade = null;
+        } else {
+          this.sendTradeUpdate(conn, partner);
+        }
+        break;
+      }
+
+      case "trade_cancel": {
+        const session = conn.trade;
+        if (!session) break;
+        const partner = this.connections.get(session.partnerId);
+        this.send(conn, { type: "trade_closed", reason: "cancelled" });
+        const partnerSession = partner?.trade;
+        if (partner && partnerSession && partnerSession.partnerId === conn.id) {
+          this.send(partner, { type: "trade_closed", reason: "cancelled" });
+          partner.trade = null;
+        }
+        conn.trade = null;
+        break;
+      }
+
+      case "gift_send": {
+        const target = this.connections.get(msg.targetId);
+        if (!target) {
+          this.send(conn, { type: "gift_ack", delivered: false, reason: "not_connected" });
+          break;
+        }
+        if (target.id === conn.id) {
+          this.send(conn, { type: "gift_ack", delivered: false, reason: "self" });
+          break;
+        }
+        if (conn.roomId !== target.roomId) {
+          this.send(conn, { type: "gift_ack", delivered: false, reason: "different_room" });
+          break;
+        }
+        const item = clampTradeItems([msg.item])[0];
+        if (!item) {
+          this.send(conn, { type: "gift_ack", delivered: false, reason: "cancelled" });
+          break;
+        }
+        this.send(target, { type: "gift_received", fromId: conn.id, fromName: conn.name, item });
+        this.send(conn, { type: "gift_ack", delivered: true });
         break;
       }
 

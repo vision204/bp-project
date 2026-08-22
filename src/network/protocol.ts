@@ -91,6 +91,36 @@ export interface EnemySyncEntry {
   alive: boolean;
 }
 
+/** 최대 9칸 — 거래창 한쪽에 올릴 수 있는 아이템 수. */
+export const MAX_TRADE_SLOTS = 9;
+
+/**
+ * 거래·선물로 오가는 아이템 하나. src/core/GameState.ts의 InventoryItem과
+ * 모양이 같지만, quantity는 "내가 가진 전체 개수"가 아니라 "이번에 제안하는
+ * 개수"입니다. 서버는 인벤토리를 동기화하지 않으므로(원래부터 각자 로컬)
+ * 이 값이 진짜인지 확인할 방법이 없습니다 — 그대로 중계만 합니다. 클라이언트가
+ * 안 가진 아이템을 거짓으로 제안해서 보낼 수도 있다는 뜻이라, PvP와 같은
+ * 이유로 README에 이 한계를 그대로 적어둡니다.
+ */
+export interface TradeItem {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  usable: boolean;
+  equippable?: boolean;
+  quantity: number;
+}
+
+/** 거래·선물 요청이 거부된 이유. */
+export type TradeCloseReason =
+  | "cancelled"
+  | "partner_left"
+  | "not_connected"
+  | "different_room"
+  | "self"
+  | "busy";
+
 // ---------------------------------------------------------------------------
 // 클라이언트 → 서버
 // ---------------------------------------------------------------------------
@@ -115,6 +145,12 @@ export type ClientMessage =
   | { type: "melee_attack"; targetId: string }
   | { type: "skill_attack"; targetId: string; slot: number }
   | { type: "enemy_states"; enemies: EnemySyncEntry[] }
+  // --- 거래 / 선물 ---------------------------------------------------------
+  | { type: "trade_request"; targetId: string }
+  | { type: "trade_offer"; items: TradeItem[] }
+  | { type: "trade_accept"; accepted: boolean }
+  | { type: "trade_cancel" }
+  | { type: "gift_send"; targetId: string; item: TradeItem }
   | { type: "ping" };
 
 // ---------------------------------------------------------------------------
@@ -133,6 +169,18 @@ export type ServerMessage =
   | { type: "pvp_hit_ack"; targetId: string; targetName: string; damage: number }
   /** 공격이 거부됐을 때 (사거리 밖, 쿨다운 중, PvP 꺼짐, 다른 진영 아님 등) */
   | { type: "pvp_rejected"; reason: string }
+  // --- 거래 / 선물 ---------------------------------------------------------
+  /** 거래 요청을 보냈거나(나) 받았을 때(상대) — 양쪽 다 이 메시지로 거래창을 엽니다. */
+  | { type: "trade_started"; partnerId: string; partnerName: string }
+  /** 상대가 제안을 바꾸거나 승낙 상태를 바꿀 때마다. */
+  | { type: "trade_update"; partnerOffer: TradeItem[]; partnerAccepted: boolean }
+  /** 양쪽 다 승낙 — 각자에게 "네가 받을 아이템"만 알려줍니다. */
+  | { type: "trade_complete"; receivedItems: TradeItem[] }
+  /** 거래가 성사 없이 끝남 (취소·상대 나감·거부 등). */
+  | { type: "trade_closed"; reason: TradeCloseReason }
+  | { type: "gift_received"; fromId: string; fromName: string; item: TradeItem }
+  /** 내가 보낸 선물이 실제로 전달됐는지 — 실패하면 내 인벤토리에서 빼면 안 됩니다. */
+  | { type: "gift_ack"; delivered: boolean; reason?: TradeCloseReason }
   | { type: "error"; message: string }
   | { type: "pong" };
 
@@ -150,4 +198,14 @@ export const PVP_REJECT_MESSAGES: Record<string, string> = {
   unknown_skill: "알 수 없는 스킬입니다.",
   locked_skill: "아직 배우지 않은 스킬입니다.",
   rate_limited: "너무 빠른 요청입니다.",
+};
+
+/** 거래·선물이 거부/종료된 이유 → 토스트 문구. */
+export const TRADE_CLOSE_MESSAGES: Record<TradeCloseReason, string> = {
+  cancelled: "거래가 취소됐습니다.",
+  partner_left: "상대가 자리를 떠나 거래가 취소됐습니다.",
+  not_connected: "대상을 찾을 수 없습니다.",
+  different_room: "서로 다른 방에 있습니다.",
+  self: "자기 자신과는 거래할 수 없습니다.",
+  busy: "상대가 이미 다른 거래 중입니다.",
 };

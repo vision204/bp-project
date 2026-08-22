@@ -2799,22 +2799,294 @@ assert(ghostSeen?.fromId === myIdOnPage, "받은 유령이 실제로 page(해적
 assert(ghostSeen?.alive === true, "받은 유령 몬스터가 생존 상태로 표시됨");
 
 // 렌더러가 그 유령 위치를 실제로 그림에 반영하는지 — ghost·visual을 같은 순간에
-// 함께 읽어서, 둘 사이에 타이밍 차이로 인한 오탐을 없앱니다.
+// 함께 읽어서, 둘 사이에 타이밍 차이로 인한 오탐을 없앱니다. (렌더 프레임 하나가
+// 늦게 따라잡는 경우를 대비해 몇 번 다시 읽어봅니다 — 값 자체의 정확성과는
+// 무관한, 프레임 타이밍만의 문제이므로.)
 await page2.waitForTimeout(300);
-const combined = await page2.evaluate((id) => {
-  const ghost = window.__game.multiplayer.enemyGhosts.get(id);
-  const visual = window.__game.renderer.enemyVisuals.get(id);
-  return {
-    ghost: ghost ? { x: ghost.x, z: ghost.z } : null,
-    visual: visual ? { visible: visual.group.visible, x: visual.group.position.x, z: visual.group.position.z } : null,
-  };
-}, enemyInfo.id);
+async function readCombined() {
+  return page2.evaluate((id) => {
+    const ghost = window.__game.multiplayer.enemyGhosts.get(id);
+    const visual = window.__game.renderer.enemyVisuals.get(id);
+    return {
+      ghost: ghost ? { x: ghost.x, z: ghost.z } : null,
+      visual: visual ? { visible: visual.group.visible, x: visual.group.position.x, z: visual.group.position.z } : null,
+    };
+  }, enemyInfo.id);
+}
+let combined = await readCombined();
+let posMatches = false;
+for (let i = 0; i < 10 && !posMatches; i++) {
+  posMatches = !!(
+    combined.ghost && combined.visual &&
+    Math.abs(combined.ghost.x - combined.visual.x) < 0.05 &&
+    Math.abs(combined.ghost.z - combined.visual.z) < 0.05
+  );
+  if (!posMatches) {
+    await page2.waitForTimeout(200);
+    combined = await readCombined();
+  }
+}
 assert(combined.visual?.visible === true, "원래는 너무 멀어서 안 보여야 할 몬스터가, 유령 덕분에 page2 화면에 실제로 보임");
-const posMatches =
-  combined.ghost && combined.visual &&
-  Math.abs(combined.ghost.x - combined.visual.x) < 0.05 &&
-  Math.abs(combined.ghost.z - combined.visual.z) < 0.05;
 assert(posMatches, "화면에 그려진 몬스터 위치가 (page2 자신의 시뮬레이션이 아니라) 받은 유령 좌표와 정확히 일치함");
+
+section("멀티플레이 — P2P 거래·선물");
+// page(해적)가 page2(해군)에게 실제로 마우스를 올리고 우클릭해서 거래/선물
+// 메뉴를 띄웁니다. 화면 어디를 눌러야 상대가 있는지는 카메라가 어느 쪽을
+// 보고 있느냐에 달려 있으므로, 고정 좌표(예: 640,400) 대신 SceneRenderer의
+// worldToScreen()으로 "그 순간 실제로 상대가 그려진 픽셀"을 계산해서 누릅니다.
+async function waitUntilOn(pg, fn, { timeoutMs = 8000, intervalMs = 150, arg } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await pg.evaluate(fn, arg)) return true;
+    await pg.waitForTimeout(intervalMs);
+  }
+  return false;
+}
+
+/** humanClick()의 page2/page3용 버전 — 패널이 매프레임 다시 그려져 버튼 DOM이
+ *  사라지는 사고를 막기 위해, 여기서도 실제 마우스로 누르고 뗍니다. */
+async function humanClickOn(pg, selector) {
+  await pg.evaluate((sel) => document.querySelector(sel)?.scrollIntoView({ block: "center" }), selector);
+  await pg.waitForTimeout(200);
+  const spot = await pg.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const cx = r.x + r.width / 2;
+    const cy = r.y + r.height / 2;
+    const hit = document.elementFromPoint(cx, cy);
+    return { x: cx, y: cy, reachable: el === hit || el.contains(hit) };
+  }, selector);
+  if (!spot || !spot.reachable) return false;
+  await pg.mouse.move(spot.x, spot.y);
+  await pg.mouse.down();
+  await pg.waitForTimeout(130);
+  await pg.mouse.up();
+  await pg.waitForTimeout(250);
+  return true;
+}
+
+const marineId = await page2.evaluate(() => window.__game.multiplayer.id);
+
+// 카메라 방향을 결정론적으로 고정하고(정면, 수평), 해군을 정확히 그 정면
+// 4m 앞에 둡니다 — page3(같은 편 해적)는 멀리 치워서 화면에 안 걸리게 합니다.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  sim.state.player.position = { x: 0, y: 2, z: 0 };
+  sim.playerController.teleport(sim.state.player.position);
+  sim.playerController.camYaw = 0;
+  sim.playerController.camPitch = 0;
+});
+await page2.evaluate(() => {
+  const sim = window.__game.simulation;
+  sim.state.player.position = { x: 0, y: 2, z: 4 };
+  sim.playerController.teleport(sim.state.player.position);
+});
+await page3.evaluate(() => {
+  const sim = window.__game.simulation;
+  sim.state.player.position = { x: 0, y: 2, z: -500 };
+  sim.playerController.teleport(sim.state.player.position);
+});
+
+const marineSynced = await waitUntilOn(
+  page,
+  (id) => {
+    const rv = window.__game.multiplayer.players.find((p) => p.snapshot.id === id);
+    return !!rv && Math.abs(rv.renderX - 0) < 0.3 && Math.abs(rv.renderZ - 4) < 0.3;
+  },
+  { timeoutMs: 6000, arg: marineId },
+);
+assert(marineSynced, "해군 위치가 해적 화면에 실시간으로 동기화됨 (presence state 브로드캐스트)");
+
+const screen = await page.evaluate((id) => {
+  const g = window.__game;
+  const rv = g.multiplayer.players.find((p) => p.snapshot.id === id);
+  if (!rv) return null;
+  return g.renderer.worldToScreen(rv.renderX, rv.renderY + 1, rv.renderZ);
+}, marineId);
+assert(screen !== null, "해군 플레이어가 해적 화면 안에 실제로 투영됨 (테스트 카메라 정렬 확인)");
+let sx = screen?.x ?? 640;
+let sy = screen?.y ?? 400;
+
+// 마우스를 그 자리로 실제로 옮기면(호버) 테두리 효과가 켜져야 함
+await page.mouse.move(sx, sy);
+await page.waitForTimeout(150);
+const hoveredId = await page.evaluate(() => window.__game.renderer.hoveredRemotePlayerId);
+assert(hoveredId === marineId, "다른 플레이어 위에 마우스를 올리면 테두리 효과(hoverOutline) 대상이 그 사람으로 잡힘");
+
+// 짧게 우클릭(누르자마자 뗌) — 드래그가 아니므로 거래/선물 메뉴가 떠야 함
+await page.mouse.down({ button: "right" });
+await page.mouse.up({ button: "right" });
+await page.waitForTimeout(100);
+const menuOpen = await page.evaluate(() => !document.querySelector(".trade-menu")?.hidden);
+assert(menuOpen, "마우스를 올린 채로 짧게 우클릭하면 거래/선물 메뉴가 뜸");
+
+// 반대로 "누른 채로 드래그"하면(카메라 회전과 같은 제스처) 메뉴가 뜨면 안 됨 —
+// 기존 우클릭-드래그 카메라 회전 조작과 충돌하지 않는지 확인하는 회귀 테스트.
+await page.evaluate(() => window.__game.tradeUI.closeMenu());
+await page.mouse.move(sx, sy);
+await page.mouse.down({ button: "right" });
+await page.mouse.move(sx + 120, sy + 60, { steps: 12 });
+await page.mouse.up({ button: "right" });
+await page.waitForTimeout(100);
+const menuAfterDrag = await page.evaluate(() => !document.querySelector(".trade-menu")?.hidden);
+assert(!menuAfterDrag, "누른 채로 크게 움직이면(드래그=카메라 회전) 메뉴가 뜨지 않음");
+
+// 방금 그 "드래그"는 실제로 InputManager의 카메라 회전을 그대로 작동시켰습니다
+// (의도한 대로 — TradeUI가 InputManager를 건드리지 않았다는 증거이기도 합니다).
+// 그래서 카메라가 실제로 돌아갔고, 해군이 그려지는 화면 좌표도 바뀌었습니다.
+// 다음 클릭을 위해 카메라를 원래대로 되돌리고 좌표를 다시 계산합니다.
+await page.evaluate(() => {
+  window.__game.simulation.playerController.camYaw = 0;
+  window.__game.simulation.playerController.camPitch = 0;
+});
+await page.waitForTimeout(100);
+const screenAfterReset = await page.evaluate((id) => {
+  const g = window.__game;
+  const rv = g.multiplayer.players.find((p) => p.snapshot.id === id);
+  if (!rv) return null;
+  return g.renderer.worldToScreen(rv.renderX, rv.renderY + 1, rv.renderZ);
+}, marineId);
+assert(screenAfterReset !== null, "카메라를 되돌리면 해군이 다시 화면 안에 투영됨");
+sx = screenAfterReset?.x ?? sx;
+sy = screenAfterReset?.y ?? sy;
+
+// 다시 짧게 우클릭해서 메뉴를 띄우고, "거래하기"를 실제로 클릭
+await page.mouse.move(sx, sy);
+await page.mouse.down({ button: "right" });
+await page.mouse.up({ button: "right" });
+await page.waitForTimeout(100);
+assert(await humanClickOn(page, "#trade-menu-trade"), "거래하기 버튼을 실제 마우스로 클릭");
+
+const tradeStartedOnA = await waitUntilOn(page, () => window.__game.multiplayer.tradeSession !== null);
+const tradeStartedOnB = await waitUntilOn(page2, () => window.__game.multiplayer.tradeSession !== null);
+assert(tradeStartedOnA, "거래하기를 누르면 해적 쪽에 거래창이 열림");
+assert(tradeStartedOnB, "동시에 해군 쪽에도 거래창이 열림 (요청 즉시 양쪽 다 시작)");
+await page.waitForTimeout(100);
+await page2.waitForTimeout(100);
+const windowVisibleA = await page.evaluate(() => !document.querySelector(".trade-window")?.hidden);
+const windowVisibleB = await page2.evaluate(() => !document.querySelector(".trade-window")?.hidden);
+assert(windowVisibleA && windowVisibleB, "거래창 DOM이 실제로 양쪽 화면에 보임");
+
+// 양쪽 인벤토리에 아이템을 하나씩 넣고, 거래창의 "내 인벤토리" 칸을 실제로 클릭해서 제안에 담습니다.
+await page.evaluate(() => {
+  window.__game.simulation.state.player.inventory.push({
+    id: "potion_small", name: "회복 물약", description: "체력을 회복합니다", icon: "🧪", quantity: 3, usable: true,
+  });
+});
+await page2.evaluate(() => {
+  window.__game.simulation.state.player.inventory.push({
+    id: "sword_yoru", name: "요루", description: "검", icon: "⚔️", quantity: 1, usable: false, equippable: true,
+  });
+});
+await page.waitForTimeout(400);
+await page2.waitForTimeout(400);
+
+/**
+ * 거래창의 "내 인벤토리" 칸을 실제로 클릭해서 제안에 담습니다.
+ *
+ * 패널이 매프레임 시그니처 비교로 다시 그려지는 타이밍과 실제 마우스
+ * 다운/업 사이(130ms)가 겹치면, DOM 노드가 교체되면서 클릭이 씹힐 수
+ * 있습니다(humanClick이 다른 패널들에서도 겪었던 문제와 같은 종류) —
+ * 그래서 클릭 직후 "내 쪽" 로컬 상태(myOffer, 네트워크 왕복 필요 없음)로
+ * 실제로 반영됐는지 즉시 확인하고, 안 됐으면 다시 클릭합니다.
+ */
+async function addToOfferAndVerify(pg, expectedItemId, label) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    // 인벤토리 칸은 배열 순서 그대로 그려지므로, 클릭할 칸은 "첫 번째로 채워진
+    // 칸"이 아니라 실제로 expectedItemId를 가진 칸이어야 합니다. 싱글플레이
+    // 구간을 먼저 거친 브라우저(해적 쪽)는 인벤토리에 이미 다른 아이템이
+    // 여러 개 쌓여 있어서, 방금 넣은 아이템이 맨 앞이 아닐 수 있습니다.
+    const idx = await pg.evaluate((id) => {
+      const inv = window.__game.simulation.state.player.inventory;
+      return inv.findIndex((i) => i.id === id);
+    }, expectedItemId);
+    if (idx < 0) {
+      await pg.waitForTimeout(200);
+      continue;
+    }
+    const clicked = await humanClickOn(pg, `.trade-inv-grid .inv-slot[data-inv-idx="${idx}"]`);
+    if (clicked) {
+      const ok = await waitUntilOn(
+        pg,
+        (id) => window.__game.multiplayer.tradeSession?.myOffer?.some((o) => o.id === id) === true,
+        { timeoutMs: 1500, arg: expectedItemId },
+      );
+      if (ok) return true;
+    }
+    await pg.waitForTimeout(200);
+  }
+  return false;
+}
+
+assert(await addToOfferAndVerify(page, "potion_small"), "해적 쪽 인벤토리 칸 클릭 → 실제로 내 제안에 담김");
+assert(await addToOfferAndVerify(page2, "sword_yoru"), "해군 쪽 인벤토리 칸 클릭 → 실제로 내 제안에 담김");
+
+const offerSyncedOnA = await waitUntilOn(page, () =>
+  window.__game.multiplayer.tradeSession?.partnerOffer?.[0]?.id === "sword_yoru",
+);
+const offerSyncedOnB = await waitUntilOn(page2, () =>
+  window.__game.multiplayer.tradeSession?.partnerOffer?.[0]?.id === "potion_small",
+);
+assert(offerSyncedOnA, "해적이 인벤토리 칸을 클릭하면 상대(해군) 화면에 그 제안이 실시간으로 뜸");
+assert(offerSyncedOnB, "해군이 넣은 요루도 해적 쪽에 실시간으로 보임");
+
+// 승낙 버튼을 양쪽 다 실제로 클릭 → 거래 성사 → 서로 아이템이 실제로 바뀜
+await page.waitForTimeout(150);
+await page2.waitForTimeout(150);
+assert(await humanClickOn(page, "#trade-accept-btn"), "해적 쪽 승낙 버튼 클릭");
+assert(await humanClickOn(page2, "#trade-accept-btn"), "해군 쪽 승낙 버튼 클릭");
+
+const closedOnA = await waitUntilOn(page, () => window.__game.multiplayer.tradeSession === null, { timeoutMs: 6000 });
+const closedOnB = await waitUntilOn(page2, () => window.__game.multiplayer.tradeSession === null, { timeoutMs: 6000 });
+assert(closedOnA && closedOnB, "양쪽 다 승낙하면 거래가 성사되어 거래창이 자동으로 닫힘");
+
+const aInvIds = await page.evaluate(() => window.__game.simulation.state.player.inventory.map((i) => i.id));
+const bInvIds = await page2.evaluate(() => window.__game.simulation.state.player.inventory.map((i) => i.id));
+assert(aInvIds.includes("sword_yoru"), "해적이 실제로 요루를 받음 (상대가 제안했던 것)");
+assert(!aInvIds.includes("potion_small"), "해적이 내줬던 물약은 자기 인벤토리에서 실제로 빠짐");
+assert(bInvIds.includes("potion_small"), "해군이 실제로 물약을 받음");
+assert(!bInvIds.includes("sword_yoru"), "해군이 내줬던 요루는 자기 인벤토리에서 실제로 빠짐");
+
+const windowClosedA = await page.evaluate(() => document.querySelector(".trade-window")?.hidden !== false);
+assert(windowClosedA, "거래창 DOM도 자동으로 다시 숨겨짐");
+
+const completeToastSeen = await page.evaluate(() =>
+  Array.from(document.querySelectorAll("#hud-toasts .toast")).some((el) => el.textContent.includes("거래")),
+);
+assert(completeToastSeen, "거래 성사 토스트가 실제로 화면에 뜸");
+
+// --- 선물: 거래창 없이 곧바로 전달 ---------------------------------------
+// 인벤토리를 통째로 이 아이템 하나로 맞춰서, 선물 목록의 "보내기" 버튼이
+// 정확히 이 아이템 것 하나만 있게 만듭니다 (여러 개면 클릭이 어느 걸 누를지
+// 모호해짐).
+await page.evaluate(() => {
+  window.__game.simulation.state.player.inventory = [
+    { id: "potion_exp", name: "경험치 물약", description: "경험치를 채워줍니다", icon: "🍾", quantity: 4, usable: true },
+  ];
+});
+await page.waitForTimeout(100);
+await page.mouse.move(sx, sy);
+await page.mouse.down({ button: "right" });
+await page.mouse.up({ button: "right" });
+await page.waitForTimeout(100);
+assert(await humanClickOn(page, "#trade-menu-gift"), "선물 주기 버튼을 실제 마우스로 클릭");
+await page.waitForTimeout(100);
+const giftPickerOpen = await page.evaluate(() => !document.querySelector(".trade-gift-picker")?.hidden);
+assert(giftPickerOpen, "선물 주기를 누르면 선물 고르기 창이 뜸");
+
+const bMoneyItemsBefore = await page2.evaluate(() => window.__game.simulation.state.player.inventory.map((i) => i.id));
+assert(await humanClickOn(page, ".trade-gift-send-btn"), "선물 보내기 버튼을 실제 마우스로 클릭");
+
+const giftDeliveredOnB = await waitUntilOn(page2, () =>
+  window.__game.simulation.state.player.inventory.some((i) => i.id === "potion_exp"),
+);
+assert(giftDeliveredOnB, "선물을 보내면 상대 인벤토리에 실제로 아이템이 생김");
+const giftAckSeen = await waitUntilOn(page, () =>
+  Array.from(document.querySelectorAll("#hud-toasts .toast")).some((el) => el.textContent.includes("선물")),
+);
+assert(giftAckSeen, "보낸 사람 화면에도 선물 전송 토스트가 뜸");
+assert(!bMoneyItemsBefore.includes("potion_exp"), "선물받기 전에는 상대 인벤토리에 그 아이템이 없었음 (테스트 전제 확인)");
 
 await page2.close();
 await page3.close();

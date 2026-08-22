@@ -504,6 +504,21 @@ export class Hud {
         case "pvp_rejected":
           // 사거리 밖/쿨다운처럼 흔한 사유는 조용히 넘기고, 눈에 띄는 것만 알립니다.
           break;
+        case "trade_started":
+          this.pushToast(`🤝 ${ev.partnerName}님과 거래를 시작합니다`, "blue");
+          break;
+        case "trade_completed":
+          this.pushToast(`🤝 ${ev.partnerName}님과 거래가 성사됐습니다!`, "gold");
+          break;
+        case "trade_closed":
+          this.pushToast(`🤝 ${ev.reason}`, "red");
+          break;
+        case "gift_received":
+          this.pushToast(`🎁 ${ev.fromName}님이 ${ev.itemName}을(를) 선물했습니다!`, "gold");
+          break;
+        case "gift_sent":
+          this.pushToast(ev.delivered ? "🎁 선물을 보냈습니다" : "🎁 선물을 전달하지 못했습니다", ev.delivered ? "blue" : "red");
+          break;
       }
     }
   }

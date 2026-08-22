@@ -352,6 +352,10 @@ export class SceneRenderer {
   private enemyVisuals = new Map<string, EnemyVisual>();
   private npcVisuals = new Map<string, NpcVisual>();
   private remotePlayerVisuals = new Map<string, RemotePlayerVisual>();
+  /** 거래 대상 고르기용 — 다른 플레이어 위에 마우스를 올렸는지 판정할 때만 씁니다. */
+  private readonly raycaster = new THREE.Raycaster();
+  private hoverOutline: THREE.BoxHelper | null = null;
+  private hoverOutlineId: string | null = null;
 
   private islandVisuals: IslandVisual[] = [];
   private environment: EnvironmentHandle | null = null;
@@ -462,6 +466,11 @@ export class SceneRenderer {
     let visual = this.remotePlayerVisuals.get(id);
     if (!visual) {
       const group = buildBlockyCharacter(REMOTE_FACTION_COLORS[faction] ?? 0xcccccc);
+      // 거래하려고 마우스로 이 플레이어를 가리켰는지 판정할 때, 레이캐스트가 맞힌
+      // 메시에서 그룹까지 부모를 타고 올라가며 이 id를 찾습니다.
+      group.traverse((obj) => {
+        obj.userData.remotePlayerId = id;
+      });
       const nameTag = buildCanvasSprite(220, 46, [2.4, 0.55]);
       nameTag.sprite.position.y = 2.7;
       group.add(nameTag.sprite);
@@ -499,12 +508,83 @@ export class SceneRenderer {
       visual.nameTag.sprite.lookAt(this.camera.position);
     }
 
+    // 테두리도 매 프레임 위치를 따라가야 합니다 (플레이어가 움직이므로).
+    if (this.hoverOutline && this.hoverOutlineId && seen.has(this.hoverOutlineId)) {
+      this.hoverOutline.update();
+    }
+
     // 접속이 끊긴 플레이어는 지웁니다.
     for (const [id, visual] of this.remotePlayerVisuals) {
       if (seen.has(id)) continue;
       this.scene.remove(visual.group);
       this.remotePlayerVisuals.delete(id);
+      if (this.hoverOutlineId === id) this.setHoverOutline(null);
     }
+  }
+
+  /**
+   * 화면 좌표(clientX/Y, 캔버스 기준) 아래에 있는 다른 플레이어를 찾습니다.
+   * 거래 상대를 고르는 "마우스 올리고 우클릭" 판정에만 씁니다 — 없으면 null.
+   */
+  pickRemotePlayerAt(clientX: number, clientY: number): string | null {
+    if (this.remotePlayerVisuals.size === 0) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const groups = [...this.remotePlayerVisuals.values()].map((v) => v.group);
+    const hits = this.raycaster.intersectObjects(groups, true);
+    if (hits.length === 0) return null;
+    let obj: THREE.Object3D | null = hits[0].object;
+    while (obj) {
+      const id = obj.userData.remotePlayerId as string | undefined;
+      if (id) return id;
+      obj = obj.parent;
+    }
+    return null;
+  }
+
+  /** 마우스가 올라간 플레이어 둘레에 테두리를 그리거나(id) 지웁니다(null). */
+  setHoverOutline(id: string | null) {
+    if (id === this.hoverOutlineId) return;
+    if (this.hoverOutline) {
+      this.scene.remove(this.hoverOutline);
+      this.hoverOutline.dispose();
+      this.hoverOutline = null;
+    }
+    this.hoverOutlineId = id;
+    if (!id) return;
+    const visual = this.remotePlayerVisuals.get(id);
+    if (!visual) {
+      this.hoverOutlineId = null;
+      return;
+    }
+    this.hoverOutline = new THREE.BoxHelper(visual.group, 0xffd54a);
+    this.scene.add(this.hoverOutline);
+  }
+
+  /** 검증용 — 지금 테두리가 표시된 플레이어 id. */
+  get hoveredRemotePlayerId(): string | null {
+    return this.hoverOutlineId;
+  }
+
+  /**
+   * 3D 좌표를 화면 픽셀 좌표로 투영합니다 — 카메라 뒤에 있으면 null.
+   * TradeUI가 아니라 검증(e2e.mjs)이 "정확히 그 플레이어가 그려진 자리"를
+   * 클릭하기 위해 씁니다 (화면 중앙 고정 좌표 대신, 카메라가 어느 쪽을
+   * 보고 있든 항상 정확한 픽셀을 계산할 수 있도록).
+   */
+  worldToScreen(x: number, y: number, z: number): { x: number; y: number } | null {
+    const v = new THREE.Vector3(x, y, z);
+    v.project(this.camera);
+    if (v.z > 1) return null; // 카메라 뒤
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    return {
+      x: (v.x * 0.5 + 0.5) * rect.width + rect.left,
+      y: (-v.y * 0.5 + 0.5) * rect.height + rect.top,
+    };
   }
 
   sync(

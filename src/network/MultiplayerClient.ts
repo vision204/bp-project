@@ -11,9 +11,10 @@
 // 화면 프레임보다 훨씬 느리기 때문입니다.
 // ---------------------------------------------------------------------------
 
-import type { GameState } from "../core/GameState";
+import type { GameState, InventoryItem, ItemId } from "../core/GameState";
 import type { SkillShape } from "../simulation/skills";
 import { dist2D, pointInShape } from "../simulation/ShapeMath";
+import { applyReceivedItems, removeFromInventory } from "../simulation/TradeSystem";
 import {
   COMBAT_STATS_SYNC_HZ,
   ENEMY_GHOST_TTL_MS,
@@ -21,13 +22,25 @@ import {
   MAX_ENEMY_SYNC_ENTRIES,
   PVP_REJECT_MESSAGES,
   STATE_SYNC_HZ,
+  TRADE_CLOSE_MESSAGES,
   type AnimState,
   type ClientMessage,
   type CombatStatsSnapshot,
   type EnemySyncEntry,
   type RemotePlayerSnapshot,
   type ServerMessage,
+  type TradeItem,
 } from "./protocol";
+
+/** 지금 진행 중인 거래창 상태 — TradeUI가 그대로 읽어서 그립니다. */
+export interface TradeSession {
+  partnerId: string;
+  partnerName: string;
+  myOffer: TradeItem[];
+  myAccepted: boolean;
+  partnerOffer: TradeItem[];
+  partnerAccepted: boolean;
+}
 
 /** 다른 사람이 지금 쫓기고 있는 몬스터 하나를 화면에 그리기 위한 최소 정보. */
 export interface RemoteEnemyGhost {
@@ -94,6 +107,7 @@ export class MultiplayerClient {
   private lastStatsSentAtMs = 0;
   private lastStatsSig = "";
   private lastEnemySyncAtMs = 0;
+  private _tradeSession: TradeSession | null = null;
 
   status: MultiplayerStatus = "disconnected";
   serverUrl = "";
@@ -122,6 +136,11 @@ export class MultiplayerClient {
     return this.remoteEnemyGhosts;
   }
 
+  /** 지금 열려 있는 거래창 상태 — 없으면 null. TradeUI가 그대로 읽어서 그립니다. */
+  get tradeSession(): TradeSession | null {
+    return this._tradeSession;
+  }
+
   connect(url: string, name: string) {
     this.disconnect();
     this.serverUrl = url;
@@ -148,6 +167,7 @@ export class MultiplayerClient {
       this.status = "disconnected";
       this.myId = null;
       this.remotePlayers.clear();
+      this._tradeSession = null;
       if (wasConnected) {
         this.state.player.events.push({ type: "pvp_disconnected", reason: "연결이 끊어졌습니다" });
       }
@@ -172,6 +192,7 @@ export class MultiplayerClient {
     this.roomSize = 0;
     this.remotePlayers.clear();
     this.remoteEnemyGhosts.clear();
+    this._tradeSession = null;
     this.state.player.pvpEnabled = false;
   }
 
@@ -254,6 +275,75 @@ export class MultiplayerClient {
         }
         break;
       }
+
+      case "trade_started":
+        this._tradeSession = {
+          partnerId: msg.partnerId,
+          partnerName: msg.partnerName,
+          myOffer: [],
+          myAccepted: false,
+          partnerOffer: [],
+          partnerAccepted: false,
+        };
+        this.state.player.events.push({ type: "trade_started", partnerName: msg.partnerName });
+        break;
+
+      case "trade_update":
+        if (this._tradeSession) {
+          this._tradeSession.partnerOffer = msg.partnerOffer;
+          this._tradeSession.partnerAccepted = msg.partnerAccepted;
+        }
+        break;
+
+      case "trade_complete": {
+        const partnerName = this._tradeSession?.partnerName ?? "상대";
+        // 내가 제안했던 아이템들을 실제로 내 인벤토리에서 뺍니다 — 협상 중에는
+        // 아직 손에 남아 있다가, 거래가 "성사"된 이 순간에만 실제로 이동합니다.
+        if (this._tradeSession) {
+          for (const item of this._tradeSession.myOffer) {
+            removeFromInventory(this.state.player, item.id as ItemId, item.quantity);
+          }
+        }
+        const received: InventoryItem[] = msg.receivedItems.map((it) => ({
+          id: it.id as ItemId,
+          name: it.name,
+          description: it.description,
+          icon: it.icon,
+          usable: it.usable,
+          equippable: it.equippable,
+          quantity: it.quantity,
+        }));
+        applyReceivedItems(this.state.player, received);
+        this._tradeSession = null;
+        this.state.player.events.push({ type: "trade_completed", partnerName });
+        break;
+      }
+
+      case "trade_closed":
+        this._tradeSession = null;
+        this.state.player.events.push({ type: "trade_closed", reason: TRADE_CLOSE_MESSAGES[msg.reason] ?? msg.reason });
+        break;
+
+      case "gift_received": {
+        const items: InventoryItem[] = [
+          {
+            id: msg.item.id as ItemId,
+            name: msg.item.name,
+            description: msg.item.description,
+            icon: msg.item.icon,
+            usable: msg.item.usable,
+            equippable: msg.item.equippable,
+            quantity: msg.item.quantity,
+          },
+        ];
+        applyReceivedItems(this.state.player, items);
+        this.state.player.events.push({ type: "gift_received", fromName: msg.fromName, itemName: msg.item.name });
+        break;
+      }
+
+      case "gift_ack":
+        this.state.player.events.push({ type: "gift_sent", delivered: msg.delivered === true });
+        break;
     }
   }
 
@@ -313,6 +403,38 @@ export class MultiplayerClient {
       const enemies = this.buildEnemySyncSnapshot();
       if (enemies.length > 0) this.send({ type: "enemy_states", enemies });
     }
+  }
+
+  // --- 거래 / 선물 -----------------------------------------------------------
+
+  /** 다른 플레이어에게 거래를 겁니다 — 상대가 거래 중이 아니면 곧바로 양쪽 다 거래창이 열립니다. */
+  sendTradeRequest(targetId: string) {
+    this.send({ type: "trade_request", targetId });
+  }
+
+  /** 내 거래창에 담긴 아이템을 통째로 다시 보냅니다 (드래그로 넣거나 뺄 때마다). */
+  sendTradeOffer(items: TradeItem[]) {
+    if (!this._tradeSession) return;
+    this._tradeSession.myOffer = items;
+    this._tradeSession.myAccepted = false;
+    this.send({ type: "trade_offer", items });
+  }
+
+  sendTradeAccept(accepted: boolean) {
+    if (!this._tradeSession) return;
+    this._tradeSession.myAccepted = accepted;
+    this.send({ type: "trade_accept", accepted });
+  }
+
+  sendTradeCancel() {
+    if (!this._tradeSession) return;
+    this._tradeSession = null;
+    this.send({ type: "trade_cancel" });
+  }
+
+  /** 거래창 없이 아이템 하나를 바로 선물합니다. */
+  sendGift(targetId: string, item: TradeItem) {
+    this.send({ type: "gift_send", targetId, item });
   }
 
   setPvpEnabled(enabled: boolean) {

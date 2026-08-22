@@ -304,7 +304,13 @@ export type GameEvent =
   | { type: "pvp_hit_landed"; targetName: string; damage: number }
   | { type: "pvp_damage_taken"; attackerName: string; damage: number }
   | { type: "pvp_defeated"; byName: string }
-  | { type: "pvp_rejected"; reason: string };
+  | { type: "pvp_rejected"; reason: string }
+  // --- 거래 / 선물 ---------------------------------------------------------
+  | { type: "trade_started"; partnerName: string }
+  | { type: "trade_completed"; partnerName: string }
+  | { type: "trade_closed"; reason: string }
+  | { type: "gift_received"; fromName: string; itemName: string }
+  | { type: "gift_sent"; delivered: boolean };
 
 export interface EnemyState {
   id: string;
