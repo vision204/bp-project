@@ -183,7 +183,7 @@ export class Simulation {
   }
 
   buyItem(itemId: ItemId) {
-    return buyItem(this.state.player, itemId, this.state.player.events);
+    return buyItem(this.state.player, itemId, this.state.player.events, this.state.currentIslandId);
   }
 
   buyBoat(tierId: BoatTierId) {

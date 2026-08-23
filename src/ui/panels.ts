@@ -453,7 +453,8 @@ export class PanelManager {
 
   private renderShop(state: GameState) {
     const signature = [state.player.money, state.player.equippedFruit,
-      state.player.inventory.map((i) => i.id).join(","), state.player.ownedBoats.join(",")].join("|");
+      state.player.inventory.map((i) => i.id).join(","), state.player.ownedBoats.join(","),
+      state.currentIslandId].join("|");
     if (!this.shouldRender("shop", signature)) return;
 
     const moneyLine = this.panels.shop.querySelector("#shop-money")!;
@@ -496,20 +497,28 @@ export class PanelManager {
     }).join("");
 
     // 무기 — 사면 인벤토리로. 거기서 단축바에 올리고 숫자키로 뽑습니다.
+    // 일부 무기는 특정 섬에 있을 때만 살 수 있습니다(예: 엔마는 화산 섬 전용) —
+    // 목록에서 숨기지 않고 "여기서는 못 산다"는 걸 그대로 보여줍니다.
     const weapons = WEAPON_CATALOG.map((w) => {
       const owned = state.player.inventory.some((i) => i.id === w.id);
       const canAfford = state.player.money >= w.price;
+      const lockedIsland = weaponFor(w.id)?.islandLock;
+      const isHere = !lockedIsland || state.currentIslandId === lockedIsland;
+      const statsLine = lockedIsland
+        ? isHere
+          ? `<div class="shop-item-stats">🌋 ${getIsland(lockedIsland).name}에서만 살 수 있어요 — 지금 여기입니다!</div>`
+          : `<div class="shop-item-stats">🌋 ${getIsland(lockedIsland).name}에서만 구매할 수 있습니다</div>`
+        : `<div class="shop-item-stats">구매 후 인벤토리(I) 클릭 → 하단 단축바 → 숫자키로 뽑기</div>`;
+      const label = owned ? "보유중" : !isHere ? "여기서 살 수 없음" : `구매 · 🪙${w.price}`;
       return `
         <div class="shop-item ${owned ? "equipped" : ""}">
           <div class="shop-item-icon">${w.icon}</div>
           <div class="shop-item-info">
             <div class="shop-item-name">${w.name}</div>
             <div class="shop-item-desc">${w.description}</div>
-            <div class="shop-item-stats">구매 후 인벤토리(I) 클릭 → 하단 단축바 → 숫자키로 뽑기</div>
+            ${statsLine}
           </div>
-          <button class="buy-btn" data-item="${w.id}" ${owned || !canAfford ? "disabled" : ""}>${
-            owned ? "보유중" : `구매 · 🪙${w.price}`
-          }</button>
+          <button class="buy-btn" data-item="${w.id}" ${owned || !canAfford || !isHere ? "disabled" : ""}>${label}</button>
         </div>
       `;
     }).join("");

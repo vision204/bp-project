@@ -1,6 +1,7 @@
 import type { FruitAbilityId, GameEvent, ItemId, PlayerState } from "../core/GameState";
 import { addItem } from "./InventorySystem";
-import { WEAPONS } from "./WeaponSystem";
+import { WEAPONS, weaponFor } from "./WeaponSystem";
+import { getIsland } from "../world/islands";
 
 export interface FruitCatalogEntry {
   id: FruitAbilityId;
@@ -169,9 +170,24 @@ export const ALL_PURCHASABLE: ItemCatalogEntry[] = [
     })),
 ];
 
-export function buyItem(player: PlayerState, itemId: ItemId, events: GameEvent[]): boolean {
+/**
+ * @param currentIslandId 지금 있는 섬 id. 섬 전용 무기(예: 화산 섬의 엔마)는
+ *   화면 상점 목록에는 그대로 나오지만, 그 섬에 있을 때만 실제로 구매됩니다 —
+ *   UI에서 버튼을 막아도, 여기서 한 번 더 막아야 진짜 방어선이 됩니다.
+ */
+export function buyItem(
+  player: PlayerState,
+  itemId: ItemId,
+  events: GameEvent[],
+  currentIslandId: string | null = null,
+): boolean {
   const entry = ALL_PURCHASABLE.find((i) => i.id === itemId);
   if (!entry) return false;
+  const lockedIsland = weaponFor(itemId)?.islandLock;
+  if (lockedIsland && currentIslandId !== lockedIsland) {
+    events.push({ type: "purchase_failed", reason: `${getIsland(lockedIsland).name}에서만 구매할 수 있습니다` });
+    return false;
+  }
   if (entry.equippable && player.inventory.some((i) => i.id === itemId)) {
     events.push({ type: "purchase_failed", reason: "이미 보유한 장비입니다" });
     return false;

@@ -153,6 +153,46 @@ function buildSantoryu(): THREE.Group {
   return group;
 }
 
+/**
+ * 엔마 — 화산 섬 전용 무기. 요루와 같은 자리(오른손 한 자루)에 들지만,
+ * 훨씬 얇고 긴 붉은 칼날이라 실루엣만 봐도 구분이 됩니다.
+ */
+function buildEnma(): THREE.Group {
+  const group = new THREE.Group();
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xc21f1f, roughness: 0.3, metalness: 0.55 });
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xffdca0, roughness: 0.25, metalness: 0.8 });
+  const guardMat = new THREE.MeshStandardMaterial({ color: 0x241010, roughness: 0.4, metalness: 0.7 });
+  const gripMat = new THREE.MeshStandardMaterial({ color: 0x180a0a, roughness: 0.9 });
+
+  // 얇고 긴 붉은 칼날 (요루보다 폭은 좁고 길이는 더 깁니다)
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.16, 3.9, 0.07), bladeMat);
+  blade.position.y = 2.15;
+  blade.castShadow = true;
+  group.add(blade);
+
+  // 칼끝 — 길고 뾰족하게
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.55, 4), bladeMat);
+  tip.position.y = 4.35;
+  tip.rotation.y = Math.PI / 4;
+  tip.castShadow = true;
+  group.add(tip);
+
+  // 칼날 중앙의 금빛 광택선 — 얇고 긴 실루엣을 한 번 더 강조합니다
+  const shine = new THREE.Mesh(new THREE.BoxGeometry(0.035, 3.8, 0.085), edgeMat);
+  shine.position.y = 2.15;
+  group.add(shine);
+
+  // 작은 십자 가드 + 손잡이
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.14), guardMat);
+  guard.position.y = 0.16;
+  group.add(guard);
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.06, 0.7, 8), gripMat);
+  grip.position.y = -0.22;
+  group.add(grip);
+
+  return group;
+}
+
 /** 부두에 정박하는 작은 배 (플레이스홀더 지오메트리) */
 interface BoatVisual {
   group: THREE.Group;
@@ -392,6 +432,13 @@ export class SceneRenderer {
     santoryu.scale.setScalar(0.62);
     this.registerWeaponVisual("sword_santoryu", santoryu);
 
+    // 엔마: 요루와 같은 자리(오른손)에 들지만, 훨씬 얇고 긴 붉은 칼날입니다.
+    const enma = buildEnma();
+    enma.scale.setScalar(0.6);
+    enma.position.set(0.7, 0.78, 0.05);
+    enma.rotation.set(0.22, 0, -0.5);
+    this.registerWeaponVisual("sword_enma", enma);
+
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
@@ -604,7 +651,7 @@ export class SceneRenderer {
     this.playerVisual.position.set(state.player.position.x, state.player.position.y, state.player.position.z);
     this.playerVisual.rotation.y = state.player.yaw;
 
-    // 손에 든 무기만 보이게 (요루 / 삼도류)
+    // 손에 든 무기만 보이게 (요루 / 삼도류 / 엔마)
     const held = drawnWeapon(state.player);
     for (const [id, visual] of this.weaponVisuals) {
       visual.visible = held?.id === id;

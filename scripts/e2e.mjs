@@ -1313,6 +1313,111 @@ const sheathed = await page.evaluate(() => ({
 assert(sheathed.active === null, "숫자키 1번 다시 → 집어넣음");
 assert(!sheathed.swordVisible, "화면에서도 흑도가 사라짐");
 
+section("18b. 엔마 — 화산 섬 전용 구매 (섬 위치 게이트)");
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const p = sim.state.player;
+  p.money = 5000;
+  p.inventory = [];
+  p.hotbar = [null, null, null];
+  p.activeHotbarSlot = null;
+  window.__game.panels.closeAll();
+  // 화산 섬이 아닌 다른 섬(정글)에서 시작합니다.
+  const { islandArrivalPosition, getIsland } = window.__game.islands;
+  sim.playerController.teleport(islandArrivalPosition(getIsland("jungle")));
+});
+await page.waitForTimeout(900);
+await page.evaluate(() => window.__game.panels.openPanel("shop"));
+await page.waitForTimeout(500);
+
+const enmaAtJungle = await page.evaluate(() => {
+  const btn = document.querySelector('.buy-btn[data-item="sword_enma"]');
+  const card = btn?.closest(".shop-item");
+  return {
+    exists: !!btn,
+    disabled: btn?.disabled,
+    label: btn?.textContent?.trim(),
+    statsText: card?.querySelector(".shop-item-stats")?.textContent?.trim(),
+    currentIslandId: window.__game.simulation.state.currentIslandId,
+  };
+});
+console.log("  정글 섬에서 엔마 카드:", JSON.stringify(enmaAtJungle));
+assert(enmaAtJungle.currentIslandId === "jungle", `지금 정글 섬에 있음 (${enmaAtJungle.currentIslandId})`);
+assert(enmaAtJungle.exists, "엔마가 상점 무기 목록에 숨지 않고 나타남");
+assert(enmaAtJungle.disabled, "다른 섬에서는 구매 버튼이 비활성화됨");
+assert(enmaAtJungle.label === "여기서 살 수 없음", `버튼 문구로 안내 ("${enmaAtJungle.label}")`);
+assert(/화산 섬에서만 구매할 수 있습니다/.test(enmaAtJungle.statsText ?? ""),
+  `설명에 "화산 섬"이 명시됨 ("${enmaAtJungle.statsText}")`);
+
+// 실제로 버튼이 막혀 있어도 되든 안 되든, UI를 우회해도 진짜 구매는 막혀야 합니다.
+const blockedPurchase = await page.evaluate(() => window.__game.simulation.buyItem("sword_enma"));
+assert(blockedPurchase === false, "정글 섬에서는 simulation.buyItem으로도 실제 구매가 막힘");
+assert(
+  !(await page.evaluate(() => window.__game.simulation.state.player.inventory.some((i) => i.id === "sword_enma"))),
+  "막혔으니 인벤토리에도 안 들어감",
+);
+
+// 이제 화산 섬으로 이동합니다.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  window.__game.panels.closeAll();
+  const { islandArrivalPosition, getIsland } = window.__game.islands;
+  sim.playerController.teleport(islandArrivalPosition(getIsland("volcano")));
+});
+await page.waitForTimeout(900);
+await page.evaluate(() => window.__game.panels.openPanel("shop"));
+await page.waitForTimeout(500);
+
+const enmaAtVolcano = await page.evaluate(() => {
+  const btn = document.querySelector('.buy-btn[data-item="sword_enma"]');
+  const card = btn?.closest(".shop-item");
+  return {
+    disabled: btn?.disabled,
+    label: btn?.textContent?.trim(),
+    statsText: card?.querySelector(".shop-item-stats")?.textContent?.trim(),
+    currentIslandId: window.__game.simulation.state.currentIslandId,
+  };
+});
+console.log("  화산 섬에서 엔마 카드:", JSON.stringify(enmaAtVolcano));
+assert(enmaAtVolcano.currentIslandId === "volcano", `지금 화산 섬에 있음 (${enmaAtVolcano.currentIslandId})`);
+assert(!enmaAtVolcano.disabled, "화산 섬에서는 구매 버튼이 활성화됨");
+assert(enmaAtVolcano.label === "구매 · 🪙700", `가격 안내 ("${enmaAtVolcano.label}")`);
+assert(/지금 여기입니다/.test(enmaAtVolcano.statsText ?? ""), `"지금 여기입니다" 안내 ("${enmaAtVolcano.statsText}")`);
+await page.screenshot({ path: "/home/claude/bp-project/scripts/out-18b-shop-enma-volcano.png" });
+
+assert(await humanClick('.buy-btn[data-item="sword_enma"]'), "화산 섬에서 엔마 구매 버튼 클릭 가능");
+const enmaBought = await page.evaluate(() => ({
+  inv: window.__game.simulation.state.player.inventory.map((i) => i.id),
+  money: window.__game.simulation.state.player.money,
+}));
+assert(enmaBought.inv.includes("sword_enma"), `엔마가 인벤토리에 들어감 (${enmaBought.inv.join(",")})`);
+assert(enmaBought.money === 5000 - 700, `가격 700 차감 (${enmaBought.money})`);
+
+// 인벤토리 → 단축바 → 숫자키로 실제 장착, 3D 화면에서 확인
+await page.evaluate(() => window.__game.panels.openPanel("inventory"));
+await page.waitForTimeout(400);
+assert(await humanClick('.inv-slot[data-item="sword_enma"]'), "인벤토리에서 엔마 클릭 가능");
+await page.evaluate(() => window.__game.panels.closeAll());
+await page.waitForTimeout(300);
+const enmaHotbarred = await page.evaluate(() => window.__game.simulation.state.player.hotbar);
+const enmaSlot = enmaHotbarred.indexOf("sword_enma");
+assert(enmaSlot !== -1, `단축바에 엔마가 올라감 (${enmaHotbarred.join(",")})`);
+
+await page.keyboard.press(`Digit${enmaSlot + 1}`);
+await page.waitForTimeout(500);
+const enmaDrawn = await page.evaluate(() => ({
+  active: window.__game.simulation.state.player.activeHotbarSlot,
+  visible: window.__game.renderer.weaponVisible("sword_enma"),
+}));
+assert(enmaDrawn.active === enmaSlot, "숫자키로 엔마를 실제로 장착함");
+assert(enmaDrawn.visible, "3D 화면에 엔마(붉고 얇고 긴 검)가 손에 나타남");
+await page.screenshot({ path: "/home/claude/bp-project/scripts/out-18c-enma-drawn.png" });
+
+// 집어넣기
+await page.keyboard.press(`Digit${enmaSlot + 1}`);
+await page.waitForTimeout(500);
+assert(!(await page.evaluate(() => window.__game.renderer.weaponVisible("sword_enma"))), "다시 누르면 화면에서 사라짐");
+
 section("19. 빠른 배 구매");
 await page.evaluate(() => {
   window.__game.simulation.state.player.money = 5000;

@@ -23,6 +23,8 @@ export interface WeaponDef {
   attackSpeedMultiplier: number;
   price: number;
   description: string;
+  /** 이 무기를 살 수 있는 섬 id — 정해져 있으면 화면 상점에서 그 섬에 있을 때만 구매 버튼이 열립니다. */
+  islandLock?: string;
 }
 
 export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
@@ -48,6 +50,20 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     price: 2500,
     description:
       "칼 세 자루를 양손과 입에 무는 검술. 사거리는 요루보다 짧지만 공격이 훨씬 빠릅니다.",
+  },
+  // 화산 섬(Lv.200) 전용 — 요루보다 얇고 훨씬 긴 붉은 칼날. 가볍게 만들어서
+  // 공격 속도는 요루보다 살짝 빠르지만, 배율은 그보다 낮게 잡아 요루의
+  // "한 방" 포지션을 뺏지 않게 균형을 맞췄습니다.
+  sword_enma: {
+    id: "sword_enma",
+    name: "엔마",
+    icon: "🗡️",
+    damageMultiplier: 2.3,
+    bonusRange: 2.0,
+    attackSpeedMultiplier: 0.9,
+    price: 700,
+    description: "화산 섬에서만 파는 붉은 장검. 얇고 긴 칼날 덕에 사거리가 가장 길고 다루기도 가볍습니다.",
+    islandLock: "volcano",
   },
 };
 

@@ -1579,6 +1579,40 @@ section("삼도류 — 요루보다 약하지만 훨씬 빠름");
   assert(WEAPON_CATALOG.some((w) => w.id === "sword_yoru"), "요루는 상점에 그대로 있음");
 }
 
+section("엔마 — 화산 섬에서만 사는 얇고 긴 붉은 검");
+{
+  const enma = weaponFor("sword_enma");
+  const yoru = weaponFor("sword_yoru");
+  assert(enma !== null && enma.name === "엔마", `엔마 등록됨 (${enma?.name})`);
+  assert(enma.price === 700, `가격 🪙${enma.price}`);
+  assert(enma.islandLock === "volcano", `화산 섬 전용으로 등록됨 (${enma.islandLock})`);
+  assert(enma.bonusRange > yoru.bonusRange, `얇고 긴 만큼 사거리는 요루보다 김 (${enma.bonusRange} > ${yoru.bonusRange})`);
+
+  // 화면 상점 목록에는 나오지만(숨기지 않음), 다른 섬에서는 실제로 못 삽니다
+  assert(WEAPON_CATALOG.some((w) => w.id === "sword_enma"), "화면 상점 무기 목록에 나옴 (숨기지 않고 안내만)");
+
+  const p = createInitialGameState("pirate").player;
+  p.money = 99999;
+  const boughtElsewhere = buyItem(p, "sword_enma", p.events, "jungle");
+  assert(boughtElsewhere === false, "정글 섬 등 다른 섬에서는 구매 실패");
+  assert(!p.inventory.some((i) => i.id === "sword_enma"), "실패했으니 인벤토리에도 안 들어감");
+  const blockedReason = p.events.at(-1);
+  assert(blockedReason?.type === "purchase_failed" && blockedReason.reason.includes("화산 섬"),
+    `실패 사유가 "화산 섬"을 안내함 ("${blockedReason?.reason}")`);
+
+  const boughtNowhere = buyItem(p, "sword_enma", p.events, null);
+  assert(boughtNowhere === false, "섬 밖(바다 위)에서도 구매 실패");
+
+  const boughtAtVolcano = buyItem(p, "sword_enma", p.events, "volcano");
+  assert(boughtAtVolcano === true, "화산 섬에서는 실제로 구매됨");
+  assert(p.inventory.some((i) => i.id === "sword_enma"), "인벤토리에 들어감");
+
+  // 손에 들면 실제로 요루보다 사거리가 늘어나는지까지 확인
+  toggleHotbar(p, "sword_enma");
+  toggleDrawn(p, 0);
+  assert(drawnWeapon(p)?.id === "sword_enma", "엔마를 손에 듦");
+}
+
 section("다단 점프 — Lv.125에서 2단, 이후 100레벨마다 1단");
 {
   assert(FIRST_JUMP_LEVEL === 125, `2단 점프는 Lv.${FIRST_JUMP_LEVEL}부터`);

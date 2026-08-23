@@ -43,7 +43,7 @@ export interface StatBlock {
   fruit: number;
 }
 
-export type ItemId = "potion_small" | "potion_exp" | "sword_yoru" | "sword_santoryu";
+export type ItemId = "potion_small" | "potion_exp" | "sword_yoru" | "sword_santoryu" | "sword_enma";
 
 /** 배 등급 — 비쌀수록 빠르고 잘 돕니다 */
 export type BoatTierId = "dinghy" | "clipper" | "galewind";
