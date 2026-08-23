@@ -275,7 +275,7 @@ export class World {
       animState: "idle",
       hakiActive: false,
       drawnWeaponId: null,
-      pvpEnabled: false,
+      pvpEnabled: true,
       alive: true,
       stats: clampStats({
         meleeDamage: 8,
@@ -642,13 +642,19 @@ export class World {
     }
   }
 
-  /** 공격 가능 여부의 공통 조건 (진영·PvP 켜짐·같은 바다·생존) */
+  /**
+   * 공격 가능 여부의 공통 조건 (진영·PvP 켜짐·같은 바다·생존).
+   *
+   * 같은 진영끼리는 원래 전부 막혀 있었지만, 해적은 자기들끼리도 싸울 수 있게
+   * 열어달라는 요청에 따라 "해적 vs 해적"만 예외로 허용합니다. 해군은 여전히
+   * 해군끼리 공격할 수 없습니다 — 명시적으로 "해적만" 열기로 확인받은 부분입니다.
+   */
   private basicPvpCheck(attacker: Connection, target: Connection | undefined): string | null {
     if (!target) return "not_connected";
     if (attacker.roomId !== target.roomId) return "different_room";
     if (!attacker.pvpEnabled) return "self_pvp_off";
     if (!target.pvpEnabled) return "pvp_off";
-    if (attacker.faction === target.faction) return "same_faction";
+    if (attacker.faction === target.faction && attacker.faction !== "pirate") return "same_faction";
     if (attacker.sea !== target.sea) return "different_sea";
     if (!target.alive || target.hp <= 0) return "target_down";
     return null;

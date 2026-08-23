@@ -23,6 +23,14 @@ import { MAX_TRADE_SLOTS, type TradeItem } from "../network/protocol";
 /** 우클릭 "클릭"과 "드래그(카메라 회전)"를 가르는 문턱값 (픽셀 누적) */
 const DRAG_THRESHOLD_PX = 6;
 
+/** 두 제안 그리드 사이에 놓는 "TRADE" 교환 아이콘 (순환 화살표) */
+const TRADE_SWAP_ICON_SVG = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M7 7h9.5A3.5 3.5 0 0 1 20 10.5V12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M10 4 7 7l3 3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17 17H7.5A3.5 3.5 0 0 1 4 13.5V12" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M14 20l3-3-3-3" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>`;
+
 function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) =>
     ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;",
@@ -325,6 +333,15 @@ export class TradeUI {
               <div class="inv-icon">${item.icon}</div>
               ${item.quantity > 1 ? `<div class="inv-qty">${item.quantity}</div>` : ""}
             </div>`;
+        } else if (i === offer.length) {
+          // 다음 아이템이 들어갈 자리 — "+" 버튼처럼 보여줍니다. 실제로 누를 수 있는 건
+          // 내 제안 쪽뿐이라(상대 제안은 못 건드림), removable일 때만 id를 붙입니다.
+          html += `
+            <div class="inv-slot trade-add-slot" ${removable ? 'id="trade-add-slot-btn"' : ""} ${
+              removable ? 'title="아래 인벤토리에서 아이템을 눌러 담으세요"' : ""
+            }>
+              <div class="trade-add-plus">+</div>
+            </div>`;
         } else {
           html += `<div class="inv-slot"></div>`;
         }
@@ -345,11 +362,16 @@ export class TradeUI {
       : `<div class="trade-empty">인벤토리가 비어 있습니다</div>`;
 
     this.tradeWindowEl.innerHTML = `
-      <div class="trade-header">🤝 ${escapeHtml(session.partnerName)}님과 거래 중 <button class="trade-close-btn" id="trade-cancel-btn">✕</button></div>
+      <div class="trade-fair-badge">🤝 정직한 거래</div>
+      <div class="trade-header">${escapeHtml(session.partnerName)}님과 거래 중 <button class="trade-close-btn" id="trade-cancel-btn">✕</button></div>
       <div class="trade-columns">
         <div class="trade-column">
           <div class="trade-col-label">내 제안 ${session.myAccepted ? "✅" : ""}</div>
           <div class="trade-grid" id="trade-my-offer">${offerSlots(session.myOffer, true)}</div>
+        </div>
+        <div class="trade-swap-col">
+          <div class="trade-swap-label">TRADE</div>
+          <div class="trade-swap-icon">${TRADE_SWAP_ICON_SVG}</div>
         </div>
         <div class="trade-column">
           <div class="trade-col-label">상대 제안 ${session.partnerAccepted ? "✅" : ""}</div>
@@ -375,6 +397,10 @@ export class TradeUI {
     });
     this.tradeWindowEl.querySelector<HTMLButtonElement>("#trade-accept-btn")!.addEventListener("click", () => {
       this.mp.sendTradeAccept(!session.myAccepted);
+    });
+    // "+" 자리를 누르면 아래 인벤토리로 스크롤해서 바로 담을 수 있게 안내합니다.
+    this.tradeWindowEl.querySelector<HTMLDivElement>("#trade-add-slot-btn")?.addEventListener("click", () => {
+      this.tradeWindowEl.querySelector(".trade-inv-grid")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
     // 내 제안 칸 클릭 → 제안에서 뺌
     this.tradeWindowEl.querySelectorAll<HTMLDivElement>("#trade-my-offer .inv-slot.filled").forEach((slot) => {

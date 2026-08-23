@@ -2685,13 +2685,25 @@ const seesEachOther = await waitUntil(
 ).catch(() => false);
 assert(seesEachOther, "해적 클라이언트가 해군 플레이어를 목록에서 봄 (presence 동기화)");
 
-// PvP 체크박스를 실제로 클릭해서 켭니다 — 서버는 양쪽 다 켜져 있어야 데미지를 인정합니다.
-await page.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.click());
-await page2.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.click());
+// PvP는 이제 기본값이 켜짐이라, 따로 켜지 않아도 접속만 하면 서로 공격할 수 있어야 합니다.
 await page.waitForTimeout(500);
-const pvpBothOn = await page.evaluate(() => window.__game.simulation.state.player.pvpEnabled)
+const pvpBothOnByDefault = await page.evaluate(() => window.__game.simulation.state.player.pvpEnabled)
   && (await page2.evaluate(() => window.__game.simulation.state.player.pvpEnabled));
-assert(pvpBothOn, "양쪽 다 PvP 체크박스로 실제로 켜짐");
+assert(pvpBothOnByDefault, "양쪽 다 PvP가 기본값으로 켜진 채 접속됨");
+const checkboxDefaultChecked =
+  (await page.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.checked)) &&
+  (await page2.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.checked));
+assert(checkboxDefaultChecked, "체크박스 UI도 기본으로 체크된 채 렌더링됨");
+
+// 체크박스를 껐다가 다시 켜도 토글 메시지가 서버까지 실제로 반영되는지 확인합니다.
+await page.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.click());
+await page.waitForTimeout(300);
+const pvpOffAfterClick = await page.evaluate(() => window.__game.simulation.state.player.pvpEnabled);
+assert(pvpOffAfterClick === false, "체크박스를 끄면 실제로 꺼짐");
+await page.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.click());
+await page.waitForTimeout(300);
+const pvpOnAgain = await page.evaluate(() => window.__game.simulation.state.player.pvpEnabled);
+assert(pvpOnAgain === true, "다시 켜면 원래대로 켜짐 (양쪽 다 켜진 상태로 이후 공격 테스트 진행)");
 
 // 패널을 닫아 입력을 가리지 않게 하고, 좌클릭으로 근접 공격을 날립니다.
 await page.evaluate(() => document.querySelector("#mp-close")?.click());
@@ -2731,7 +2743,11 @@ await page3.goto("http://localhost:4173/?faction=pirate&mode=fast&guest=1", { wa
 await page3.waitForFunction(() => typeof window.__game !== "undefined", null, { timeout: 20000 });
 await page3.evaluate(() => {
   const sim = window.__game.simulation;
-  sim.state.player.position = { x: 0.5, y: 2, z: 0 };
+  // page(0,2,0)가 기본 카메라(camYaw=0)로 +x 방향을 보고 있으므로, page3는 그
+  // -x 쪽(뒤)이 아니라 page 기준 -x(=page3 기준으로는 page가 +x 방향)에 서야
+  // page3의 기본 카메라로도 page가 정면에 잡힙니다 — 해군 공격 테스트(page→page2,
+  // x:0→1.4)와 같은 상대 배치를 그대로 미러링했습니다.
+  sim.state.player.position = { x: -1.4, y: 2, z: 0 };
   sim.playerController.teleport(sim.state.player.position);
 });
 await connectMultiplayer(page3, MP_URL, "같은편해적");
@@ -2744,17 +2760,25 @@ const p3Connected = await (async () => {
   return false;
 })();
 assert(p3Connected, "세 번째(같은 진영) 클라이언트도 접속됨");
-await page3.evaluate(() => document.querySelector("#mp-pvp-checkbox")?.click());
 await page3.waitForTimeout(400);
+const page3PvpDefaultOn = await page3.evaluate(() => window.__game.simulation.state.player.pvpEnabled);
+assert(page3PvpDefaultOn, "세 번째 클라이언트도 PvP가 기본값으로 켜져 있음");
 await page3.evaluate(() => document.querySelector("#mp-close")?.click());
 
+// 해적은 이제 자기들끼리도 싸울 수 있어야 합니다 (해적만 열기로 확정한 설계).
+// 해군끼리 여전히 막히는지는 server/state.ts를 직접 두드리는 verify-logic.mjs
+// 쪽에서 이미 확인하므로, 여기서는 실제 두 브라우저 간 해적 vs 해적만 검증합니다.
 const pirateHpBefore = await page.evaluate(() => window.__game.simulation.state.player.hp);
-for (let i = 0; i < 6; i++) {
+let pirateHit = false;
+for (let i = 0; i < 15 && !pirateHit; i++) {
   await page3.mouse.click(640, 400);
   await page3.waitForTimeout(300);
+  const now = await page.evaluate(() => window.__game.simulation.state.player.hp);
+  if (now < pirateHpBefore) pirateHit = true;
 }
 const pirateHpAfter = await page.evaluate(() => window.__game.simulation.state.player.hp);
-assert(pirateHpAfter === pirateHpBefore, "같은 진영끼리는 서버가 피해를 인정하지 않음 (same_faction 거부)");
+console.log(`  같은 진영(해적) PvP: hp ${pirateHpBefore} → ${pirateHpAfter}`);
+assert(pirateHpAfter < pirateHpBefore, "해적끼리도 서버가 피해를 인정함 (same_faction 예외 — 해적만 허용)");
 
 section("멀티플레이 — 몬스터(NPC) 동기화");
 // page(해적)가 몬스터를 실제로 어그로 끌면, page2(해군)는 그 몬스터한테서 멀리

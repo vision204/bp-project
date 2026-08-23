@@ -15,6 +15,7 @@ import type { GameState, InventoryItem, ItemId } from "../core/GameState";
 import type { SkillShape } from "../simulation/skills";
 import { dist2D, pointInShape } from "../simulation/ShapeMath";
 import { applyReceivedItems, removeFromInventory } from "../simulation/TradeSystem";
+import type { Faction } from "../world/islands";
 import {
   COMBAT_STATS_SYNC_HZ,
   ENEMY_GHOST_TTL_MS,
@@ -69,6 +70,16 @@ export interface RemoteEnemyGhost {
 }
 
 const SMOOTHING_PER_SEC = 10;
+
+/**
+ * 진영이 같아도 PvP 후보로 볼지 — server/state.ts의 basicPvpCheck와 규칙을
+ * 맞춥니다. 해적끼리만 예외로 허용하고(명시적으로 확정한 설계), 해군끼리는
+ * 여전히 후보에서 빠집니다. 여기서 걸러도 서버가 다시 같은 규칙으로 최종
+ * 판정하므로, 이건 "굳이 물어볼 필요도 없는 요청"을 줄이는 최적화일 뿐입니다.
+ */
+function canFactionPvp(mine: Faction, theirs: Faction): boolean {
+  return mine !== theirs || mine === "pirate";
+}
 
 /** 서버에서 온 스냅샷 + 화면에 그릴 부드러운 보간 좌표. */
 export class RemotePlayerView {
@@ -223,7 +234,8 @@ export class MultiplayerClient {
     this._tradeSession = null;
     this._incomingTradeInvite = null;
     this._outgoingTradeInvite = null;
-    this.state.player.pvpEnabled = false;
+    // 기본값이 켜짐이므로 연결 해제 후에도 켜짐으로 되돌립니다 (꺼진 채로 남지 않도록).
+    this.state.player.pvpEnabled = true;
   }
 
   private send(msg: ClientMessage) {
@@ -502,12 +514,12 @@ export class MultiplayerClient {
     this.send({ type: "skill_attack", targetId, slot });
   }
 
-  /** 근접 사거리 안에 있는, 공격 후보가 될 만한 다른 진영 플레이어들. */
+  /** 근접 사거리 안에 있는, 공격 후보가 될 만한 플레이어들 (다른 진영 + 해적끼리). */
   meleeCandidates(range: number): RemotePlayerView[] {
     const p = this.state.player;
     return this.players.filter(
       (r) =>
-        r.snapshot.faction !== p.faction &&
+        canFactionPvp(p.faction, r.snapshot.faction) &&
         r.snapshot.pvpEnabled &&
         dist2D(p.position.x, p.position.z, r.renderX, r.renderZ) <= range,
     );
@@ -518,7 +530,7 @@ export class MultiplayerClient {
     const p = this.state.player;
     return this.players.filter(
       (r) =>
-        r.snapshot.faction !== p.faction &&
+        canFactionPvp(p.faction, r.snapshot.faction) &&
         r.snapshot.pvpEnabled &&
         pointInShape({ x: p.position.x, z: p.position.z, aimYaw: p.aimYaw }, r.renderX, r.renderZ, shape),
     );

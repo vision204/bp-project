@@ -60,6 +60,27 @@ const PALETTES: Record<IslandTheme, ThemePalette> = {
   mansion: { sand: 0xcbb894, ground: 0x577f45, rock: 0x7d6a55, propTrunk: 0x4b3a2b, propTop: 0x2f6b32, fogColor: 0x8fd0ff },
 };
 
+// ── Lv.400 이상 섬 — 고원 + 중앙 랜드마크 ─────────────────────────────────
+// 수정 섬(400)부터 대저택(1900)까지, 두 바다에 걸친 13개 "고레벨" 섬은
+// 섬 중앙에 다단 점프 없이는 못 올라가는 고원을 세우고 그 위에 커다란
+// 조형물(랜드마크)을 놓습니다. 부두·해변·기존 몬스터 배치는 그대로 두고
+// 고원은 "추가로" 얹는 구조라서 낮은 레벨대 섬 로직에는 영향이 없습니다.
+/** 이 레벨 이상인 섬부터 고원이 생깁니다 (수정 섬 = 정확히 400). */
+const PLATEAU_MIN_LEVEL = 400;
+/**
+ * 고원 벽 높이(m). 점프 물리(JUMP_SPEED=9, GRAVITY=20)로 계산하면 한 단
+ * 점프의 이론상 최대 상승량은 v²/(2g) ≈ 2.0m이고, 정점에 맞춰 눌러야 하는
+ * 실제 플레이라면 한 단당 대략 1.5m 안팎이 나옵니다(e2e 실측치 기준).
+ * 그러면 4단(약 6m)으로는 못 넘고 5단(약 7.5m)이면 넘을 수 있는 높이가
+ * 7m입니다 — "적어도 5단 점프를 안 하면 못 올라가는" 요청에 맞춘 값입니다.
+ */
+const PLATEAU_HEIGHT = 7;
+
+/** 섬 반지름에 비례하되 12~22m 사이로 잡습니다 (너무 작거나 섬을 다 덮지 않게). */
+function plateauRadiusFor(island: IslandDef): number {
+  return Math.min(22, Math.max(12, island.radius * 0.3));
+}
+
 /** 섬마다 배치가 매번 달라지지 않도록 시드 기반 난수를 씁니다. */
 function makeRandom(seed: number) {
   let state = seed >>> 0;
@@ -421,6 +442,325 @@ function buildProp(theme: IslandTheme, palette: ThemePalette): THREE.Group {
 }
 
 /**
+ * 고원 꼭대기에 세우는 커다란 중앙 조형물. buildProp보다 훨씬 큰 스케일로,
+ * 섬 테마에 어울리는 랜드마크(화산분화구/성/큰 나무 등)를 만듭니다.
+ * Lv.400 이상 13개 섬은 테마가 서로 겹치지 않으므로 테마 하나당 케이스 하나입니다.
+ */
+function buildLandmark(theme: IslandTheme, palette: ThemePalette, rand: () => number): THREE.Group {
+  const group = new THREE.Group();
+  const trunkMat = new THREE.MeshStandardMaterial({ color: palette.propTrunk, roughness: 0.85 });
+  const topMat = new THREE.MeshStandardMaterial({ color: palette.propTop, roughness: 0.45 });
+  const rockMat = new THREE.MeshStandardMaterial({ color: palette.rock, roughness: 0.92 });
+  const groundMat = new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 0.9 });
+
+  const add = (mesh: THREE.Mesh) => {
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  };
+
+  switch (theme) {
+    case "crystal": {
+      // 거대 수정 결정 무리 — 가운데 큰 결정 + 주위 5개 작은 결정
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 4.6, 2, 9), rockMat);
+      base.position.y = 1;
+      add(base);
+      const core = new THREE.Mesh(new THREE.OctahedronGeometry(4.2, 0), topMat);
+      core.position.y = 6.6;
+      add(core);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 + rand();
+        const shard = new THREE.Mesh(new THREE.OctahedronGeometry(1.6 + rand() * 1.1, 0), topMat);
+        shard.position.set(Math.cos(a) * 3.8, 2.6 + rand() * 3, Math.sin(a) * 3.8);
+        shard.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
+        add(shard);
+      }
+      break;
+    }
+    case "abyss": {
+      // 심연 첨탑 — 검은 오벨리스크 + 청록빛 균열 고리들
+      const spire = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 2.6, 11, 6), trunkMat);
+      spire.position.y = 5.5;
+      add(spire);
+      for (const y of [3, 6.2, 9]) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.9 - (y - 3) * 0.12, 0.16, 6, 16), topMat);
+        ring.position.y = y;
+        ring.rotation.x = Math.PI / 2;
+        group.add(ring);
+      }
+      const tip = new THREE.Mesh(new THREE.OctahedronGeometry(0.9, 0), topMat);
+      tip.position.y = 11.4;
+      add(tip);
+      break;
+    }
+    case "sky": {
+      // 구름 위 황금 첨탑 — 3단 파고다 실루엣
+      const cloud = new THREE.Mesh(new THREE.IcosahedronGeometry(3.6, 0), trunkMat);
+      cloud.position.y = 2.2;
+      cloud.scale.set(1.6, 0.6, 1.6);
+      add(cloud);
+      for (const [i, y] of [4.2, 6.6, 8.8].entries()) {
+        const tier = new THREE.Mesh(new THREE.ConeGeometry(2.6 - i * 0.6, 1.6, 4), topMat);
+        tier.position.y = y;
+        tier.rotation.y = Math.PI / 4;
+        add(tier);
+      }
+      const spire = new THREE.Mesh(new THREE.ConeGeometry(0.4, 3, 6), topMat);
+      spire.position.y = 11.5;
+      add(spire);
+      break;
+    }
+    case "dragon": {
+      // 용의 둥지 — 화산분화구: 크레이터 산 + 안에서 빛나는 용암
+      const cone = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 6.8, 9, 10, 1, true), trunkMat);
+      cone.position.y = 4.5;
+      cone.material.side = THREE.DoubleSide;
+      add(cone);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.5, 8, 14), rockMat);
+      rim.position.y = 9;
+      rim.rotation.x = Math.PI / 2;
+      add(rim);
+      const lava = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 0.4, 10), topMat);
+      lava.position.y = 8.2;
+      group.add(lava);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        const egg = new THREE.Mesh(new THREE.SphereGeometry(1.1, 8, 8), rockMat);
+        egg.position.set(Math.cos(a) * 6.5, 1.1, Math.sin(a) * 6.5);
+        egg.scale.set(0.8, 1.15, 0.8);
+        add(egg);
+      }
+      break;
+    }
+    case "rose": {
+      // 장미 왕국의 성 — 중앙 keep + 4개 모서리 첨탑
+      const keep = new THREE.Mesh(new THREE.CylinderGeometry(3.2, 3.6, 8, 12), groundMat);
+      keep.position.y = 4;
+      add(keep);
+      const keepRoof = new THREE.Mesh(new THREE.ConeGeometry(3.6, 3.2, 12), topMat);
+      keepRoof.position.y = 9.6;
+      add(keepRoof);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        const turret = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.2, 5.5, 8), groundMat);
+        turret.position.set(Math.cos(a) * 4.6, 2.75, Math.sin(a) * 4.6);
+        add(turret);
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(1.3, 2, 8), topMat);
+        roof.position.set(Math.cos(a) * 4.6, 6.5, Math.sin(a) * 4.6);
+        add(roof);
+      }
+      break;
+    }
+    case "green": {
+      // 초원의 커다란 고목
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 2.4, 6.5, 10), trunkMat);
+      trunk.position.y = 3.25;
+      add(trunk);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        const blob = new THREE.Mesh(new THREE.IcosahedronGeometry(2.6 + rand() * 1.2, 0), topMat);
+        blob.position.set(Math.cos(a) * 2.4, 8 + rand() * 1.6, Math.sin(a) * 2.4);
+        blob.scale.set(1.1, 0.8, 1.1);
+        add(blob);
+      }
+      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(3.8, 0), topMat);
+      crown.position.y = 9.4;
+      crown.scale.set(1.3, 0.75, 1.3);
+      add(crown);
+      break;
+    }
+    case "graveyard": {
+      // 대묘 — 돌 영묘 + 기둥 + 꼭대기 첨탑
+      const crypt = new THREE.Mesh(new THREE.BoxGeometry(6.5, 4.2, 5.5), groundMat);
+      crypt.position.y = 2.1;
+      add(crypt);
+      for (const side of [-1, 1]) {
+        const col = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.5, 5.4, 8), rockMat);
+        col.position.set(side * 3.6, 2.7, 3.2);
+        add(col);
+      }
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(4.6, 2.4, 4), rockMat);
+      roof.position.y = 5.4;
+      roof.rotation.y = Math.PI / 4;
+      add(roof);
+      const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 4.4, 6), rockMat);
+      spire.position.y = 8.8;
+      add(spire);
+      const orb = new THREE.Mesh(new THREE.SphereGeometry(0.55, 10, 10), topMat);
+      orb.position.y = 11.2;
+      add(orb);
+      break;
+    }
+    case "snow": {
+      // 눈 덮인 봉우리 — 큰 설산 첨봉 + 주변 바위 봉우리들
+      const peak = new THREE.Mesh(new THREE.ConeGeometry(4.6, 11, 9), topMat);
+      peak.position.y = 5.5;
+      add(peak);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + 0.6;
+        const small = new THREE.Mesh(new THREE.ConeGeometry(1.5 + rand(), 5 + rand() * 2, 7), rockMat);
+        small.position.set(Math.cos(a) * 4.8, 2.5, Math.sin(a) * 4.8);
+        add(small);
+        const cap = new THREE.Mesh(new THREE.ConeGeometry(1.0, 1.6, 7), topMat);
+        cap.position.set(Math.cos(a) * 4.8, 5.6, Math.sin(a) * 4.8);
+        add(cap);
+      }
+      break;
+    }
+    case "hotcold": {
+      // 화염과 얼음 — 절반은 화산분화구, 절반은 얼음 첨탑
+      const iceMat = new THREE.MeshStandardMaterial({ color: 0x9fe0f5, roughness: 0.3 });
+      const base = new THREE.Mesh(new THREE.CylinderGeometry(4.4, 5.2, 1.6, 10), rockMat);
+      base.position.y = 0.8;
+      add(base);
+      const lavaCone = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 3.4, 7.5, 8, 1, true), trunkMat);
+      lavaCone.position.set(-2.2, 4.55, 0);
+      lavaCone.material.side = THREE.DoubleSide;
+      add(lavaCone);
+      const lavaTop = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.1, 0.4, 8), topMat);
+      lavaTop.position.set(-2.2, 8.2, 0);
+      group.add(lavaTop);
+      const ice = new THREE.Mesh(new THREE.ConeGeometry(2.6, 9, 7), iceMat);
+      ice.position.set(2.6, 4.5, 0);
+      add(ice);
+      break;
+    }
+    case "cursed": {
+      // 저주받은 배 — 좌초한 선체 + 부러진 돛대
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(11, 3.2, 4.2), trunkMat);
+      hull.position.set(0, 1.6, 0);
+      hull.rotation.z = 0.12;
+      add(hull);
+      const bow = new THREE.Mesh(new THREE.ConeGeometry(2.4, 4, 4), trunkMat);
+      bow.position.set(5.4, 2, 0);
+      bow.rotation.z = Math.PI / 2;
+      bow.rotation.y = Math.PI / 4;
+      add(bow);
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 9, 7), trunkMat);
+      mast.position.set(-1.5, 6.5, 0.3);
+      mast.rotation.z = 0.22;
+      add(mast);
+      const sail = new THREE.Mesh(new THREE.PlaneGeometry(4.6, 3.6), topMat);
+      (sail.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+      (sail.material as THREE.MeshStandardMaterial).transparent = true;
+      (sail.material as THREE.MeshStandardMaterial).opacity = 0.6;
+      sail.position.set(-2.4, 8.4, 0.3);
+      sail.rotation.z = 0.3;
+      group.add(sail);
+      break;
+    }
+    case "icecastle": {
+      // 얼음 성 — 육각 본성 + 좌우 소첨탑
+      const keep = new THREE.Mesh(new THREE.CylinderGeometry(3.4, 3.8, 8.5, 6), groundMat);
+      keep.position.y = 4.25;
+      add(keep);
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(3.9, 4.6, 6), topMat);
+      roof.position.y = 10.8;
+      add(roof);
+      for (const side of [-1, 1]) {
+        const turret = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.4, 6, 6), groundMat);
+        turret.position.set(side * 4.6, 3, 1.5);
+        add(turret);
+        const tRoof = new THREE.Mesh(new THREE.ConeGeometry(1.5, 2.6, 6), topMat);
+        tRoof.position.set(side * 4.6, 7.3, 1.5);
+        add(tRoof);
+      }
+      break;
+    }
+    case "forgotten": {
+      // 잊혀진 신전 — 계단식 피라미드 + 부서진 첨탑
+      for (const [i, s] of [6.2, 4.8, 3.4].entries()) {
+        const tier = new THREE.Mesh(new THREE.BoxGeometry(s * 1.8, 1.6, s * 1.8), groundMat);
+        tier.position.y = 0.8 + i * 1.6;
+        add(tier);
+      }
+      const obelisk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.85, 5.4, 6), rockMat);
+      obelisk.position.y = 7.5;
+      obelisk.rotation.z = 0.08;
+      add(obelisk);
+      const rubble = new THREE.Mesh(new THREE.DodecahedronGeometry(1.3, 0), rockMat);
+      rubble.position.set(3.6, 1, 3.2);
+      add(rubble);
+      break;
+    }
+    case "mansion": {
+      // 대저택 — 커다란 본관 + 정원 산울타리 고리
+      const manor = new THREE.Mesh(new THREE.BoxGeometry(8.5, 6.4, 6.5), groundMat);
+      manor.position.y = 3.2;
+      add(manor);
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(6.4, 3.2, 4), trunkMat);
+      roof.position.y = 8;
+      roof.rotation.y = Math.PI / 4;
+      add(roof);
+      for (const side of [-1, 1]) {
+        const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 6.4, 8), topMat);
+        pillar.position.set(side * 3.6, 3.2, 3.6);
+        add(pillar);
+      }
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const hedge = new THREE.Mesh(new THREE.SphereGeometry(1.1, 8, 8), trunkMat);
+        hedge.position.set(Math.cos(a) * 8.5, 1, Math.sin(a) * 8.5);
+        add(hedge);
+      }
+      break;
+    }
+    default: {
+      // 방어적 기본값 — 사실상 도달하지 않지만, 큰 돌기둥 하나
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.6, 9, 10), rockMat);
+      pillar.position.y = 4.5;
+      add(pillar);
+      break;
+    }
+  }
+
+  return group;
+}
+
+/**
+ * Lv.400 이상 섬의 중앙 고원. 섬 중심에 다단 점프 없이는 못 넘는 원기둥
+ * 벽을 세우고(측면이 곧 "절벽"), 그 꼭대기 평평한 면 위에 랜드마크를
+ * 올립니다. 기존 해변/부두/소품 배치는 건드리지 않는 별도 구조물입니다.
+ */
+function buildPlateau(
+  island: IslandDef,
+  palette: ThemePalette,
+  group: THREE.Group,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+  rand: () => number,
+) {
+  const radius = plateauRadiusFor(island);
+  const height = PLATEAU_HEIGHT;
+
+  // 절벽 벽 — 시각 + 충돌 모두 이 하나의 원기둥으로 처리합니다
+  // (측면이 절벽, 윗면이 그대로 고원 바닥의 충돌면이 됩니다).
+  const wallMat = new THREE.MeshStandardMaterial({ color: palette.rock, roughness: 0.95 });
+  const wallMesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, quality.islandSegments), wallMat);
+  wallMesh.position.set(island.center.x, height / 2, island.center.z);
+  wallMesh.castShadow = quality.shadows;
+  wallMesh.receiveShadow = quality.shadows;
+  group.add(wallMesh);
+
+  const wallBody = world.createRigidBody(
+    RAPIER_NS.RigidBodyDesc.fixed().setTranslation(island.center.x, height / 2, island.center.z),
+  );
+  world.createCollider(RAPIER_NS.ColliderDesc.cylinder(height / 2, radius), wallBody);
+
+  // 고원 윗면 — 테마 색 얇은 판 (시각용, 충돌은 위 벽 콜라이더가 이미 처리)
+  const topMat = new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 });
+  const topMesh = new THREE.Mesh(new THREE.CylinderGeometry(radius - 0.4, radius - 0.4, 0.3, quality.islandSegments), topMat);
+  topMesh.position.set(island.center.x, height + 0.15, island.center.z);
+  topMesh.receiveShadow = quality.shadows;
+  group.add(topMesh);
+
+  const landmark = buildLandmark(island.theme, palette, rand);
+  landmark.position.set(island.center.x, height + 0.3, island.center.z);
+  group.add(landmark);
+}
+
+/**
  * 해변 경사: 물속에서 섬 위로 걸어 올라올 수 있도록 4단 계단 콜라이더를 깔고,
  * 그 위에 매끈한 원뿔대 메시를 덮어 시각적으로는 완만한 모래사장처럼 보이게 합니다.
  * (계단 한 칸 높이 0.35m는 캐릭터 컨트롤러의 autostep 0.5m보다 낮아서 자동으로 올라갑니다.)
@@ -719,6 +1059,12 @@ function buildIsland(
 
   // 소품 배치 (부두 방향은 비워둠 — 배 타러 가는 길을 막지 않도록)
   const rand = makeRandom(island.id.length * 7919 + Math.round(island.center.x));
+
+  // Lv.400 이상 섬은 중앙에 다단 점프 고원 + 랜드마크를 추가로 세웁니다.
+  if (island.requiredLevel >= PLATEAU_MIN_LEVEL) {
+    buildPlateau(island, palette, group, world, RAPIER_NS, quality, rand);
+  }
+
   const rockMat = new THREE.MeshStandardMaterial({ color: palette.rock, roughness: 0.95 });
   const propCount = Math.max(2, Math.round(9 * (island.radius / 40) * quality.propDensity));
   for (let i = 0; i < propCount; i++) {

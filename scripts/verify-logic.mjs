@@ -1956,6 +1956,36 @@ section("멀티플레이 서버 — 방 나누기 (ROOM_CAPACITY명씩)");
   assert(rejected?.reason === "different_room", "다른 방 사람은 서버가 공격 자체를 거부함 (different_room)");
 }
 
+section("멀티플레이 서버 — PvP: 해적은 서로 싸울 수 있지만 해군은 여전히 안 됨");
+{
+  // "같은 진영끼리도 PvP를 허용해달라"는 요청에 "해적만" 열기로 확정했으므로,
+  // 해적 vs 해적은 통과하고 해군 vs 해군은 여전히 same_faction으로 막혀야 합니다.
+  function fakeConn(world, name, faction) {
+    const sent = [];
+    const sock = { readyState: 1, OPEN: 1, send: (d) => sent.push(JSON.parse(d)), close() {} };
+    const conn = world.join(sock, name, faction);
+    return { conn, sent };
+  }
+
+  const world = new World();
+  const pirateA = fakeConn(world, "해적A", "pirate");
+  const pirateB = fakeConn(world, "해적B", "pirate");
+  const marineA = fakeConn(world, "해군A", "marine");
+  const marineB = fakeConn(world, "해군B", "marine");
+
+  assert(pirateA.conn.pvpEnabled && marineA.conn.pvpEnabled, "새로 접속하면 PvP가 기본으로 켜져 있음 (join 기본값)");
+
+  world.handleMessage(pirateA.conn, JSON.stringify({ type: "melee_attack", targetId: pirateB.conn.id }));
+  const pirateRejected = pirateA.sent.find((m) => m.type === "pvp_rejected");
+  assert(!pirateRejected, `해적끼리는 공격이 거부되지 않음 (${pirateRejected?.reason ?? "통과"})`);
+  assert(pirateB.conn.hp < 100, `해적끼리 실제로 피해가 들어감 (해적B hp: ${pirateB.conn.hp})`);
+
+  world.handleMessage(marineA.conn, JSON.stringify({ type: "melee_attack", targetId: marineB.conn.id }));
+  const marineRejected = marineA.sent.find((m) => m.type === "pvp_rejected");
+  assert(marineRejected?.reason === "same_faction", `해군끼리는 여전히 same_faction으로 거부됨 (${marineRejected?.reason})`);
+  assert(marineB.conn.hp === 100, "해군끼리는 피해가 들어가지 않음");
+}
+
 section("멀티플레이 서버 — 몬스터(NPC) 위치 중계");
 {
   function fakeConn(world, name, faction) {

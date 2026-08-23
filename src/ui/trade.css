@@ -1,6 +1,8 @@
 /* P2P 거래·선물 UI — PanelManager를 쓰지 않는 독립 위젯이라 별도 파일로 뺐습니다
    (MultiplayerUI.ts·multiplayer.css와 같은 결). 인벤토리 슬롯(.inv-slot 등)은
-   panels.css의 것과 같은 클래스명을 그대로 재사용해 시각적으로 통일합니다. */
+   panels.css의 것과 같은 클래스명을 그대로 재사용합니다. 다만 거래창(.trade-window)
+   안쪽만은 참고 디자인에 맞춰 밝은 민트 그린 테마로 스코프를 좁혀 덮어씁니다 —
+   선물 창·컨텍스트 메뉴 등 나머지는 원래의 어두운 테마 그대로입니다. */
 
 /* ── 우클릭 컨텍스트 메뉴 (거래하기 / 선물 주기) ─────────────────────────── */
 .trade-menu {
@@ -33,25 +35,43 @@
 }
 .trade-menu-btn:hover { background: rgba(255, 213, 74, 0.22); }
 
-/* ── 거래창 ───────────────────────────────────────────────────────────── */
+/* ── 거래창 ───────────────────────────────────────────────────────────────
+   민트 그린 "Fair Trade" 카드 스타일로 다시 그렸습니다 — 나머지 게임 UI는
+   어두운 톤이지만, 거래창만은 참고 디자인 그대로 밝은 초록 테마를 씁니다.
+   .inv-slot 등은 panels.css의 클래스를 재사용하되, .trade-window 아래로
+   스코프를 좁혀 이 창 안에서만 밝은 테마로 덮어씁니다(다른 패널에는 영향 없음). */
 .trade-window {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 560px;
+  width: 600px;
   max-width: 92vw;
   max-height: 82vh;
   overflow-y: auto;
-  background: rgba(14, 18, 28, 0.96);
-  border: 1px solid rgba(255, 213, 74, 0.5);
-  border-radius: 16px;
+  background: linear-gradient(180deg, #eafff2 0%, #d7f7e2 100%);
+  border: 2px solid #34c77b;
+  border-radius: 18px;
   padding: 16px 18px 18px;
-  color: #fff3e0;
+  color: #14532d;
   font-size: 13px;
   pointer-events: auto;
   z-index: 55;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+}
+
+.trade-fair-badge {
+  width: fit-content;
+  margin: -4px auto 10px;
+  padding: 3px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.65);
+  border: 1px solid rgba(52, 199, 123, 0.5);
+  color: #1b7a44;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.02em;
+  text-align: center;
 }
 
 .trade-header {
@@ -61,48 +81,124 @@
   font-weight: bold;
   font-size: 16px;
   margin-bottom: 12px;
+  color: #0f3d24;
 }
 
 .trade-close-btn {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff3e0;
+  border: 1px solid rgba(20, 83, 45, 0.25);
+  background: rgba(255, 255, 255, 0.55);
+  color: #14532d;
   cursor: pointer;
   font-size: 12px;
 }
-.trade-close-btn:hover { background: rgba(229, 57, 53, 0.4); }
+.trade-close-btn:hover { background: rgba(229, 57, 53, 0.25); }
 
 .trade-columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 14px;
 }
 
 .trade-col-label {
   font-size: 12px;
-  opacity: 0.8;
+  font-weight: bold;
+  color: #1b7a44;
   margin-bottom: 6px;
 }
 
-.trade-grid,
+/* 가운데 "TRADE" 교환 아이콘 — 두 제안 그리드 사이 */
+.trade-swap-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+}
+
+.trade-swap-label {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #1b7a44;
+}
+
+.trade-swap-icon {
+  width: 34px;
+  height: 34px;
+  color: #22b573;
+}
+.trade-swap-icon svg { display: block; width: 100%; height: 100%; }
+
+.trade-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  width: 168px;
+}
+
 .trade-inv-grid {
   display: grid;
-  grid-template-columns: repeat(9, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
   gap: 5px;
+}
+
+/* 거래창 안의 슬롯만 밝은 민트 테마로 덮어씁니다 (인벤토리·핫바 등 다른 패널은 그대로) */
+.trade-window .inv-slot {
+  background: #f2fff7;
+  border: 1px solid #8ee0af;
+  border-radius: 9px;
+}
+.trade-window .inv-slot.filled {
+  background: #ffffff;
+  border-color: #34c77b;
+}
+.trade-window .inv-slot.usable:hover {
+  border-color: #16a35e;
+  background: #eafff2;
+}
+.trade-window .inv-qty {
+  background: rgba(20, 83, 45, 0.75);
+  color: #f2fff7;
+}
+
+/* 다음 아이템이 들어갈 자리 — "+" 버튼처럼 보이는 슬롯 (내 제안 쪽만 실제로 클릭 가능) */
+.trade-add-slot {
+  cursor: default;
+}
+#trade-add-slot-btn.trade-add-slot { cursor: pointer; }
+.trade-add-plus {
+  width: 68%;
+  height: 68%;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 900;
+  color: #ffffff;
+  background: linear-gradient(180deg, #4ade80 0%, #22b573 100%);
+  box-shadow: 0 2px 0 #16874f, inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+#trade-add-slot-btn .trade-add-plus:hover { filter: brightness(1.08); }
+/* 상대 제안 쪽은 클릭할 수 없으니 살짝 흐리게 */
+.trade-grid:not(#trade-my-offer) .trade-add-plus {
+  opacity: 0.55;
+  box-shadow: none;
 }
 
 .trade-inv-label {
   font-size: 12px;
-  opacity: 0.7;
+  font-weight: bold;
+  color: #1b7a44;
   margin: 10px 0 6px;
 }
 
 .trade-inv-grid {
-  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
   max-height: 160px;
   overflow-y: auto;
   margin-bottom: 14px;
@@ -116,36 +212,40 @@
 .trade-accept-btn {
   padding: 9px 18px;
   border-radius: 10px;
-  border: 1px solid rgba(129, 199, 132, 0.6);
-  background: rgba(129, 199, 132, 0.22);
-  color: #e8f5e9;
+  border: 1px solid #2fae6d;
+  background: linear-gradient(180deg, #4ade80 0%, #22b573 100%);
+  color: #ffffff;
   font-family: inherit;
   font-weight: bold;
   cursor: pointer;
+  box-shadow: 0 2px 0 #16874f;
 }
-.trade-accept-btn:hover { background: rgba(129, 199, 132, 0.35); }
+.trade-accept-btn:hover { filter: brightness(1.05); }
 .trade-accept-btn.accepted {
-  border-color: rgba(255, 213, 74, 0.7);
-  background: rgba(255, 213, 74, 0.25);
-  color: #fff3e0;
+  border-color: #d99a1c;
+  background: linear-gradient(180deg, #ffd54a 0%, #f0a83c 100%);
+  color: #402c00;
+  box-shadow: 0 2px 0 #b8791f;
 }
 
 .trade-empty {
-  opacity: 0.6;
+  opacity: 0.65;
   font-size: 12px;
   padding: 10px 2px;
   grid-column: 1 / -1;
+  color: #1b7a44;
 }
 
 .trade-confirm-countdown {
   margin: -4px 0 12px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(255, 213, 74, 0.15);
-  border: 1px solid rgba(255, 213, 74, 0.4);
+  background: rgba(255, 213, 74, 0.35);
+  border: 1px solid #d99a1c;
   font-size: 12px;
-  color: #ffe082;
+  color: #5c3d00;
   text-align: center;
+  font-weight: bold;
 }
 
 /* ── 거래 신청 받음 (상대가 나에게 걸었을 때) ───────────────────────────── */

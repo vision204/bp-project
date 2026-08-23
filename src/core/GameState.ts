@@ -449,7 +449,7 @@ export function createInitialGameState(
       flying: devMode, // 개발자 모드로 들어오면 바로 날 수 있게
       lastGachaAtMs: null,
       guideTargetIslandId: null,
-      pvpEnabled: false,
+      pvpEnabled: true,
       maxJumps: 1,
       unlockedSecondSea: false,
       events: [],
