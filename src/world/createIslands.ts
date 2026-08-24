@@ -110,8 +110,17 @@ function makeRandom(seed: number) {
 }
 
 /**
- * 테마별 소품(나무/선인장/얼음기둥/용암기둥)을 만듭니다. 충돌체는 붙이지 않아서
- * 플레이어가 통과할 수 있습니다 — 좁은 섬에서 소품에 끼는 것을 피하기 위함입니다.
+ * 소품(나무/선인장/얼음기둥/바위 등) 하나에 붙일 충돌체의 반지름(m).
+ * 테마마다 시각적으로는 모양이 다 다르지만(선인장 팔, 깃대, 지붕 등), 충돌은
+ * 몸통 굵기 정도의 가벼운 원기둥 하나로만 잡습니다 — 섬마다 수십 개씩 놓이므로
+ * 복합 충돌체를 쓰면 물리 연산이 무거워지고, 나무를 "가로지르지는 못하지만
+ * 스치듯 지나갈 수는 있는" 정도가 실제 플레이 감각에도 적당합니다.
+ */
+const PROP_COLLIDER_RADIUS = 0.4;
+const PROP_COLLIDER_HALF_HEIGHT = 1.0;
+
+/**
+ * 테마별 소품(나무/선인장/얼음기둥/용암기둥)을 만듭니다.
  */
 function buildProp(theme: IslandTheme, palette: ThemePalette): THREE.Group {
   const group = new THREE.Group();
@@ -1264,17 +1273,37 @@ function buildIsland(
     prop.position.set(x, 0.3, z);
     prop.rotation.y = rand() * Math.PI * 2;
     group.add(prop);
+
+    // 나무/선인장/기둥 등 지형지물에 충돌 추가 — 몸통 굵기의 가벼운 원기둥 하나로,
+    // 통과하지 못하고 부딪히게 합니다 (섬마다 여럿이라 primitive 하나로 최소화).
+    const propBody = world.createRigidBody(
+      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(x, 0.3 + PROP_COLLIDER_HALF_HEIGHT, z),
+    );
+    world.createCollider(
+      RAPIER_NS.ColliderDesc.cylinder(PROP_COLLIDER_HALF_HEIGHT, PROP_COLLIDER_RADIUS),
+      propBody,
+    );
   }
 
   const rockCount = Math.max(2, Math.round(5 * (island.radius / 40) * quality.propDensity));
   for (let i = 0; i < rockCount; i++) {
     const angle = (i / rockCount) * Math.PI * 2 + 1.1;
     const dist = island.radius * (0.6 + rand() * 0.25);
-    const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(1.1 + rand() * 1.1, 0), rockMat);
-    rock.position.set(island.center.x + Math.cos(angle) * dist, 0.7, island.center.z + Math.sin(angle) * dist);
+    const rockRadius = 1.1 + rand() * 1.1;
+    const rx = island.center.x + Math.cos(angle) * dist;
+    const rz = island.center.z + Math.sin(angle) * dist;
+    const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(rockRadius, 0), rockMat);
+    rock.position.set(rx, 0.7, rz);
     rock.rotation.set(rand(), rand(), rand());
     rock.castShadow = quality.shadows;
     group.add(rock);
+
+    // 바위도 충돌 추가 — 모양은 다각형(icosahedron)이지만, 충돌체는 그 반지름에
+    // 맞춘 구(ball) 하나로 저렴하게 근사합니다.
+    const rockBody = world.createRigidBody(
+      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(rx, 0.7, rz),
+    );
+    world.createCollider(RAPIER_NS.ColliderDesc.ball(rockRadius * 0.85), rockBody);
   }
 
   return group;

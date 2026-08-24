@@ -1,15 +1,27 @@
-import type { EnemyState, GameEvent, PlayerState } from "../core/GameState";
+import type { EnemyState, GameEvent, ItemId, PlayerState } from "../core/GameState";
 import type { InputSnapshot } from "../core/InputManager";
 import { damageEnemy } from "./EnemyManager";
 import { grantExp } from "./Leveling";
 import { effectiveMeleeDamage } from "./HakiSystem";
 import { fruitExpFromEnemy, fruitLevelDamageMultiplier, grantFruitExp } from "./FruitLeveling";
+import { weaponExpFromEnemy, weaponLevelDamageMultiplier, weaponMasteryLevel, grantWeaponExp } from "./WeaponLeveling";
 import { isSlotUnlocked, skillsForFruit, type SkillDef } from "./skills";
-import { weaponAttackSpeedMultiplier, weaponBonusRange, weaponDamageMultiplier } from "./WeaponSystem";
+import { isWeaponSlotUnlocked, skillsForWeapon } from "./weaponSkills";
+import {
+  drawnWeapon,
+  weaponAttackSpeedMultiplier,
+  weaponBonusRange,
+  weaponDamageMultiplier,
+} from "./WeaponSystem";
 import { dist2D, pointInShape } from "./ShapeMath";
 
-/** 데미지의 출처 — 열매 경험치는 출처가 "fruit"인 막타에만 들어옵니다. */
-export type DamageSource = "melee" | "fruit";
+/**
+ * 데미지의 출처.
+ *   · "fruit"  — 열매 경험치는 출처가 "fruit"인 막타에만 들어옵니다.
+ *   · "weapon" — 무기 경험치는 그 무기를 손에 든 채로 낸 근접/무기스킬
+ *                막타에서 들어옵니다 (아래 dealDamage 참고).
+ */
+export type DamageSource = "melee" | "fruit" | "weapon";
 
 /**
  * 몬스터가 스킬 판정 범위 안에 있는지 검사합니다.
@@ -40,8 +52,25 @@ export function skillDamage(player: PlayerState, skill: SkillDef) {
 }
 
 /**
+ * 무기 스킬의 최종 데미지 = 기본값 × (공격 스텟 비율) × 무기 배율 × 무기숙련 배율.
+ * 열매의 abilityDamageMultiplier(열매 스텟에서 파생)에 대응해, 여기서는
+ * 공격 스텟에서 파생된 근접 데미지(player.meleeDamage, 기본값 8)를 기준으로
+ * 스케일합니다.
+ */
+export function weaponSkillDamage(player: PlayerState, skill: SkillDef, weaponId: ItemId) {
+  return (
+    skill.damage *
+    (player.meleeDamage / 8) *
+    weaponDamageMultiplier(player) *
+    weaponLevelDamageMultiplier(weaponMasteryLevel(player, weaponId))
+  );
+}
+
+/**
  * 실제로 피해를 입히고, 죽었으면 보상을 지급합니다.
- * source가 "fruit"인 경우에만 열매 경험치가 들어갑니다.
+ *   · source가 "fruit"이면 열매 경험치가 들어갑니다.
+ *   · 그 외(근접·무기 스킬)에는, 그 순간 무기를 손에 들고 있었다면 그 무기의
+ *     숙련 경험치가 들어갑니다 (맨손이면 아무 무기 경험치도 들어오지 않음).
  */
 function dealDamage(
   player: PlayerState,
@@ -64,25 +93,41 @@ function dealDamage(
   player.money += enemy.moneyReward;
   grantExp(player, enemy.expReward, events);
 
-  // 여기가 핵심: 막타가 열매였을 때만 열매 경험치 지급
+  // 여기가 핵심: 막타가 열매였을 때만 열매 경험치, 무기를 들고 있었을 때만 그 무기 경험치.
   if (source === "fruit") {
     grantFruitExp(player, fruitExpFromEnemy(enemy.expReward), events);
+  } else {
+    const weapon = drawnWeapon(player);
+    if (weapon) grantWeaponExp(player, weapon.id, weaponExpFromEnemy(enemy.expReward), events);
   }
 }
 
-function applySkill(player: PlayerState, enemies: EnemyState[], skill: SkillDef, events: GameEvent[]) {
-  // 자기 강화
-  if (skill.selfBuffMultiplier && skill.selfBuffDurationSec) {
+/**
+ * 스킬 하나를 실제로 적용합니다. 열매/무기 스킬이 공통으로 쓰며, 데미지 값은
+ * 호출부(stepCombat)가 각자의 공식(skillDamage/weaponSkillDamage)으로 미리
+ * 계산해서 넘깁니다. 자기 강화·회복은 열매 스킬 전용입니다 — 무기 스킬은
+ * 순수 공격/기동 위주로 설계했습니다.
+ */
+function applySkill(
+  player: PlayerState,
+  enemies: EnemyState[],
+  skill: SkillDef,
+  source: DamageSource,
+  damage: number,
+  events: GameEvent[],
+) {
+  // 자기 강화 — 열매 스킬 전용
+  if (source === "fruit" && skill.selfBuffMultiplier && skill.selfBuffDurationSec) {
     player.fruitBuffMultiplier = skill.selfBuffMultiplier;
     player.fruitBuffRemainingSec = skill.selfBuffDurationSec;
   }
 
-  // 회복
-  if (skill.healPercentOfMaxHp) {
+  // 회복 — 열매 스킬 전용
+  if (source === "fruit" && skill.healPercentOfMaxHp) {
     player.hp = Math.min(player.maxHp, player.hp + player.maxHp * skill.healPercentOfMaxHp);
   }
 
-  // 돌진 — 물리 바디 이동은 Simulation이 처리하도록 요청만 남깁니다.
+  // 돌진 — 물리 바디 이동은 Simulation이 처리하도록 요청만 남깁니다. (공통)
   if (skill.dashDistance) {
     player.pendingDash = {
       x: Math.sin(player.aimYaw) * skill.dashDistance,
@@ -92,7 +137,6 @@ function applySkill(player: PlayerState, enemies: EnemyState[], skill: SkillDef,
 
   if (skill.shape.kind === "self") return;
 
-  const damage = skillDamage(player, skill);
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
     if (!isInShape(player, enemy, skill)) continue;
@@ -107,7 +151,7 @@ function applySkill(player: PlayerState, enemies: EnemyState[], skill: SkillDef,
       enemy.status.burnRemainingSec = skill.burnDurationSec;
     }
 
-    if (damage > 0) dealDamage(player, enemy, damage, "fruit", events);
+    if (damage > 0) dealDamage(player, enemy, damage, source, events);
   }
 }
 
@@ -143,10 +187,13 @@ function applyMelee(player: PlayerState, enemies: EnemyState[], events: GameEven
 }
 
 /**
- * 화상 등 지속 피해 처리. 열매 스킬에서 비롯된 효과이므로, 도트로 죽어도
- * 열매 경험치가 들어옵니다 (막타의 출처가 열매이기 때문).
+ * 화상 등 지속 피해 처리. 열매 스킬 또는 무기 스킬(엔마 등)에서 비롯된
+ * 효과이므로, 도트로 죽어도 그 순간 손에 든 게 무엇이냐에 따라 열매/무기
+ * 경험치가 들어옵니다 (지금 뽑아 든 상태를 기준으로 판단합니다 — 이
+ * 프로젝트의 다른 "막타 기준" 판정들과 같은 원칙입니다).
  */
 export function stepEnemyStatuses(player: PlayerState, enemies: EnemyState[], dt: number, events: GameEvent[]) {
+  const dotSource: DamageSource = player.fruitDrawn ? "fruit" : drawnWeapon(player) ? "weapon" : "melee";
   for (const enemy of enemies) {
     const st = enemy.status;
 
@@ -158,7 +205,7 @@ export function stepEnemyStatuses(player: PlayerState, enemies: EnemyState[], dt
     if (st.burnRemainingSec > 0) {
       st.burnRemainingSec = Math.max(0, st.burnRemainingSec - dt);
       if (enemy.alive && st.burnDps > 0) {
-        dealDamage(player, enemy, st.burnDps * dt, "fruit", events);
+        dealDamage(player, enemy, st.burnDps * dt, dotSource, events);
       }
       if (st.burnRemainingSec === 0) st.burnDps = 0;
     }
@@ -188,27 +235,59 @@ export function stepCombat(dt: number, input: InputSnapshot, player: PlayerState
     player.events.push({ type: "melee_attack_fired" });
   }
 
-  const skills = skillsForFruit(player.equippedFruit);
-  for (let slot = 0; slot < 4; slot++) {
-    if (!input.skillPressed[slot]) continue;
+  // Z/X/C/V는 "지금 손에 뽑아 든 것"에 따라 열매 스킬 또는 무기 스킬로 갈립니다.
+  // 아무것도 뽑지 않았으면(맨손) 숫자키를 눌러 열매(4번)나 무기(1~3번)를 먼저
+  // 뽑아야 하고, 그 전까지는 스킬 입력을 아예 처리하지 않습니다 —
+  // skill_locked 안내조차 뜨지 않습니다(HUD도 스킬 UI를 통째로 숨깁니다).
+  const weapon = drawnWeapon(player);
+  if (player.fruitDrawn) {
+    const skills = skillsForFruit(player.equippedFruit);
+    for (let slot = 0; slot < 4; slot++) {
+      if (!input.skillPressed[slot]) continue;
 
-    const skill = skills[slot];
-    if (!skill) continue;
+      const skill = skills[slot];
+      if (!skill) continue;
 
-    if (!isSlotUnlocked(slot, player.fruitLevel)) {
-      player.events.push({
-        type: "skill_locked",
-        skillName: skill.name,
-        requiredFruitLevel: skill.unlockFruitLevel,
-      });
-      continue;
+      if (!isSlotUnlocked(slot, player.fruitLevel)) {
+        player.events.push({
+          type: "skill_locked",
+          skillName: skill.name,
+          requiredFruitLevel: skill.unlockFruitLevel,
+        });
+        continue;
+      }
+      if (player.skillCooldowns[slot] > 0) continue;
+      if (player.mana < skill.manaCost) continue;
+
+      player.skillCooldowns[slot] = skill.cooldownSec;
+      player.mana -= skill.manaCost;
+      applySkill(player, enemies, skill, "fruit", skillDamage(player, skill), player.events);
+      player.events.push({ type: "skill_fired", slot });
     }
-    if (player.skillCooldowns[slot] > 0) continue;
-    if (player.mana < skill.manaCost) continue;
+  } else if (weapon) {
+    const skills = skillsForWeapon(weapon.id);
+    const masteryLevel = weaponMasteryLevel(player, weapon.id);
+    for (let slot = 0; slot < 4; slot++) {
+      if (!input.skillPressed[slot]) continue;
 
-    player.skillCooldowns[slot] = skill.cooldownSec;
-    player.mana -= skill.manaCost;
-    applySkill(player, enemies, skill, player.events);
-    player.events.push({ type: "skill_fired", slot });
+      const skill = skills[slot];
+      if (!skill) continue;
+
+      if (!isWeaponSlotUnlocked(slot, masteryLevel)) {
+        player.events.push({
+          type: "weapon_skill_locked",
+          skillName: skill.name,
+          requiredWeaponLevel: skill.unlockFruitLevel,
+        });
+        continue;
+      }
+      if (player.skillCooldowns[slot] > 0) continue;
+      if (player.mana < skill.manaCost) continue;
+
+      player.skillCooldowns[slot] = skill.cooldownSec;
+      player.mana -= skill.manaCost;
+      applySkill(player, enemies, skill, "weapon", weaponSkillDamage(player, skill, weapon.id), player.events);
+      player.events.push({ type: "skill_fired", slot });
+    }
   }
 }

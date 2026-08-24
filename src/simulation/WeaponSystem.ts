@@ -119,8 +119,11 @@ export function toggleHotbar(player: PlayerState, itemId: ItemId): number | null
 }
 
 /**
- * 숫자키로 실제 장착/해제를 토글합니다.
+ * 숫자키(1~3)로 실제 장착/해제를 토글합니다.
  * 같은 칸을 다시 누르면 무기를 도로 집어넣습니다.
+ *
+ * 무기를 뽑으면(drawn) 열매는 자동으로 집어넣어집니다 — 손에는 열매든
+ * 무기든 하나만 들 수 있기 때문입니다 (FruitSystem의 toggleFruitDrawn 참고).
  */
 export function toggleDrawn(player: PlayerState, slot: number): "drawn" | "sheathed" | null {
   if (slot < 0 || slot >= player.hotbar.length) return null;
@@ -131,5 +134,22 @@ export function toggleDrawn(player: PlayerState, slot: number): "drawn" | "sheat
     return "sheathed";
   }
   player.activeHotbarSlot = slot;
+  player.fruitDrawn = false;
+  return "drawn";
+}
+
+/**
+ * 숫자키 4번으로 먹은 열매를 실제로 뽑아 듭니다/집어넣습니다.
+ * 무기와 마찬가지로 열매도 "뽑아야만" Z/X/C/V 스킬을 쓸 수 있습니다.
+ *
+ * 열매를 뽑으면 손에 들고 있던 무기는 자동으로 집어넣어집니다(상호 배타).
+ */
+export function toggleFruitDrawn(player: PlayerState): "drawn" | "sheathed" {
+  if (player.fruitDrawn) {
+    player.fruitDrawn = false;
+    return "sheathed";
+  }
+  player.fruitDrawn = true;
+  player.activeHotbarSlot = null;
   return "drawn";
 }

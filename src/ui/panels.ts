@@ -141,7 +141,7 @@ export class PanelManager {
           <div class="dialog-portrait">武</div>
           <p class="dialog-line">
             네 몸을 강철처럼 단단하게 만드는 <b>무장색</b>을 가르쳐주마.<br/>
-            익히면 <b>H키</b>로 발동할 수 있고, 발동하는 동안 전신이 검게 변하면서
+            익히면 <b>J키</b>로 발동할 수 있고, 발동하는 동안 전신이 검게 변하면서
             근접 공격 데미지가 <b>${Math.round((HAKI_DAMAGE_MULTIPLIER - 1) * 100)}%</b> 올라간다.
             대신 마나가 계속 소모되지.
           </p>
@@ -403,7 +403,7 @@ export class PanelManager {
         <div>최대 마나: ${p.maxMana}</div>
         <div>근접 공격력: ${p.meleeDamage}${p.hakiActive ? ` → <b style="color:#d1c4e9">${Math.round(effectiveMeleeDamage(p))}</b>` : ""}</div>
         <div>열매 능력 배율: x${p.abilityDamageMultiplier.toFixed(2)}</div>
-        <div>무장색: ${p.hakiLearned ? (p.hakiActive ? "발동 중 (H)" : "습득함 (H로 발동)") : "미습득"}</div>
+        <div>무장색: ${p.hakiLearned ? (p.hakiActive ? "발동 중 (J)" : "습득함 (J로 발동)") : "미습득"}</div>
         <div>열매 레벨: Lv.${p.fruitLevel} (${p.fruitExp}/${p.fruitExpToNext})</div>
       </div>
     `);
@@ -709,7 +709,7 @@ export class PanelManager {
         <div class="trainer-icon">武</div>
         <div class="trainer-info">
           <div class="trainer-name">무장색</div>
-          <div class="trainer-desc">전신이 검게 변하며 근접 데미지가 ${Math.round((HAKI_DAMAGE_MULTIPLIER - 1) * 100)}% 올라갑니다. H키로 발동.</div>
+          <div class="trainer-desc">전신이 검게 변하며 근접 데미지가 ${Math.round((HAKI_DAMAGE_MULTIPLIER - 1) * 100)}% 올라갑니다. J키로 발동.</div>
           <div class="trainer-stats">발동 중에는 마나가 계속 소모됩니다</div>
         </div>
         ${hakiBtn}

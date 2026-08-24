@@ -208,6 +208,23 @@ export interface PlayerState {
   /** 실제로 손에 들고 있는 단축바 칸 (null이면 맨손) */
   activeHotbarSlot: number | null;
 
+  /**
+   * 열매를 실제로 "뽑아 든" 상태인지 (숫자키 4번). 무기와 마찬가지로, 열매도
+   * 그냥 먹었다고 바로 스킬(Z/X/C/V)을 쓸 수 있는 게 아니라 숫자키로 꺼내야
+   * 합니다. 무기를 뽑으면(activeHotbarSlot이 null이 아니게 되면) 이 값은
+   * 자동으로 꺼지고, 반대로 열매를 뽑으면 무기는 자동으로 집어넣어집니다 —
+   * "지금 손에 든 것"은 열매든 무기든 하나뿐입니다.
+   */
+  fruitDrawn: boolean;
+
+  /**
+   * 무기별 숙련도(레벨). 열매 레벨과 완전히 같은 방식으로 오르지만, 열매는
+   * 하나뿐이라 단일 값인 반면 무기는 여러 자루를 오가며 쓸 수 있어 무기 id별로
+   * 따로 관리합니다. 처음 손에 들기 전까지는 항목이 없다가, 그 무기로 첫
+   * 경험치를 얻는 순간 Lv.1로 생성됩니다.
+   */
+  weaponMastery: Partial<Record<ItemId, { level: number; exp: number; expToNext: number }>>;
+
   /** 무장색(무장색 패기)을 배웠는지 */
   hakiLearned: boolean;
   /** 무장색을 현재 발동 중인지 — 켜면 전신이 검게 변하고 근접 데미지가 올라갑니다 */
@@ -284,6 +301,10 @@ export type GameEvent =
   | { type: "item_hotbarred"; itemName: string; slot: number }
   | { type: "weapon_drawn"; weaponName: string }
   | { type: "weapon_sheathed"; weaponName: string }
+  | { type: "fruit_drawn"; fruitName: string }
+  | { type: "fruit_sheathed"; fruitName: string }
+  | { type: "weapon_leveled_up"; weaponId: ItemId; weaponName: string; newLevel: number }
+  | { type: "weapon_skill_locked"; skillName: string; requiredWeaponLevel: number }
   | { type: "gacha_rolled"; fruitName: string; paid: number }
   | { type: "jump_learned"; jumps: number }
   | { type: "sea_changed"; sea: Sea; seaName: string; islandName: string }
@@ -441,6 +462,8 @@ export function createInitialGameState(
       ownedBoats: ["dinghy"],
       hotbar: [null, null, null],
       activeHotbarSlot: null,
+      fruitDrawn: false,
+      weaponMastery: {},
       hakiLearned: false,
       hakiActive: false,
       expBuffRemainingSec: 0,

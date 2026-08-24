@@ -29,10 +29,17 @@
 // ---------------------------------------------------------------------------
 
 import type { WebSocket } from "ws";
-import type { PlayerState } from "../src/core/GameState";
+import type { ItemId, PlayerState } from "../src/core/GameState";
 import type { Faction } from "../src/world/islands";
-import { totalMeleeCooldown, totalMeleeDamage, totalMeleeRange, skillDamage } from "../src/simulation/CombatSystem";
+import {
+  totalMeleeCooldown,
+  totalMeleeDamage,
+  totalMeleeRange,
+  skillDamage,
+  weaponSkillDamage,
+} from "../src/simulation/CombatSystem";
 import { isSlotUnlocked, skillsForFruit } from "../src/simulation/skills";
+import { isWeaponSlotUnlocked, skillsForWeapon } from "../src/simulation/weaponSkills";
 import { dist2D, pointInShape } from "../src/simulation/ShapeMath";
 import {
   CONE_LATENCY_BUFFER_DEG,
@@ -58,6 +65,7 @@ const MAX_MELEE_DAMAGE = 20000;
 const MAX_ABILITY_MULTIPLIER = 50;
 const MAX_FRUIT_BUFF_MULTIPLIER = 2; // 카탈로그 최댓값(기어 세컨드 1.8배)보다 여유
 const MAX_MELEE_RANGE = 30;
+const MAX_WEAPON_MASTERY_LEVEL = 150;
 const MIN_MELEE_COOLDOWN_SEC = 0.05;
 const MELEE_COOLDOWN_GRACE = 0.7; // 지연시간 보정 — 서버가 요구하는 최소 대기 비율
 const SKILL_COOLDOWN_GRACE = 0.7;
@@ -85,7 +93,16 @@ function clampStats(raw: CombatStatsSnapshot): CombatStatsSnapshot {
     fruitLevel: clampFinite(raw.fruitLevel, 1, 150, 1),
     fruitBuffMultiplier: clampFinite(raw.fruitBuffMultiplier, 1, MAX_FRUIT_BUFF_MULTIPLIER, 1),
     equippedFruit: typeof raw.equippedFruit === "string" ? raw.equippedFruit : "magma_fist",
+    fruitDrawn: raw.fruitDrawn === true,
+    weaponMasteryLevel: clampFinite(raw.weaponMasteryLevel, 1, MAX_WEAPON_MASTERY_LEVEL, 1),
   };
+}
+
+/** 지금 activeHotbarSlot/hotbar로부터 실제로 손에 든 무기 id (없으면 null). */
+function drawnWeaponIdFromStats(stats: CombatStatsSnapshot): ItemId | null {
+  if (stats.activeHotbarSlot === null) return null;
+  const id = stats.hotbar[stats.activeHotbarSlot];
+  return typeof id === "string" ? (id as ItemId) : null;
 }
 
 /**
@@ -95,6 +112,7 @@ function clampStats(raw: CombatStatsSnapshot): CombatStatsSnapshot {
  * 그대로 넘깁니다 — 클라이언트가 쓰는 것과 완전히 같은 함수, 같은 공식입니다.
  */
 function asPlayerStateForCombat(stats: CombatStatsSnapshot, aimYaw: number): PlayerState {
+  const weaponId = drawnWeaponIdFromStats(stats);
   return {
     meleeDamage: stats.meleeDamage,
     meleeRange: stats.meleeRange,
@@ -106,6 +124,9 @@ function asPlayerStateForCombat(stats: CombatStatsSnapshot, aimYaw: number): Pla
     fruitLevel: stats.fruitLevel,
     fruitBuffMultiplier: stats.fruitBuffMultiplier,
     equippedFruit: stats.equippedFruit as PlayerState["equippedFruit"],
+    fruitDrawn: stats.fruitDrawn,
+    // weaponSkillDamage/weaponMasteryLevel이 이 무기 id로 찾아 읽습니다.
+    weaponMastery: weaponId ? { [weaponId]: { level: stats.weaponMasteryLevel, exp: 0, expToNext: 0 } } : {},
     aimYaw,
     position: { x: 0, y: 0, z: 0 },
     // 아래는 이 계산에서 안 쓰이는 필드들 — 타입을 맞추기 위한 자리 채우기.
@@ -713,13 +734,21 @@ export class World {
     }
 
     const stats = attacker.stats;
-    const skills = skillsForFruit(stats.equippedFruit as Parameters<typeof skillsForFruit>[0]);
-    const skill = skills?.[slot];
+    // 클라이언트와 같은 규칙: 열매를 뽑았으면 열매 스킬, 아니면(무기를 뽑았으면) 무기 스킬.
+    const weaponId = drawnWeaponIdFromStats(stats);
+    const skill = stats.fruitDrawn
+      ? skillsForFruit(stats.equippedFruit as Parameters<typeof skillsForFruit>[0])?.[slot]
+      : weaponId
+        ? skillsForWeapon(weaponId)[slot]
+        : undefined;
     if (!skill) {
       this.send(attacker, { type: "pvp_rejected", reason: "unknown_skill" });
       return;
     }
-    if (!isSlotUnlocked(slot, stats.fruitLevel)) {
+    const unlocked = stats.fruitDrawn
+      ? isSlotUnlocked(slot, stats.fruitLevel)
+      : isWeaponSlotUnlocked(slot, stats.weaponMasteryLevel);
+    if (!unlocked) {
       this.send(attacker, { type: "pvp_rejected", reason: "locked_skill" });
       return;
     }
@@ -747,7 +776,11 @@ export class World {
 
     attacker.lastSkillAtMs[slot] = nowMs;
     const fakePlayer = asPlayerStateForCombat(stats, attacker.aimYaw);
-    const damage = skillDamage(fakePlayer, skill);
+    const damage = stats.fruitDrawn
+      ? skillDamage(fakePlayer, skill)
+      : weaponId
+        ? weaponSkillDamage(fakePlayer, skill, weaponId)
+        : 0;
     this.applyDamage(attacker, target, damage, "skill");
   }
 }

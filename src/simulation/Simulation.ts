@@ -25,7 +25,8 @@ import { rollGacha } from "./GachaSystem";
 import { learnJump } from "./TrainerSystem";
 import { travelSea, canTravelSea } from "./SeaSystem";
 import { setGuideTarget, stepGuide } from "./GuideSystem";
-import { toggleDrawn, weaponFor } from "./WeaponSystem";
+import { toggleDrawn, toggleFruitDrawn, weaponFor } from "./WeaponSystem";
+import { FRUIT_CATALOG } from "./ShopSystem";
 import { buyBoatTier } from "./BoatSystem";
 import { SWIM_SURFACE_Y, islandAt, islandArrivalPosition, getIsland, startIslandFor } from "../world/islands";
 import type { Faction } from "../world/islands";
@@ -81,7 +82,17 @@ export class Simulation {
     }
 
     // 숫자키로 단축바 장비를 실제로 뽑거나 집어넣습니다 (로블록스 방식)
-    if (input.hotbarPressed !== null) {
+    // 1~3번은 무기, 4번은 열매입니다 — 둘은 상호 배타적이라 하나를 뽑으면
+    // 다른 하나는 자동으로 집어넣어집니다 (WeaponSystem.toggleDrawn/toggleFruitDrawn 참고).
+    if (input.hotbarPressed === 3) {
+      const result = toggleFruitDrawn(player);
+      const fruitName = FRUIT_CATALOG.find((f) => f.id === player.equippedFruit)?.name ?? "열매";
+      player.events.push(
+        result === "drawn"
+          ? { type: "fruit_drawn", fruitName }
+          : { type: "fruit_sheathed", fruitName },
+      );
+    } else if (input.hotbarPressed !== null) {
       const result = toggleDrawn(player, input.hotbarPressed);
       const weapon = weaponFor(player.hotbar[input.hotbarPressed]);
       if (result && weapon) {

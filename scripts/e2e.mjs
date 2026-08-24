@@ -78,23 +78,21 @@ async function humanClick(selector) {
  *
  * 세이브가 있으면 시작 화면이 진영을 다시 묻지 않고 넘어가기 때문에,
  * "처음 접속"을 검증하려면 저장본부터 비워야 합니다.
+ *
+ * 로그인은 이제 구글 계정만 허용합니다(게스트 버튼 없음) — 자동화로는 실제
+ * 구글 OAuth 팝업을 통과할 수 없으므로, 대부분의 검증(게임 안 동작 확인)은
+ * main.ts가 자동 테스트/딥링크용으로 열어둔 ?guest=1 파라미터로 **로그인
+ * 단계만** 건너뜁니다 — 진영/모드 선택 화면은 그대로 남아 있어서 그 화면
+ * 자체를 검증하는 테스트(섹션 0 등)에는 영향이 없습니다. 로그인 화면 자체를
+ * 검증하려면(섹션 25) { guest: false }로 호출해 URL을 그대로 씁니다.
  */
 async function freshStart(url = "http://localhost:4173/", { guest = true } = {}) {
-  await page.goto(url, { waitUntil: "load" });
+  const hasBypassParam = /[?&](mode|faction|guest)=/.test(url);
+  const target = guest && !hasBypassParam ? url + (url.includes("?") ? "&" : "?") + "guest=1" : url;
+  await page.goto(target, { waitUntil: "load" });
   await page.evaluate(() => { try { localStorage.clear(); } catch {} });
-  await page.goto(url, { waitUntil: "load" });
+  await page.goto(target, { waitUntil: "load" });
   await page.waitForTimeout(1600);
-  // 파이어베이스 설정이 들어 있으므로 로그인 단계가 먼저 뜹니다.
-  // 대부분의 검증은 게임 안에서 하는 것이라 여기서는 게스트로 통과합니다.
-  if (guest) {
-    const hasLogin = await page.evaluate(
-      () => !!document.getElementById("btn-play-guest") && !document.getElementById("start-step-login")?.hidden,
-    );
-    if (hasLogin) {
-      await humanClick("#btn-play-guest");
-      await page.waitForTimeout(400);
-    }
-  }
 }
 
 /** 직선·부채꼴 스킬은 카메라가 보는 방향으로 나가므로, 대상 쪽으로 시점을 맞춥니다. */
@@ -782,7 +780,7 @@ assert(!beforeHaki.active, "발동 전");
 assert(beforeHaki.bodyColor !== "141414", `발동 전 몸 색은 검정이 아님 (#${beforeHaki.bodyColor})`);
 assert(beforeHaki.badgeHidden, "발동 전 HUD 뱃지 숨김");
 
-await page.keyboard.press("KeyH");
+await page.keyboard.press("KeyJ");
 await page.waitForTimeout(500);
 const afterHakiOn = await page.evaluate(() => {
   const g = window.__game;
@@ -794,7 +792,7 @@ const afterHakiOn = await page.evaluate(() => {
     badgeText: document.querySelector("#hud-haki")?.textContent,
   };
 });
-assert(afterHakiOn.active, "H키로 무장색 발동");
+assert(afterHakiOn.active, "J키로 무장색 발동");
 assert(afterHakiOn.bodyColor === "141414", `전신이 검정으로 변함 (몸 #${afterHakiOn.bodyColor})`);
 assert(afterHakiOn.legColor === "0d0d0d", `다리도 검정 (#${afterHakiOn.legColor})`);
 assert(!afterHakiOn.badgeHidden && /무장색/.test(afterHakiOn.badgeText ?? ""), `HUD 뱃지 표시: "${afterHakiOn.badgeText}"`);
@@ -806,15 +804,15 @@ await page.waitForTimeout(1800);
 const manaB = await page.evaluate(() => window.__game.simulation.state.player.mana);
 assert(manaB < manaA, `발동 중 마나 지속 소모 (${manaA.toFixed(1)} → ${manaB.toFixed(1)})`);
 
-// 다시 V로 해제하면 색이 돌아오는지
-await page.keyboard.press("KeyH");
+// 다시 J로 해제하면 색이 돌아오는지
+await page.keyboard.press("KeyJ");
 await page.waitForTimeout(500);
 const afterHakiOff = await page.evaluate(() => ({
   active: window.__game.simulation.state.player.hakiActive,
   bodyColor: window.__game.renderer.playerParts.bodyMat.color.getHexString(),
   badgeHidden: document.querySelector("#hud-haki")?.hidden,
 }));
-assert(!afterHakiOff.active, "H키로 무장색 해제");
+assert(!afterHakiOff.active, "J키로 무장색 해제");
 assert(afterHakiOff.bodyColor === "ffcc66", `원래 색으로 복귀 (#${afterHakiOff.bodyColor})`);
 assert(afterHakiOff.badgeHidden, "해제 후 뱃지 숨김");
 
@@ -928,6 +926,16 @@ await page.evaluate(() => {
   sim.state.player.mana = sim.state.player.maxMana;
 });
 await page.waitForTimeout(500);
+
+// 열매도 숫자키(4번)를 눌러 "뽑아야만" ZXCV 스킬 UI가 보입니다 — 아직 아무것도
+// 뽑지 않은 상태에서는 스킬바가 비어 있어야 합니다.
+const skillRowBeforeDraw = await page.evaluate(() => document.querySelectorAll(".skill-slot").length);
+assert(skillRowBeforeDraw === 0, `아무것도 뽑지 않았으면 스킬 UI가 아예 안 보임 (슬롯 ${skillRowBeforeDraw}개)`);
+
+await page.keyboard.press("Digit4");
+await page.waitForTimeout(400);
+const fruitDrawnState = await page.evaluate(() => window.__game.simulation.state.player.fruitDrawn);
+assert(fruitDrawnState === true, "4번 키로 열매를 뽑음");
 
 const slotsAtLv1 = await page.evaluate(() =>
   [...document.querySelectorAll(".skill-slot")].map((el) => ({
@@ -1276,7 +1284,7 @@ const hotbarred = await page.evaluate(() => ({
 assert(hotbarred.hotbar[0] === "sword_yoru", `단축바 1번에 장착 (${hotbarred.hotbar.join(",")})`);
 assert(hotbarred.stillInInv, "장비는 소모되지 않고 인벤토리에 남음");
 assert(hotbarred.active === null, "아직 손에 들진 않음");
-assert(hotbarred.slots === 3, `하단 중앙 단축바 ${hotbarred.slots}칸 표시`);
+assert(hotbarred.slots === 4, `하단 중앙 단축바 ${hotbarred.slots}칸 표시 (무기 3 + 열매 1)`);
 assert(/요루/.test(hotbarred.slot1Text ?? ""), `단축바 1번에 이름 표시: "${hotbarred.slot1Text?.trim()}"`);
 await page.evaluate(() => window.__game.panels.closeAll());
 await page.waitForTimeout(300);
@@ -1978,35 +1986,44 @@ assert(/남았습니다/.test(reloadedPanel.status ?? ""), `남은 시간 안내
 // 뒷정리 — 저장값을 지워서 다음 실행에 영향을 주지 않게
 await page.evaluate(() => localStorage.removeItem("bloxfruits-web/save-v1"));
 
-section("25. 파이어베이스 — 설정 없이도 로그인 화면이 뜨고, 게스트로 계속 가능");
+section("25. 파이어베이스 — 구글 로그인만 허용(게스트 없음) + 구글 로고 표시");
 // 설정값이 소스에 들어 있으므로 .env 없이도 로그인 단계가 나와야 합니다.
+// 자동화로는 실제 구글 OAuth 팝업을 통과할 수 없으므로, 여기서는 화면 자체(버튼
+// 구성·로고·게스트 우회 없음)만 확인하고 클릭하지는 않습니다.
 await freshStart("http://localhost:4173/", { guest: false });
 const loginScreen = await page.evaluate(() => ({
   loginVisible: !document.getElementById("start-step-login")?.hidden,
   factionHidden: document.getElementById("start-step-faction")?.hidden,
   loginBtn: !!document.getElementById("btn-google-login"),
   guestBtn: !!document.getElementById("btn-play-guest"),
+  googleLogoSvg: !!document.querySelector("#btn-google-login svg"),
   gameStarted: typeof window.__game !== "undefined",
 }));
 console.log("  로그인 화면:", JSON.stringify(loginScreen));
 assert(loginScreen.loginVisible, ".env 없이도 로그인 화면이 뜸 (설정이 코드에 있으므로)");
 assert(loginScreen.factionHidden, "로그인 단계 동안 진영 선택은 가려져 있음");
-assert(loginScreen.loginBtn && loginScreen.guestBtn, "구글 로그인 / 게스트 버튼이 둘 다 있음");
-assert(!loginScreen.gameStarted, "고르기 전에는 게임이 시작되지 않음");
+assert(loginScreen.loginBtn, "구글 로그인 버튼이 있음");
+assert(!loginScreen.guestBtn, "게스트(로그인 없이 플레이) 버튼은 더 이상 없음 — 구글 로그인 필수");
+assert(loginScreen.googleLogoSvg, "구글 로그인 버튼에 구글 로고(SVG)가 보임");
+assert(!loginScreen.gameStarted, "로그인하기 전에는 게임이 시작되지 않음");
 await page.screenshot({ path: "/home/claude/bp-project/scripts/out-25-login.png" });
 
-// 게스트로 들어가도 게임은 정상 진행되어야 합니다
-assert(await humanClick("#btn-play-guest"), "로그인 없이 플레이 버튼을 실제 마우스로 클릭 가능");
-await page.waitForTimeout(500);
-const afterGuest = await page.evaluate(() => ({
+// 실제 플레이 검증(저장/복원/랭킹 등)은 구글 로그인 없이 진행해야 하므로,
+// main.ts가 자동 테스트·딥링크용으로 열어둔 ?guest=1로 로그인 단계만 건너뜁니다
+// (실 사용자 화면에는 이 통로가 노출되지 않습니다 — 화면에 버튼이 없으므로).
+await page.goto("http://localhost:4173/?guest=1", { waitUntil: "load" });
+await page.evaluate(() => { try { localStorage.clear(); } catch {} });
+await page.goto("http://localhost:4173/?guest=1", { waitUntil: "load" });
+await page.waitForTimeout(1600);
+const afterBypass = await page.evaluate(() => ({
   loginHidden: document.getElementById("start-step-login")?.hidden,
   factionVisible: !document.getElementById("start-step-faction")?.hidden,
 }));
-assert(afterGuest.loginHidden && afterGuest.factionVisible, "게스트를 고르면 진영 선택으로 넘어감");
+assert(afterBypass.loginHidden && afterBypass.factionVisible, "?guest=1 딥링크로 로그인 단계를 건너뛰면 곧장 진영 선택으로 감");
 
 assert(await humanClick('.start-btn[data-faction="pirate"]'), "해적 선택");
 assert(await humanClick('.start-btn[data-mode="fast"]'), "빠른 모드 선택");
-await waitUntil(() => typeof window.__game !== "undefined", { label: "게스트 부팅" });
+await waitUntil(() => typeof window.__game !== "undefined", { label: "비로그인 부팅" });
 await page.waitForTimeout(1000);
 
 const progress = await page.evaluate(async () => {
@@ -2027,14 +2044,12 @@ const progress = await page.evaluate(async () => {
   };
 });
 console.log("  저장됨:", JSON.stringify({ isCloud: progress.isCloud, level: progress.saved?.level }));
-assert(progress.isCloud === false, "게스트는 클라우드 저장을 시도하지 않음");
+assert(progress.isCloud === false, "로그인하지 않았으면 클라우드 저장을 시도하지 않음");
 assert(progress.saved && progress.saved.level === 77, `이 브라우저에 저장됨 (Lv.${progress.saved?.level})`);
 
-// 새로고침 — 진영을 다시 묻지 않고 바로 이어서
-await page.goto("http://localhost:4173/", { waitUntil: "load" });
+// 새로고침 — 진영을 다시 묻지 않고 바로 이어서 (여기서도 ?guest=1로 로그인 단계만 건너뜀)
+await page.goto("http://localhost:4173/?guest=1", { waitUntil: "load" });
 await page.waitForTimeout(2000);
-assert(await humanClick("#btn-play-guest"), "새로고침 후에도 게스트로 계속");
-await page.waitForTimeout(600);
 const resumeScreen = await page.evaluate(() => ({
   factionHidden: document.getElementById("start-step-faction")?.hidden,
   modeVisible: !document.getElementById("start-step-mode")?.hidden,
@@ -2065,14 +2080,14 @@ assert(restored.boats.includes("clipper"), `보유 배 복원 (${restored.boats}
 assert(restored.maxHp === 100 + 5 * 12, `스텟에서 최대 체력 재계산 (${restored.maxHp})`);
 assert(restored.faction === "pirate", "진영 유지");
 
-// 게스트 상태에서 랭킹을 열면 "로그인이 필요하다"고 안내해야 합니다 (에러로 죽지 않고)
+// 로그인하지 않은 상태에서 랭킹을 열면 "로그인이 필요하다"고 안내해야 합니다 (에러로 죽지 않고)
 assert(await humanClick("#btn-rank"), "랭킹 버튼을 실제 마우스로 클릭 가능");
 await page.waitForTimeout(1200);
 const rankPanel = await page.evaluate(() => ({
   open: !document.querySelector("#panel-rank").hidden,
   notice: document.querySelector(".rank-notice")?.textContent?.replace(/\s+/g, " ").trim(),
 }));
-console.log("  랭킹(게스트):", JSON.stringify(rankPanel));
+console.log("  랭킹(비로그인):", JSON.stringify(rankPanel));
 assert(rankPanel.open, "랭킹 패널이 열림");
 assert(/로그인/.test(rankPanel.notice ?? ""), `로그인이 필요하다고 안내: "${rankPanel.notice}"`);
 await page.screenshot({ path: "/home/claude/bp-project/scripts/out-25-rank.png" });

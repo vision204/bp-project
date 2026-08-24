@@ -12,13 +12,16 @@
 import type { GameState } from "../core/GameState";
 import { totalMeleeRange } from "../simulation/CombatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
+import { weaponMasteryLevel } from "../simulation/WeaponLeveling";
 import { skillsForFruit } from "../simulation/skills";
+import { skillsForWeapon } from "../simulation/weaponSkills";
 import type { CombatStatsSnapshot } from "./protocol";
 import type { MultiplayerClient } from "./MultiplayerClient";
 
 /** 현재 스텟으로부터 서버 동기화용 스냅샷을 만듭니다. */
 export function buildCombatStatsSnapshot(state: GameState): CombatStatsSnapshot {
   const p = state.player;
+  const weapon = drawnWeapon(p);
   return {
     meleeDamage: p.meleeDamage,
     meleeRange: p.meleeRange,
@@ -30,7 +33,17 @@ export function buildCombatStatsSnapshot(state: GameState): CombatStatsSnapshot 
     fruitLevel: p.fruitLevel,
     fruitBuffMultiplier: p.fruitBuffMultiplier,
     equippedFruit: p.equippedFruit,
+    fruitDrawn: p.fruitDrawn,
+    weaponMasteryLevel: weapon ? weaponMasteryLevel(p, weapon.id) : 1,
   };
+}
+
+/** 지금 스킬 판정에 써야 할 카탈로그 — 뽑아 든 게 열매면 열매 스킬, 무기면 무기 스킬. */
+function activeSkillsFor(state: GameState) {
+  const p = state.player;
+  if (p.fruitDrawn) return skillsForFruit(p.equippedFruit);
+  const weapon = drawnWeapon(p);
+  return weapon ? skillsForWeapon(weapon.id) : [];
 }
 
 /**
@@ -53,7 +66,7 @@ export function processPvpAttacks(state: GameState, mp: MultiplayerClient) {
         mp.sendMeleeAttack(target.snapshot.id);
       }
     } else if (ev.type === "skill_fired") {
-      const skill = skillsForFruit(p.equippedFruit)[ev.slot];
+      const skill = activeSkillsFor(state)[ev.slot];
       if (!skill || skill.shape.kind === "self") continue;
       for (const target of mp.shapeCandidates(skill.shape)) {
         mp.sendSkillAttack(target.snapshot.id, ev.slot);

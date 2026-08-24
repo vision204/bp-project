@@ -405,6 +405,18 @@ html, body {
   background: linear-gradient(90deg, #ab47bc, #ce93d8);
 }
 
+/* 무기 숙련도 바 — 지금 손에 든 무기가 있을 때만 보임 */
+.bar-label.weapon {
+  width: 68px;
+  font-size: 11px;
+  color: #ffb74d;
+  white-space: nowrap;
+}
+
+.bar-fill.weapon {
+  background: linear-gradient(90deg, #e65100, #ffb74d);
+}
+
 /* Z/X/C/V 스킬바 */
 .skill-row {
   position: absolute;
@@ -935,15 +947,20 @@ canvas.hide-cursor {
   border-color: rgba(255, 213, 79, 0.6);
 }
 
-/* 시작 화면: 로그인 버튼 */
+/* 시작 화면: 로그인 버튼 (구글 계정만 — 게스트 없음) */
 .start-btn.google:hover:not(:disabled) {
   border-color: rgba(255, 255, 255, 0.9);
   background: rgba(255, 255, 255, 0.14);
 }
 
-.start-btn.guest:hover:not(:disabled) {
-  border-color: rgba(158, 158, 158, 0.9);
-  background: rgba(158, 158, 158, 0.14);
+.start-btn-icon-google {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #fff;
 }
 
 /* ── 레벨 + 경험치 한 줄 (상태창 맨 위) ──────────────────────────────────── */

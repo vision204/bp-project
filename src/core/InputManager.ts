@@ -17,7 +17,10 @@ export interface InputSnapshot {
   sprintHeld: boolean;
   /** Q — 전방 대쉬 */
   dashPressed: boolean;
-  /** 숫자키 1~3 — 단축바 장착/해제 (눌린 칸 번호, 없으면 null) */
+  /**
+   * 숫자키 1~3 — 무기 단축바 장착/해제, 숫자키 4 — 열매 장착/해제
+   * (눌린 칸 번호. 무기는 0~2, 열매는 3. 없으면 null)
+   */
   hotbarPressed: number | null;
   attackPressed: boolean; // 좌클릭
   /** Z/X/C/V 4개 스킬 슬롯이 이번 프레임에 눌렸는지 */
@@ -25,7 +28,7 @@ export interface InputSnapshot {
   interactPressed: boolean; // 'E' — NPC 상호작용
   toggleInventoryPressed: boolean; // 'I'
   toggleStatsPressed: boolean; // 'K' — 캐릭터창 (C는 3번째 스킬로 옮겨감)
-  toggleHakiPressed: boolean; // 'H' — 무장색 발동/해제 (V는 4번째 스킬로 옮겨감)
+  toggleHakiPressed: boolean; // 'J' — 무장색 발동/해제 (H는 예전 키, V는 4번째 스킬로 옮겨감)
   mouseDeltaX: number;
   mouseDeltaY: number;
   /** 마우스 휠 — 양수면 줌아웃(카메라가 멀어짐), 음수면 줌인 */
@@ -150,7 +153,9 @@ export class InputManager {
           ? 1
           : this.justPressed.has("Digit3")
             ? 2
-            : null,
+            : this.justPressed.has("Digit4")
+              ? 3
+              : null,
       attackPressed: this.attackQueued,
       skillPressed: [
         this.justPressed.has("KeyZ"),
@@ -161,7 +166,7 @@ export class InputManager {
       interactPressed: this.justPressed.has("KeyE"),
       toggleInventoryPressed: this.justPressed.has("KeyI"),
       toggleStatsPressed: this.justPressed.has("KeyK"),
-      toggleHakiPressed: this.justPressed.has("KeyH"),
+      toggleHakiPressed: this.justPressed.has("KeyJ"),
       flyUpHeld: this.keys.has("Space"),
       flyDownHeld: this.keys.has("ControlLeft") || this.keys.has("ControlRight"),
       toggleFlyPressed: this.justPressed.has("KeyF"),

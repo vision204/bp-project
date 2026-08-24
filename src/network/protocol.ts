@@ -54,6 +54,10 @@ export interface CombatStatsSnapshot {
   fruitLevel: number;
   fruitBuffMultiplier: number;
   equippedFruit: string;
+  /** 열매를 실제로 뽑아 든 상태인지 — 꺼져 있으면 스킬은 무기(있다면) 쪽으로 판정합니다. */
+  fruitDrawn: boolean;
+  /** 지금 손에 든 무기의 숙련 레벨(무기가 없으면 1) — 무기 스킬 데미지/해금 계산용. */
+  weaponMasteryLevel: number;
 }
 
 export type AnimState = "idle" | "move" | "swim" | "boat";

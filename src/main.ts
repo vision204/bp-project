@@ -30,23 +30,27 @@ export interface StartChoice {
 /**
  * 0단계: 로그인. Firebase 설정이 있을 때만 물어봅니다.
  * 이미 로그인돼 있으면(새로고침·리다이렉트 복귀) 묻지 않고 그대로 통과합니다.
+ *
+ * **구글 계정 로그인만 허용합니다 — 게스트로 건너뛰는 버튼은 없습니다.**
+ * (예전에는 "로그인 없이 플레이" 버튼이 있었지만, 사용자 요청으로 제거했습니다.
+ * 자동 테스트/딥링크(?mode=/?faction=/?guest=1)는 이 화면 자체를 아예
+ * 건너뛰므로 그쪽 경로는 그대로 영향이 없습니다 — README 참고.)
  */
 async function chooseAccount(): Promise<CloudUser | null> {
   const step = document.getElementById("start-step-login");
   const note = document.getElementById("login-note");
   const status = document.getElementById("start-status");
   const loginBtn = document.getElementById("btn-google-login") as HTMLButtonElement | null;
-  const guestBtn = document.getElementById("btn-play-guest") as HTMLButtonElement | null;
 
   if (!cloudAvailable()) {
     // 설정이 없으면 로그인 단계를 통째로 건너뜁니다 (게임은 그대로 됩니다).
     if (note) note.textContent = "";
     return null;
   }
-  if (!step || !loginBtn || !guestBtn) return null;
+  if (!step || !loginBtn) return null;
 
-  // 딥링크(?mode=fast 등)로 시작 화면을 건너뛸 때는 로그인도 묻지 않고 게스트로 갑니다.
-  // (자동 테스트나 북마크로 바로 들어오는 경우)
+  // 딥링크(?mode=fast 등)로 시작 화면을 건너뛸 때는 로그인도 묻지 않고 넘어갑니다.
+  // (자동 테스트나 북마크로 바로 들어오는 경우 — 실제 사용자 화면에는 없는 통로입니다)
   const params = new URLSearchParams(location.search);
   if (params.has("mode") || params.has("faction") || params.get("guest") === "1") return null;
 
@@ -55,7 +59,7 @@ async function chooseAccount(): Promise<CloudUser | null> {
   if (already) return already;
 
   step.hidden = false;
-  if (status) status.textContent = "로그인하면 다른 기기에서도 이어서 할 수 있습니다";
+  if (status) status.textContent = "구글 계정으로 로그인해야 시작할 수 있습니다";
 
   return new Promise<CloudUser | null>((resolve) => {
     let settled = false;
@@ -75,11 +79,10 @@ async function chooseAccount(): Promise<CloudUser | null> {
       if (user) {
         finish(user);
       } else if (note) {
-        // 팝업을 닫았거나 실패 — 게스트로 계속할 수 있게 안내만 합니다.
-        note.textContent = "로그인이 취소됐습니다. 로그인 없이 플레이해도 됩니다.";
+        // 팝업을 닫았거나 실패 — 게스트 우회가 없으므로 다시 시도하라고 안내합니다.
+        note.textContent = "로그인이 취소됐습니다. 다시 시도해 주세요.";
       }
     });
-    guestBtn.addEventListener("click", () => finish(null));
   });
 }
 

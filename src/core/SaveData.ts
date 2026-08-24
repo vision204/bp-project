@@ -25,7 +25,9 @@ import {
 import { ISLANDS, getIsland, startIslandFor } from "../world/islands";
 import { recomputeDerivedStats } from "../simulation/StatSystem";
 import { fruitExpRequiredForLevel, MAX_FRUIT_LEVEL } from "../simulation/FruitLeveling";
+import { MAX_WEAPON_LEVEL, weaponExpRequiredForLevel } from "../simulation/WeaponLeveling";
 import { ALL_PURCHASABLE, FRUIT_CATALOG } from "../simulation/ShopSystem";
+import { isWeapon } from "../simulation/WeaponSystem";
 import { BOAT_TIERS } from "../simulation/BoatSystem";
 import { MAX_JUMPS } from "../simulation/TrainerSystem";
 
@@ -52,6 +54,9 @@ export interface SaveData {
   equippedFruit: FruitAbilityId;
   fruitLevel: number;
   fruitExp: number;
+
+  /** 무기별 숙련도 — 손에 들어본 적 있는 무기만 들어 있습니다. */
+  weaponMastery: { id: ItemId; level: number; exp: number }[];
 
   hakiLearned: boolean;
   /** 배운 점프 단수 (1 = 기본) */
@@ -109,6 +114,8 @@ export function toSaveData(state: GameState, savedAtMs: number): SaveData {
     equippedFruit: p.equippedFruit,
     fruitLevel: p.fruitLevel,
     fruitExp: p.fruitExp,
+    weaponMastery: (Object.entries(p.weaponMastery) as [ItemId, { level: number; exp: number }][])
+      .map(([id, m]) => ({ id, level: m.level, exp: m.exp })),
     hakiLearned: p.hakiLearned,
     maxJumps: p.maxJumps,
     unlockedSecondSea: p.unlockedSecondSea,
@@ -161,6 +168,20 @@ export function applySaveData(state: GameState, raw: unknown): boolean {
   p.fruitExpToNext = fruitExpRequiredForLevel(p.fruitLevel);
   p.fruitExp = clampInt(data.fruitExp, 0, p.fruitExpToNext - 1, 0);
 
+  // 무기 숙련도 — 실제 무기 id만 복원하고, 값은 상식적인 범위로 자릅니다.
+  p.weaponMastery = {};
+  if (Array.isArray(data.weaponMastery)) {
+    for (const entry of data.weaponMastery) {
+      if (!entry || typeof entry !== "object") continue;
+      const id = (entry as { id?: unknown }).id;
+      if (typeof id !== "string" || !isWeapon(id as ItemId)) continue;
+      const level = clampInt((entry as { level?: unknown }).level, 1, MAX_WEAPON_LEVEL, 1);
+      const expToNext = weaponExpRequiredForLevel(level);
+      const exp = clampInt((entry as { exp?: unknown }).exp, 0, expToNext - 1, 0);
+      p.weaponMastery[id as ItemId] = { level, exp, expToNext };
+    }
+  }
+
   p.hakiLearned = data.hakiLearned === true;
   p.maxJumps = clampInt(data.maxJumps, 1, MAX_JUMPS, 1);
   p.unlockedSecondSea = data.unlockedSecondSea === true;
@@ -197,6 +218,7 @@ export function applySaveData(state: GameState, raw: unknown): boolean {
     }
   }
   p.activeHotbarSlot = null; // 접속하면 항상 맨손으로 시작
+  p.fruitDrawn = false; // 열매도 마찬가지 — 접속 직후에는 뽑혀 있지 않음
 
   p.ownedBoats = ["dinghy"];
   if (Array.isArray(data.ownedBoats)) {

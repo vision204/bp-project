@@ -17,6 +17,8 @@ import { expRequiredForLevel } from "../core/ExpCurve";
 import { BOAT_TIERS } from "./BoatSystem";
 import { ALL_PURCHASABLE } from "./ShopSystem";
 import { MAX_JUMPS } from "./TrainerSystem";
+import { weaponExpRequiredForLevel } from "./WeaponLeveling";
+import { fruitExpRequiredForLevel } from "./FruitLeveling";
 
 /** 레벨업 한 번에 받는 스텟 포인트 (Leveling.ts와 같은 값) */
 const STAT_POINTS_PER_LEVEL = 3;
@@ -84,6 +86,16 @@ export function applyDevLoadout(state: GameState) {
   const weapons = p.inventory.filter((i) => i.equippable).map((i) => i.id);
   p.hotbar = [weapons[0] ?? null, weapons[1] ?? null, weapons[2] ?? null];
   p.activeHotbarSlot = null;
+  p.fruitDrawn = false;
+
+  // 열매/무기 스킬을 전부 확인해볼 수 있게 열매 레벨과 각 무기 숙련도를
+  // 전부 만렙(=100, Z/X/C/V 해금 최고 조건)으로 맞춰둡니다.
+  p.fruitLevel = 100;
+  p.fruitExpToNext = fruitExpRequiredForLevel(100);
+  p.fruitExp = 0;
+  for (const weaponId of weapons) {
+    p.weaponMastery[weaponId] = { level: 100, exp: 0, expToNext: weaponExpRequiredForLevel(100) };
+  }
 
   recomputeDerivedStats(p);
   p.hp = p.maxHp;

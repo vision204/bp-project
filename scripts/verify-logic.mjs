@@ -7,9 +7,14 @@ const { DUMMY_EXP_REWARD, createInitialEnemies } = await import("../src/simulati
 const { createQuests, createNpcs, canAcceptQuest, stepInteraction: stepInteractionQ } = await import("../src/simulation/QuestSystem.ts");
 const { FRUIT_CATALOG, ITEM_CATALOG, WEAPON_CATALOG, buyFruit, buyItem,
         CASH_PAYMENT_ENABLED, CASH_PAYMENT_NOTICE } = await import("../src/simulation/ShopSystem.ts");
-const { WEAPONS, weaponFor, drawnWeapon, toggleHotbar, toggleDrawn, weaponDamageMultiplier,
-        weaponAttackSpeedMultiplier, weaponDps } = await import("../src/simulation/WeaponSystem.ts");
+const { WEAPONS, weaponFor, drawnWeapon, toggleHotbar, toggleDrawn, toggleFruitDrawn, weaponDamageMultiplier,
+        weaponAttackSpeedMultiplier, weaponDps, isWeapon } = await import("../src/simulation/WeaponSystem.ts");
 const { totalMeleeDamage, totalMeleeRange } = await import("../src/simulation/CombatSystem.ts");
+const { WEAPON_SKILLS, skillsForWeapon, isWeaponSlotUnlocked, allWeaponSkills } =
+  await import("../src/simulation/weaponSkills.ts");
+const { MAX_WEAPON_LEVEL, weaponExpRequiredForLevel, weaponLevelDamageMultiplier,
+        weaponExpFromEnemy, weaponMasteryLevel, grantWeaponExp } =
+  await import("../src/simulation/WeaponLeveling.ts");
 const { BOAT_TIERS, boatTier, bestOwnedBoat, buyBoatTier } = await import("../src/simulation/BoatSystem.ts");
 const { useItem } = await import("../src/simulation/InventorySystem.ts");
 const { EXP_POTION_DURATION_SEC, stepBuffs } = await import("../src/simulation/BuffSystem.ts");
@@ -24,7 +29,8 @@ const { QUEST_KILL_TARGET, QUEST_REWARD_PERCENT_OF_LEVEL, applyKillsToQuests, qu
         acceptQuest } = await import("../src/simulation/QuestSystem.ts");
 const { SLOT_KEYS, SLOT_UNLOCK_LEVELS, allSkills, skillsForFruit, isSlotUnlocked } =
   await import("../src/simulation/skills.ts");
-const { stepCombat, stepEnemyStatuses, skillDamage } = await import("../src/simulation/CombatSystem.ts");
+const { stepCombat, stepEnemyStatuses, skillDamage, weaponSkillDamage } =
+  await import("../src/simulation/CombatSystem.ts");
 const { fruitExpRequiredForLevel, fruitLevelDamageMultiplier, MAX_FRUIT_LEVEL } =
   await import("../src/simulation/FruitLeveling.ts");
 const { SAVE_VERSION, MAX_LEVEL, toSaveData, applySaveData } = await import("../src/core/SaveData.ts");
@@ -1077,6 +1083,9 @@ function freshPlayer() {
   pl.position = { x: 0, y: 1, z: 0 };
   pl.aimYaw = 0;
   pl.meleeDamage = 1000; // 한 방에 처치되도록
+  // 아래 스킬 테스트 대부분은 "열매를 이미 뽑아 든 상태"를 전제로 하므로
+  // 기본값을 true로 둡니다 (뽑지 않은 상태 자체를 검증하는 테스트는 따로 있음).
+  pl.fruitDrawn = true;
   return pl;
 }
 function input(overrides = {}) {
@@ -1215,6 +1224,142 @@ stepCombat(0.016, input({ skillPressed: [false, false, false, true] }), pLock, e
 assert(eLock[0].hp === 10000, "열매 Lv.1에서 V 스킬은 발동되지 않음");
 assert(pLock.mana === 999, "마나도 소모되지 않음");
 assert(pLock.events.some((e) => e.type === "skill_locked"), "skill_locked 이벤트로 안내");
+
+section("열매/무기를 뽑아야만 스킬(Z/X/C/V) 사용 가능");
+{
+  // (1) 아무것도 뽑지 않은 상태(맨손) — 스킬 입력을 눌러도 아무 일도 안 일어남,
+  //     skill_locked조차 뜨지 않아야 함 (HUD가 스킬 UI 자체를 숨기는 것과 짝을 이룸).
+  const pBare = freshPlayer();
+  pBare.fruitDrawn = false; // freshPlayer 기본값(true)을 되돌려 "맨손" 상태를 만듦
+  pBare.fruitLevel = 100; // 레벨은 충분해도 뽑지 않았으면 소용없음을 확인
+  pBare.events = [];
+  const eBare = [makeEnemy("bare1", 10000, 10)];
+  stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pBare, eBare);
+  assert(eBare[0].hp === 10000, "맨손 상태에서는 Z를 눌러도 피해가 없음");
+  assert(pBare.mana === 999, "맨손 상태에서는 마나도 소모되지 않음");
+  assert(
+    !pBare.events.some((e) => e.type === "skill_locked" || e.type === "skill_fired" || e.type === "weapon_skill_locked"),
+    "맨손 상태에서는 skill_locked/skill_fired 이벤트가 전혀 발생하지 않음(UI도 아예 안 뜸)",
+  );
+
+  // (2) 열매를 뽑으면(toggleFruitDrawn) 열매 스킬이 다시 작동함
+  const pDraw = freshPlayer();
+  pDraw.fruitDrawn = false;
+  assert(toggleFruitDrawn(pDraw) === "drawn", "toggleFruitDrawn → 뽑음");
+  assert(pDraw.fruitDrawn === true, "fruitDrawn true로 바뀜");
+  pDraw.events = [];
+  const eDraw = [makeEnemy("draw1", 10, 10)];
+  stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pDraw, eDraw);
+  assert(!eDraw[0].alive, "열매를 뽑은 뒤에는 Z 스킬이 다시 작동함");
+
+  // (3) 다시 누르면 집어넣어짐
+  assert(toggleFruitDrawn(pDraw) === "sheathed", "toggleFruitDrawn 다시 → 집어넣음");
+  assert(pDraw.fruitDrawn === false, "fruitDrawn false로 복귀");
+
+  // (4) 무기를 뽑으면 열매는 자동으로 집어넣어짐(상호 배타), 반대도 마찬가지
+  const pEx = freshPlayer();
+  pEx.fruitDrawn = false;
+  pEx.hotbar[0] = "sword_yoru";
+  toggleDrawn(pEx, 0); // 무기를 뽑음
+  assert(pEx.activeHotbarSlot === 0, "무기를 뽑음");
+  toggleFruitDrawn(pEx); // 열매를 뽑으면
+  assert(pEx.fruitDrawn === true, "열매가 뽑힘");
+  assert(pEx.activeHotbarSlot === null, "무기는 자동으로 집어넣어짐(상호 배타)");
+  toggleDrawn(pEx, 0); // 다시 무기를 뽑으면
+  assert(pEx.activeHotbarSlot === 0, "무기를 다시 뽑음");
+  assert(pEx.fruitDrawn === false, "열매는 자동으로 집어넣어짐(상호 배타)");
+}
+
+section("무기 스킬(ZXCV) — 무기를 뽑았을 때만, 숙련도로 해금");
+{
+  // 무기 스킬 카탈로그 형태 확인 — 열매와 완전히 같은 규칙(4개, Z~V, [1,25,50,100] 해금)
+  for (const weaponId of Object.keys(WEAPON_SKILLS)) {
+    const ws = skillsForWeapon(weaponId);
+    assert(ws.length === 4, `${weaponId} 무기 스킬 4개 (${ws.length})`);
+    assert(ws.map((s) => s.slot).join(",") === "0,1,2,3", `${weaponId} 슬롯 순서 Z~V`);
+    assert(
+      ws.map((s) => s.unlockFruitLevel).join(",") === "1,25,50,100",
+      `${weaponId} 해금 레벨 [1,25,50,100] (${ws.map((s) => s.unlockFruitLevel).join(",")})`,
+    );
+  }
+  assert(allWeaponSkills().length === Object.keys(WEAPON_SKILLS).length * 4, "무기 스킬 전체 개수 = 무기 수 × 4");
+  assert(isWeapon("sword_yoru") && isWeapon("sword_santoryu") && isWeapon("sword_enma"), "세 무기 모두 WeaponSystem이 인식");
+
+  // 무기를 뽑고 숙련도가 충분하면 무기 스킬이 발동됨
+  const pw = freshPlayer();
+  pw.fruitDrawn = false;
+  pw.hotbar[0] = "sword_yoru";
+  toggleDrawn(pw, 0);
+  pw.weaponMastery["sword_yoru"] = { level: 100, exp: 0, expToNext: weaponExpRequiredForLevel(100) };
+  pw.events = [];
+  const ew = [makeEnemy("w1", 10, 10)];
+  stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pw, ew);
+  assert(!ew[0].alive, "무기를 뽑고 숙련도가 충분하면 무기 스킬(Z)로 처치됨");
+  assert(pw.events.some((e) => e.type === "skill_fired"), "skill_fired 이벤트 발생");
+
+  // 숙련도가 낮으면 잠김 — weapon_skill_locked
+  const pwLock = freshPlayer();
+  pwLock.fruitDrawn = false;
+  pwLock.hotbar[0] = "sword_yoru";
+  toggleDrawn(pwLock, 0);
+  pwLock.events = [];
+  const ewLock = [makeEnemy("w2", 10000, 10)];
+  stepCombat(0.016, input({ skillPressed: [false, false, false, true] }), pwLock, ewLock);
+  assert(ewLock[0].hp === 10000, "숙련도 Lv.1에서 V 무기 스킬은 발동되지 않음");
+  assert(pwLock.events.some((e) => e.type === "weapon_skill_locked"), "weapon_skill_locked 이벤트로 안내");
+
+  // 무기 스킬 데미지 공식 — 숙련도가 오르면 데미지도 오름
+  const pDmg = freshPlayer();
+  pDmg.hotbar[0] = "sword_yoru";
+  toggleDrawn(pDmg, 0);
+  const yoruZ = skillsForWeapon("sword_yoru")[0];
+  const dmgAtLv1 = weaponSkillDamage(pDmg, yoruZ, "sword_yoru");
+  pDmg.weaponMastery["sword_yoru"] = { level: 50, exp: 0, expToNext: 1 };
+  const dmgAtLv50 = weaponSkillDamage(pDmg, yoruZ, "sword_yoru");
+  assert(dmgAtLv50 > dmgAtLv1, `무기 숙련도가 오르면 스킬 데미지도 오름 (Lv.1=${dmgAtLv1.toFixed(1)} → Lv.50=${dmgAtLv50.toFixed(1)})`);
+  assert(
+    Math.abs(weaponLevelDamageMultiplier(50) - (1 + 49 * 0.02)) < 1e-9,
+    `무기 레벨 배율 공식도 열매와 동일 (레벨당 +2%): x${weaponLevelDamageMultiplier(50).toFixed(2)}`,
+  );
+}
+
+section("무기 숙련도(경험치) — 그 무기를 든 채로 낸 근접/무기스킬 막타에서 상승");
+{
+  // (1) 무기 없이(맨손) 근접으로 처치 — 무기 경험치는 없음
+  const pNoWeapon = freshPlayer();
+  pNoWeapon.fruitDrawn = false;
+  const eNoWeapon = [makeEnemy("nw1", 10, 100)];
+  pNoWeapon.events = [];
+  stepCombat(0.016, input({ attackPressed: true }), pNoWeapon, eNoWeapon);
+  assert(!eNoWeapon[0].alive, "맨손 근접으로 처치됨");
+  assert(Object.keys(pNoWeapon.weaponMastery).length === 0, "무기가 없으면 무기 숙련도가 전혀 생기지 않음");
+
+  // (2) 무기를 뽑고 근접으로 처치 — 그 무기의 숙련 경험치가 오름
+  const pw2 = freshPlayer();
+  pw2.fruitDrawn = false;
+  pw2.hotbar[0] = "sword_yoru";
+  toggleDrawn(pw2, 0);
+  const ew2 = [makeEnemy("w3", 10, 100)];
+  pw2.events = [];
+  stepCombat(0.016, input({ attackPressed: true }), pw2, ew2);
+  assert(!ew2[0].alive, "무기를 뽑고 근접으로 처치됨");
+  assert(pw2.weaponMastery["sword_yoru"]?.exp > 0 || pw2.weaponMastery["sword_yoru"]?.level > 1,
+    `무기를 든 채 근접 막타 → 그 무기 숙련 경험치 획득 (${JSON.stringify(pw2.weaponMastery["sword_yoru"])})`);
+  assert(!pw2.weaponMastery["sword_santoryu"], "다른 무기의 숙련도는 그대로(안 생김)");
+
+  // (3) grantWeaponExp/weaponExpFromEnemy/weaponMasteryLevel 직접 검증 — FruitLeveling과 같은 곡선
+  const pDirect = freshPlayer();
+  assert(weaponMasteryLevel(pDirect, "sword_enma") === 1, "아직 한 번도 안 쓴 무기는 Lv.1");
+  grantWeaponExp(pDirect, "sword_enma", weaponExpRequiredForLevel(1), []);
+  assert(weaponMasteryLevel(pDirect, "sword_enma") === 2, `경험치를 요구치만큼 주면 레벨업 (Lv.${weaponMasteryLevel(pDirect, "sword_enma")})`);
+  const evLevelUp = [];
+  for (let i = 0; i < 50 && weaponMasteryLevel(pDirect, "sword_enma") < 25; i++) {
+    grantWeaponExp(pDirect, "sword_enma", pDirect.weaponMastery["sword_enma"].expToNext, evLevelUp);
+  }
+  assert(weaponMasteryLevel(pDirect, "sword_enma") >= 25, "반복 지급으로 Lv.25(X 해금)까지 도달");
+  assert(evLevelUp.some((e) => e.type === "weapon_leveled_up"), "weapon_leveled_up 이벤트 발생");
+  assert(weaponExpFromEnemy(100) === Math.round(100 * 0.6), "무기 경험치 비율도 열매와 동일(60%)");
+}
 
 section("이동 — Shift 질주 / Q 대쉬");
 const { DASH_COOLDOWN_SEC } = await import("../src/simulation/PlayerController.ts");
@@ -1403,6 +1548,8 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   buyItem(bp, "potion_exp", bp.events);
   buyItem(bp, "sword_yoru", bp.events);
   toggleHotbar(bp, "sword_yoru");
+  toggleDrawn(bp, 0);
+  bp.weaponMastery["sword_yoru"] = { level: 37, exp: 5, expToNext: weaponExpRequiredForLevel(37) };
   before.quests.find((q) => q.islandId === "desert").completions = 9;
 
   const saved = toSaveData(before, 1_700_000_100_000);
@@ -1428,6 +1575,8 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   assert(after.currentIslandId === "ice", `마지막 섬 복원 (${after.currentIslandId})`);
   assert(ap.inventory.some((i) => i.id === "potion_exp"), "인벤토리 아이템 복원");
   assert(ap.hotbar[0] === "sword_yoru", `단축바 복원 (${ap.hotbar.join(",")})`);
+  assert(ap.weaponMastery["sword_yoru"]?.level === 37, `무기 숙련도 복원 (Lv.${ap.weaponMastery["sword_yoru"]?.level})`);
+  assert(ap.weaponMastery["sword_yoru"]?.exp === 5, "무기 숙련 경험치도 복원");
   assert(after.quests.find((q) => q.islandId === "desert").completions === 9, "퀘스트 완료 횟수 복원");
 
   // 파생값은 저장하지 않고 다시 계산합니다
@@ -1435,6 +1584,7 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   assert(ap.hp === ap.maxHp, "접속하면 풀피로 시작");
   assert(ap.expToNextLevel === expRequiredForLevel(137), "요구 경험치도 다시 계산");
   assert(ap.activeHotbarSlot === null, "무기는 집어넣은 상태로 시작");
+  assert(ap.fruitDrawn === false, "열매도 집어넣은 상태로 시작");
   assert(ap.hakiActive === false, "무장색은 꺼진 상태로 시작");
 }
 
@@ -1462,6 +1612,12 @@ section("세이브 방어 — 이상한 값이 들어와도 안 깨짐");
     hakiLearned: "네",
     inventory: [{ id: "치트_아이템", quantity: 99999 }, { id: "potion_small", quantity: -5 }, null],
     hotbar: ["sword_yoru", 42, {}],
+    weaponMastery: [
+      { id: "sword_yoru", level: 99999, exp: -5 },
+      { id: "potion_small", level: 10, exp: 0 }, // 무기가 아닌 id는 버려져야 함
+      null,
+      { id: "존재하지_않는_검", level: 5, exp: 0 },
+    ],
     ownedBoats: ["우주선", "galewind", "galewind"],
     quests: [{ islandId: "없는섬", completions: 5 }, null],
     lastGachaAtMs: "어제",
@@ -1483,6 +1639,10 @@ section("세이브 방어 — 이상한 값이 들어와도 안 깨짐");
   assert(p.inventory.every((i) => ITEM_CATALOG.concat(WEAPON_CATALOG).some((c) => c.id === i.id)),
     "카탈로그에 없는 아이템은 버려짐");
   assert(p.inventory.every((i) => i.quantity >= 1), "개수가 1 미만인 아이템은 1로 보정");
+  assert(p.weaponMastery["sword_yoru"]?.level === MAX_WEAPON_LEVEL, `무기 숙련 레벨도 상한(${MAX_WEAPON_LEVEL})으로 잘림`);
+  assert((p.weaponMastery["sword_yoru"]?.exp ?? -1) >= 0, "음수 무기 경험치는 0 이상으로");
+  assert(!p.weaponMastery["potion_small"], "무기가 아닌 id는 무기 숙련도에서 버려짐");
+  assert(!p.weaponMastery["존재하지_않는_검"], "존재하지 않는 무기 id도 버려짐");
   assert(p.hotbar.every((slot) => slot === null || typeof slot === "string"), "단축바에 이상한 값이 안 들어감");
   assert(p.hotbar.every((slot) => slot === null || p.inventory.some((i) => i.id === slot)),
     "인벤토리에 없는 장비는 단축바에서 제거");

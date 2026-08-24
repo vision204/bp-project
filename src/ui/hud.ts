@@ -2,7 +2,10 @@ import type { GameState } from "../core/GameState";
 import { formatBuffTime } from "../simulation/BuffSystem";
 import { SEA_LABELS, getIsland } from "../world/islands";
 import { SLOT_KEYS, isSlotUnlocked, skillsForFruit } from "../simulation/skills";
-import { weaponFor } from "../simulation/WeaponSystem";
+import { isWeaponSlotUnlocked, skillsForWeapon } from "../simulation/weaponSkills";
+import { weaponMasteryLevel } from "../simulation/WeaponLeveling";
+import { drawnWeapon, weaponFor } from "../simulation/WeaponSystem";
+import { FRUIT_CATALOG } from "../simulation/ShopSystem";
 import { boatTier } from "../simulation/BoatSystem";
 import { guideInfo } from "../simulation/GuideSystem";
 
@@ -20,6 +23,10 @@ export class Hud {
   private skillRow!: HTMLDivElement;
   private fruitLevelLabel!: HTMLDivElement;
   private fruitExpFill!: HTMLDivElement;
+  private weaponRow!: HTMLDivElement;
+  private weaponLevelLabel!: HTMLDivElement;
+  private weaponExpFill!: HTMLDivElement;
+  private weaponText!: HTMLDivElement;
   private questBox!: HTMLDivElement;
   private interactionPrompt!: HTMLDivElement;
   private toastContainer!: HTMLDivElement;
@@ -67,8 +74,8 @@ export class Hud {
       <div class="controls-hint">
         <b>WASD</b> 이동 · <b>Shift</b> 질주 · <b>Space</b> 점프 · <b>Q</b> 대쉬<br/>
         우클릭 드래그 시점 회전 · <b>마우스 휠</b> 카메라 확대/축소 · 좌클릭 근접<br/>
-        <b>Z X C V</b> 열매 스킬 · 휠을 끝까지 당기면 1인칭<br/>
-        <b>E</b> NPC/배 · <b>I</b> 인벤토리 · <b>K</b> 캐릭터 · <b>H</b> 무장색
+        <b>1~3</b> 무기 뽑기 · <b>4</b> 열매 뽑기 · <b>Z X C V</b> 뽑은 것의 스킬 · 휠을 끝까지 당기면 1인칭<br/>
+        <b>E</b> NPC/배 · <b>I</b> 인벤토리 · <b>K</b> 캐릭터 · <b>J</b> 무장색
       </div>
       <div class="side-buttons">
         <button class="ui-btn shop" id="btn-shop">🏪 상점</button>
@@ -123,6 +130,13 @@ export class Hud {
             <div class="bar-text" id="hud-fruit-text">0 / 0</div>
           </div>
         </div>
+        <div class="bar-row" id="hud-weapon-row" hidden>
+          <div class="bar-label weapon" id="hud-weapon-level">무기 Lv.1</div>
+          <div class="bar-track">
+            <div class="bar-fill weapon" id="hud-weapon-exp" style="width:0%"></div>
+            <div class="bar-text" id="hud-weapon-text">0 / 0</div>
+          </div>
+        </div>
         <div class="top-badges">
           <div class="faction-badge" id="hud-faction">해적</div>
           <div class="money-badge" id="hud-money">🪙 0</div>
@@ -155,6 +169,10 @@ export class Hud {
     this.skillRow = this.root.querySelector("#hud-skills")!;
     this.fruitLevelLabel = this.root.querySelector("#hud-fruit-level")!;
     this.fruitExpFill = this.root.querySelector("#hud-fruit-exp")!;
+    this.weaponRow = this.root.querySelector("#hud-weapon-row")!;
+    this.weaponLevelLabel = this.root.querySelector("#hud-weapon-level")!;
+    this.weaponExpFill = this.root.querySelector("#hud-weapon-exp")!;
+    this.weaponText = this.root.querySelector("#hud-weapon-text")!;
     this.questBox = this.root.querySelector("#hud-quest-box")!;
     this.interactionPrompt = this.root.querySelector("#hud-interaction")!;
     this.toastContainer = this.root.querySelector("#hud-toasts")!;
@@ -285,11 +303,12 @@ export class Hud {
     }
 
     // 하단 중앙 단축바 — 인벤토리에서 올린 장비를 숫자키로 뽑습니다.
+    // 1~3번은 무기, 4번은 언제나 지금 먹은 열매입니다(열매는 항상 하나 있으므로).
     // (내용이 바뀔 때만 다시 그려야 클릭·호버가 끊기지 않습니다)
-    const hotbarSig = `${p.hotbar.join(",")}|${p.activeHotbarSlot}`;
+    const hotbarSig = `${p.hotbar.join(",")}|${p.activeHotbarSlot}|${p.fruitDrawn}|${p.equippedFruit}`;
     if (hotbarSig !== this.hotbarSignature) {
       this.hotbarSignature = hotbarSig;
-      this.hotbarEl.innerHTML = p.hotbar
+      const weaponSlots = p.hotbar
         .map((itemId, slot) => {
           const weapon = weaponFor(itemId);
           const active = p.activeHotbarSlot === slot;
@@ -300,6 +319,12 @@ export class Hud {
           return `<div class="${cls}"><div class="hotbar-key">${slot + 1}</div>${body}</div>`;
         })
         .join("");
+      const fruit = FRUIT_CATALOG.find((f) => f.id === p.equippedFruit);
+      const fruitCls = ["hotbar-slot", "filled", p.fruitDrawn ? "active" : ""].filter(Boolean).join(" ");
+      const fruitSlot =
+        `<div class="${fruitCls}"><div class="hotbar-key">4</div>` +
+        `<div class="hotbar-icon">${fruit?.icon ?? "🍈"}</div><div class="hotbar-name">${fruit?.name ?? "열매"}</div></div>`;
+      this.hotbarEl.innerHTML = weaponSlots + fruitSlot;
     }
 
     // 항해 중 안내
@@ -310,34 +335,69 @@ export class Hud {
     }
     this.drownOverlay.hidden = !p.inWater;
 
-    // 열매 레벨 바
+    // 열매 레벨 바 — 늘 보입니다 (스킬을 뽑아 들었는지와 무관하게 진행 상황은 항상 표시).
     this.fruitLevelLabel.textContent = `열매 Lv.${p.fruitLevel}`;
     this.fruitExpFill.style.width = `${Math.min(100, (p.fruitExp / p.fruitExpToNext) * 100)}%`;
 
+    // 무기 숙련도 바 — 지금 손에 든 무기가 있을 때만 보입니다.
+    const heldWeapon = drawnWeapon(p);
+    if (heldWeapon) {
+      const mastery = p.weaponMastery[heldWeapon.id];
+      const level = mastery?.level ?? 1;
+      const exp = mastery?.exp ?? 0;
+      const expToNext = mastery?.expToNext ?? 1;
+      this.weaponRow.hidden = false;
+      this.weaponLevelLabel.textContent = `${heldWeapon.name} Lv.${level}`;
+      this.weaponExpFill.style.width = `${Math.min(100, (exp / expToNext) * 100)}%`;
+      this.weaponText.textContent = `${Math.floor(exp).toLocaleString()} / ${expToNext.toLocaleString()}`;
+    } else {
+      this.weaponRow.hidden = true;
+    }
+
     // Z/X/C/V 스킬 슬롯 4개.
+    // 지금 뽑아 든 게 열매면 열매 스킬, 무기면 무기 스킬을 보여주고,
+    // 아무것도 안 뽑았으면(맨손) 스킬 UI를 통째로 비웁니다.
     // 매 프레임 innerHTML을 갈아끼우면 레이아웃이 계속 다시 계산되므로,
-    // 구조는 열매/해금 상태가 바뀔 때만 만들고 쿨다운 숫자만 따로 갱신합니다.
-    const skills = skillsForFruit(p.equippedFruit);
-    const structureSig = `${p.equippedFruit}|${skills.map((_, i) => (isSlotUnlocked(i, p.fruitLevel) ? 1 : 0)).join("")}`;
+    // 구조는 뽑은 것/해금 상태가 바뀔 때만 만들고 쿨다운 숫자만 따로 갱신합니다.
+    const activeMode: "fruit" | "weapon" | "none" = p.fruitDrawn ? "fruit" : heldWeapon ? "weapon" : "none";
+    const skills =
+      activeMode === "fruit" ? skillsForFruit(p.equippedFruit) : activeMode === "weapon" ? skillsForWeapon(heldWeapon!.id) : [];
+    const masteryLevel = activeMode === "weapon" ? weaponMasteryLevel(p, heldWeapon!.id) : 0;
+    const isUnlocked = (slot: number) =>
+      activeMode === "fruit"
+        ? isSlotUnlocked(slot, p.fruitLevel)
+        : activeMode === "weapon"
+          ? isWeaponSlotUnlocked(slot, masteryLevel)
+          : false;
+
+    const structureSig = [
+      activeMode,
+      activeMode === "fruit" ? p.equippedFruit : activeMode === "weapon" ? heldWeapon!.id : "",
+      skills.map((_, i) => (isUnlocked(i) ? 1 : 0)).join(""),
+    ].join("|");
     if (structureSig !== this.skillRowSignature) {
       this.skillRowSignature = structureSig;
-      this.skillRow.innerHTML = skills
-        .map((skill, slot) => {
-          const unlocked = isSlotUnlocked(slot, p.fruitLevel);
-          const body = unlocked
-            ? `<div class="skill-name">${skill.name}</div><div class="skill-cost">${skill.manaCost} MP</div>` +
-              `<div class="cooldown-overlay" hidden></div>`
-            : `<div class="skill-lock">🔒</div><div class="skill-lock-req">열매 Lv.${skill.unlockFruitLevel}</div>`;
-          return `<div class="skill-slot ${unlocked ? "" : "locked"}"><div class="skill-key">${SLOT_KEYS[slot]}</div>${body}</div>`;
-        })
-        .join("");
+      this.skillRow.innerHTML =
+        activeMode === "none"
+          ? ""
+          : skills
+              .map((skill, slot) => {
+                const unlocked = isUnlocked(slot);
+                const reqLabel = activeMode === "fruit" ? "열매" : "무기";
+                const body = unlocked
+                  ? `<div class="skill-name">${skill.name}</div><div class="skill-cost">${skill.manaCost} MP</div>` +
+                    `<div class="cooldown-overlay" hidden></div>`
+                  : `<div class="skill-lock">🔒</div><div class="skill-lock-req">${reqLabel} Lv.${skill.unlockFruitLevel}</div>`;
+                return `<div class="skill-slot ${unlocked ? "" : "locked"}"><div class="skill-key">${SLOT_KEYS[slot]}</div>${body}</div>`;
+              })
+              .join("");
     }
 
     const slotEls = this.skillRow.querySelectorAll<HTMLDivElement>(".skill-slot");
     skills.forEach((skill, slot) => {
       const el = slotEls[slot];
       if (!el) return;
-      const unlocked = isSlotUnlocked(slot, p.fruitLevel);
+      const unlocked = isUnlocked(slot);
       const cd = p.skillCooldowns[slot];
       const overlay = el.querySelector<HTMLDivElement>(".cooldown-overlay");
       if (overlay) {
@@ -432,8 +492,11 @@ export class Hud {
         case "skill_locked":
           this.pushToast(`${ev.skillName}은(는) 열매 Lv.${ev.requiredFruitLevel}부터 사용 가능합니다`, "red");
           break;
+        case "weapon_skill_locked":
+          this.pushToast(`${ev.skillName}은(는) 무기 Lv.${ev.requiredWeaponLevel}부터 사용 가능합니다`, "red");
+          break;
         case "haki_learned":
-          this.pushToast("무장색을 익혔습니다! H키로 발동하세요");
+          this.pushToast("무장색을 익혔습니다! J키로 발동하세요");
           break;
         case "haki_toggled":
           this.pushToast(ev.active ? "무장색 발동!" : "무장색 해제", "blue");
@@ -467,6 +530,20 @@ export class Hud {
         case "weapon_sheathed":
           this.pushToast(`${ev.weaponName}을(를) 집어넣었습니다`, "blue");
           break;
+        case "fruit_drawn":
+          this.pushToast(`${ev.fruitName}을(를) 뽑았습니다`);
+          break;
+        case "fruit_sheathed":
+          this.pushToast(`${ev.fruitName}을(를) 집어넣었습니다`, "blue");
+          break;
+        case "weapon_leveled_up": {
+          const unlocked = [1, 25, 50, 100].indexOf(ev.newLevel);
+          const msg = unlocked >= 0
+            ? `${ev.weaponName} Lv.${ev.newLevel} — ${["Z", "X", "C", "V"][unlocked]} 스킬 해금!`
+            : `${ev.weaponName} 숙련도 상승! Lv.${ev.newLevel}`;
+          this.pushToast(msg, unlocked >= 0 ? "gold" : "blue");
+          break;
+        }
         case "boat_boarded":
           this.pushToast("항해 시작! WASD로 배를 조종하세요", "blue");
           break;
