@@ -81,6 +81,25 @@ function plateauRadiusFor(island: IslandDef): number {
   return Math.min(22, Math.max(12, island.radius * 0.3));
 }
 
+// ── Lv.400 미만인 첫 번째 바다의 다섯 섬 — 걸어서 오를 수 있는 완만한 언덕 ──
+// 정글·사막·얼음·화산·폭풍 섬은 Lv.25~235라 아직 다단 점프를 못 배웠을 수도
+// 있으므로(2단 점프는 Lv.125부터), 고원처럼 **절벽**을 세우면 안 됩니다. 대신
+// 경사면을 완만한 계단(칸당 0.4m — 캐릭터 컨트롤러의 오토스텝 0.5m보다 낮음)으로
+// 깔아서 그냥 걸어 올라갈 수 있게 하고, 그 위에 섬 테마에 맞는 랜드마크를 얹습니다.
+// "섬마다 높이를 다양하게" 해달라는 요청대로 섬마다 언덕 높이를 다르게 잡았습니다.
+const HILL_HEIGHTS: Record<string, number> = {
+  jungle: 3.2,
+  desert: 4.4,
+  ice: 3.8,
+  volcano: 6.5, // 분화구가 있는 화산이 가장 높습니다.
+  storm: 4.6,
+};
+
+/** 섬 반지름에 비례하되 11~20m 사이로 잡습니다 (고원보다 살짝 작게 — 절벽이 아니라 언덕이라서). */
+function hillRadiusFor(island: IslandDef): number {
+  return Math.min(20, Math.max(11, island.radius * 0.32));
+}
+
 /** 섬마다 배치가 매번 달라지지 않도록 시드 기반 난수를 씁니다. */
 function makeRandom(seed: number) {
   let state = seed >>> 0;
@@ -460,6 +479,111 @@ function buildLandmark(theme: IslandTheme, palette: ThemePalette, rand: () => nu
   };
 
   switch (theme) {
+    case "desert": {
+      // 피라미드 — 매끈한 사각뿔 몸체 + 금빛 캡스톤 + 좌우에 보초 서듯 선 작은 오벨리스크
+      const pyramidMat = new THREE.MeshStandardMaterial({ color: 0xd9b873, roughness: 0.88 });
+      const goldMat = new THREE.MeshStandardMaterial({ color: 0xe8c94a, roughness: 0.3, metalness: 0.55 });
+      const body = new THREE.Mesh(new THREE.ConeGeometry(5.2, 6.4, 4), pyramidMat);
+      body.position.y = 3.2;
+      body.rotation.y = Math.PI / 4;
+      add(body);
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1.3, 4), goldMat);
+      cap.position.y = 6.95;
+      cap.rotation.y = Math.PI / 4;
+      add(cap);
+      for (const side of [-1, 1]) {
+        const obelisk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 3.4, 4), rockMat);
+        obelisk.position.set(side * 4.6, 1.7, 3.4);
+        obelisk.rotation.y = Math.PI / 4;
+        add(obelisk);
+        const tip = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.6, 4), goldMat);
+        tip.position.set(side * 4.6, 3.7, 3.4);
+        tip.rotation.y = Math.PI / 4;
+        add(tip);
+      }
+      break;
+    }
+    case "volcano": {
+      // 분화구 — 바위 테두리 고리 + 이글거리는 용암 웅덩이 + 피어오르는 연기, 주변에 용암암 파편
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(3.4, 0.75, 8, 16), rockMat);
+      rim.position.y = 0.5;
+      rim.rotation.x = Math.PI / 2;
+      add(rim);
+      const lava = new THREE.Mesh(new THREE.CylinderGeometry(2.9, 2.9, 0.3, 14), topMat);
+      lava.position.y = 0.2;
+      group.add(lava);
+      const smokeMat = new THREE.MeshStandardMaterial({
+        color: 0x333333,
+        roughness: 1,
+        transparent: true,
+        opacity: 0.5,
+      });
+      for (let i = 0; i < 3; i++) {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.85 + rand() * 0.5, 8, 8), smokeMat);
+        puff.position.set((rand() - 0.5) * 2.2, 2.2 + i * 1.5, (rand() - 0.5) * 2.2);
+        group.add(puff);
+      }
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 + rand();
+        const chunk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + rand() * 0.4, 0), rockMat);
+        chunk.position.set(Math.cos(a) * 4.0, 0.5, Math.sin(a) * 4.0);
+        add(chunk);
+      }
+      break;
+    }
+    case "jungle": {
+      // 거대한 반얀나무 — 굵은 기둥 + 넓은 수관 + 사방으로 늘어진 공중뿌리
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.7, 5.5, 9), trunkMat);
+      trunk.position.y = 2.75;
+      add(trunk);
+      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(3.6, 0), topMat);
+      crown.position.y = 7.4;
+      crown.scale.set(1.3, 0.8, 1.3);
+      add(crown);
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        const root = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.22, 3.4 + rand(), 5), trunkMat);
+        root.position.set(Math.cos(a) * 1.7, 5.4, Math.sin(a) * 1.7);
+        root.rotation.z = 0.15;
+        add(root);
+      }
+      break;
+    }
+    case "ice": {
+      // 빙하 첨봉 — 커다란 얼음 결정 첨탑 + 주위를 둘러싼 작은 얼음 결정 무리
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(2.6, 7.5, 6), topMat);
+      spike.position.y = 3.75;
+      add(spike);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + rand();
+        const shard = new THREE.Mesh(new THREE.ConeGeometry(0.7 + rand() * 0.4, 2.6 + rand(), 5), topMat);
+        shard.position.set(Math.cos(a) * 3.3, 1.3, Math.sin(a) * 3.3);
+        add(shard);
+      }
+      break;
+    }
+    case "storm": {
+      // 벼락 맞은 거목 — 앙상한 큰 나무 위로 먹구름이 떠 있고, 그 아래로 번개가 내리꽂힌 모습
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.9, 6.5, 7), trunkMat);
+      trunk.position.y = 3.25;
+      trunk.rotation.z = 0.1;
+      add(trunk);
+      for (const [i, h] of [4.2, 5.6].entries()) {
+        const branch = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.32, 3.4, 5), trunkMat);
+        branch.position.set(i === 0 ? -1.6 : 1.8, h, 0);
+        branch.rotation.z = i === 0 ? 0.85 : -0.75;
+        add(branch);
+      }
+      const cloud = new THREE.Mesh(new THREE.IcosahedronGeometry(1.8, 0), rockMat);
+      cloud.position.y = 8.2;
+      cloud.scale.set(1.6, 0.6, 1.4);
+      group.add(cloud);
+      const bolt = new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.6, 3), topMat);
+      bolt.position.set(0.3, 6.2, 0);
+      bolt.rotation.z = Math.PI;
+      group.add(bolt);
+      break;
+    }
     case "crystal": {
       // 거대 수정 결정 무리 — 가운데 큰 결정 + 주위 5개 작은 결정
       const base = new THREE.Mesh(new THREE.CylinderGeometry(3.8, 4.6, 2, 9), rockMat);
@@ -754,6 +878,65 @@ function buildPlateau(
   topMesh.position.set(island.center.x, height + 0.15, island.center.z);
   topMesh.receiveShadow = quality.shadows;
   group.add(topMesh);
+
+  const landmark = buildLandmark(island.theme, palette, rand);
+  landmark.position.set(island.center.x, height + 0.3, island.center.z);
+  group.add(landmark);
+}
+
+/**
+ * Lv.400 미만인 첫 번째 바다의 다섯 섬(정글·사막·얼음·화산·폭풍)에 세우는 완만한
+ * 중앙 언덕. buildPlateau와 달리 **절벽이 아니라 경사**입니다 — 계단 한 칸을
+ * 0.4m로 잡아서 캐릭터 컨트롤러의 자동보행(오토스텝 0.5m)만으로 걸어 올라갈 수
+ * 있습니다(해변 경사와 같은 기법). 꼭대기에는 buildLandmark로 만든 섬 테마
+ * 랜드마크(피라미드/분화구 등)를 얹습니다.
+ */
+function buildHill(
+  island: IslandDef,
+  palette: ThemePalette,
+  group: THREE.Group,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+  rand: () => number,
+) {
+  const height = HILL_HEIGHTS[island.id] ?? 3;
+  const baseRadius = hillRadiusFor(island);
+  const topRadius = baseRadius * 0.42;
+
+  // 완만한 원뿔대 — 시각
+  const hillMat = new THREE.MeshStandardMaterial({ color: palette.rock, roughness: 0.95 });
+  const hillMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(topRadius, baseRadius, height, quality.islandSegments),
+    hillMat,
+  );
+  hillMesh.position.set(island.center.x, height / 2, island.center.z);
+  hillMesh.castShadow = quality.shadows;
+  hillMesh.receiveShadow = quality.shadows;
+  group.add(hillMesh);
+
+  // 꼭대기 판 — 테마 색
+  const topMat = new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 });
+  const topMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(topRadius - 0.3, topRadius - 0.3, 0.3, quality.islandSegments),
+    topMat,
+  );
+  topMesh.position.set(island.center.x, height + 0.15, island.center.z);
+  topMesh.receiveShadow = quality.shadows;
+  group.add(topMesh);
+
+  // 충돌: 계단식으로 쌓아 걸어서 오를 수 있게 (해변 경사와 같은 기법)
+  const stepHeight = 0.4;
+  const steps = Math.max(1, Math.ceil(height / stepHeight));
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const stepRadius = baseRadius + (topRadius - baseRadius) * t;
+    const topY = t * height;
+    const body = world.createRigidBody(
+      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(island.center.x, topY - 0.5, island.center.z),
+    );
+    world.createCollider(RAPIER_NS.ColliderDesc.cylinder(0.5, stepRadius), body);
+  }
 
   const landmark = buildLandmark(island.theme, palette, rand);
   landmark.position.set(island.center.x, height + 0.3, island.center.z);
@@ -1061,8 +1244,12 @@ function buildIsland(
   const rand = makeRandom(island.id.length * 7919 + Math.round(island.center.x));
 
   // Lv.400 이상 섬은 중앙에 다단 점프 고원 + 랜드마크를 추가로 세웁니다.
+  // Lv.400 미만인 첫 번째 바다의 사냥터 섬(정글·사막·얼음·화산·폭풍)은 그 대신
+  // 절벽 없이 걸어 오를 수 있는 완만한 언덕 + 랜드마크를 얹습니다.
   if (island.requiredLevel >= PLATEAU_MIN_LEVEL) {
     buildPlateau(island, palette, group, world, RAPIER_NS, quality, rand);
+  } else if (island.kind === "wild") {
+    buildHill(island, palette, group, world, RAPIER_NS, quality, rand);
   }
 
   const rockMat = new THREE.MeshStandardMaterial({ color: palette.rock, roughness: 0.95 });
