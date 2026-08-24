@@ -61,6 +61,8 @@ export interface SaveData {
   hakiLearned: boolean;
   /** 배운 점프 단수 (1 = 기본) */
   maxJumps: number;
+  /** R키 순간이동을 배웠는지 */
+  teleportLearned: boolean;
   /** 두 번째 바다를 연 적이 있는지 (첫 항해에만 Lv.1100이 필요) */
   unlockedSecondSea: boolean;
 
@@ -118,6 +120,7 @@ export function toSaveData(state: GameState, savedAtMs: number): SaveData {
       .map(([id, m]) => ({ id, level: m.level, exp: m.exp })),
     hakiLearned: p.hakiLearned,
     maxJumps: p.maxJumps,
+    teleportLearned: p.teleportLearned,
     unlockedSecondSea: p.unlockedSecondSea,
     // 아이템은 id와 개수만 — 이름·설명은 카탈로그에서 다시 붙입니다.
     inventory: p.inventory.map((i) => ({ id: i.id, quantity: i.quantity })),
@@ -184,6 +187,8 @@ export function applySaveData(state: GameState, raw: unknown): boolean {
 
   p.hakiLearned = data.hakiLearned === true;
   p.maxJumps = clampInt(data.maxJumps, 1, MAX_JUMPS, 1);
+  p.teleportLearned = data.teleportLearned === true;
+  p.teleportCooldownSec = 0; // 접속 직후에는 쿨다운 없이 바로 쓸 수 있게
   p.unlockedSecondSea = data.unlockedSecondSea === true;
 
   // 인벤토리 — 카탈로그에 있는 아이템만 복원하고 이름·설명은 카탈로그 기준으로 다시 붙입니다.

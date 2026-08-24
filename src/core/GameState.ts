@@ -165,7 +165,7 @@ export interface PlayerState {
   meleeRange: number;
 
   /**
-   * 악마의 열매는 한 번에 하나만 먹을 수 있습니다 (블록스피스와 동일).
+   * 악마의 열매는 한 번에 하나만 먹을 수 있습니다.
    * 새 열매를 먹으면 이 값이 교체되고, 스킬 4개도 통째로 바뀝니다.
    */
   equippedFruit: FruitAbilityId;
@@ -267,6 +267,11 @@ export interface PlayerState {
    */
   maxJumps: number;
 
+  /** R키 순간이동을 배웠는지 — 얼음 섬 설인에게 Lv.125부터 배울 수 있습니다 */
+  teleportLearned: boolean;
+  /** 순간이동 남은 쿨다운(초) — 0이면 바로 다시 쓸 수 있음 */
+  teleportCooldownSec: number;
+
   /**
    * 두 번째 바다를 한 번이라도 연 적이 있는지.
    * 첫 항해에만 Lv.1100이 필요하고, 그 뒤로는 레벨과 상관없이 왕복할 수 있게
@@ -307,6 +312,8 @@ export type GameEvent =
   | { type: "weapon_skill_locked"; skillName: string; requiredWeaponLevel: number }
   | { type: "gacha_rolled"; fruitName: string; paid: number }
   | { type: "jump_learned"; jumps: number }
+  | { type: "teleport_learned" }
+  | { type: "teleport_failed" }
   | { type: "sea_changed"; sea: Sea; seaName: string; islandName: string }
   | { type: "guide_started"; islandName: string }
   | { type: "guide_arrived"; islandName: string }
@@ -474,6 +481,8 @@ export function createInitialGameState(
       guideTargetIslandId: null,
       pvpEnabled: true,
       maxJumps: 1,
+      teleportLearned: false,
+      teleportCooldownSec: 0,
       unlockedSecondSea: false,
       events: [],
     },

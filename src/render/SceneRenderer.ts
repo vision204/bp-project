@@ -593,6 +593,26 @@ export class SceneRenderer {
     return null;
   }
 
+  /**
+   * 화면 좌표(clientX/Y) 아래에 있는 "땅"(섬 지형·소품·바위) 위의 한 점을 찾습니다.
+   * R키 순간이동이 씁니다 — 섬 그룹들만 대상으로 하기 때문에 바다·하늘·플레이어는
+   * 걸리지 않고, 맞은 지점이 없으면(먼 바다 등) null을 돌려줍니다.
+   */
+  raycastTerrainAt(clientX: number, clientY: number): { x: number; y: number; z: number } | null {
+    if (this.islandVisuals.length === 0) return null;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const groups = this.islandVisuals.map((v) => v.group);
+    const hits = this.raycaster.intersectObjects(groups, true);
+    if (hits.length === 0) return null;
+    const p = hits[0].point;
+    return { x: p.x, y: p.y, z: p.z };
+  }
+
   /** 마우스가 올라간 플레이어 둘레에 테두리를 그리거나(id) 지웁니다(null). */
   setHoverOutline(id: string | null) {
     if (id === this.hoverOutlineId) return;

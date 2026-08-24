@@ -41,6 +41,11 @@ export interface InputSnapshot {
   toggleFlyPressed: boolean;
   /** P — 개발자 패널 열기/닫기 */
   toggleDevPanelPressed: boolean;
+  /** R — 순간이동 (마우스가 가리키는 지점으로). 배우지 않았으면 무시됩니다 */
+  teleportPressed: boolean;
+  /** 지금 마우스 커서의 화면 좌표(clientX/Y) — R키 순간이동 레이캐스트에 씁니다 */
+  mouseClientX: number;
+  mouseClientY: number;
 }
 
 export class InputManager {
@@ -51,6 +56,9 @@ export class InputManager {
   private zoomDelta = 0;
   private attackQueued = false;
   private rightMouseHeld = false;
+  /** 마지막으로 확인된 마우스 커서의 화면 좌표 — 우클릭 여부와 무관하게 항상 갱신됩니다 */
+  private lastMouseClientX = 0;
+  private lastMouseClientY = 0;
   /** 포인터락을 원하는 상태인지 (요청은 비동기라 실제 잠금과 시점이 어긋날 수 있음) */
   private wantPointerLock = false;
 
@@ -134,6 +142,9 @@ export class InputManager {
       this.mouseDeltaX += e.movementX;
       this.mouseDeltaY += e.movementY;
     }
+    // R키 순간이동 레이캐스트용 — 우클릭 여부와 무관하게 항상 최신 위치를 기억해둡니다.
+    this.lastMouseClientX = e.clientX;
+    this.lastMouseClientY = e.clientY;
   };
 
   /** 매 프레임 한 번 호출: 현재 프레임 입력 스냅샷을 만들고 1프레임짜리 상태(justPressed 등)를 리셋합니다. */
@@ -171,6 +182,9 @@ export class InputManager {
       flyDownHeld: this.keys.has("ControlLeft") || this.keys.has("ControlRight"),
       toggleFlyPressed: this.justPressed.has("KeyF"),
       toggleDevPanelPressed: this.justPressed.has("KeyP"),
+      teleportPressed: this.justPressed.has("KeyR"),
+      mouseClientX: this.lastMouseClientX,
+      mouseClientY: this.lastMouseClientY,
       mouseDeltaX: this.mouseDeltaX,
       mouseDeltaY: this.mouseDeltaY,
       zoomDelta: this.zoomDelta,

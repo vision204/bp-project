@@ -184,6 +184,12 @@ const startState = await page.evaluate(() => {
 });
 console.log("  시작화면:", JSON.stringify(startState));
 assert(startState.screenVisible, "F5 직후 시작 화면이 보임");
+const titleInfo = await page.evaluate(() => ({
+  tabTitle: document.title,
+  logoText: document.querySelector(".start-title")?.textContent?.trim(),
+}));
+assert(titleInfo.tabTitle === "Piratevoyage", `브라우저 탭 제목이 Piratevoyage (${titleInfo.tabTitle})`);
+assert(titleInfo.logoText === "Piratevoyage", `시작 화면 로고도 Piratevoyage (${titleInfo.logoText})`);
 assert(
   startState.factions.includes("pirate") && startState.factions.includes("marine"),
   "해적 / 해군 버튼이 둘 다 있음",
@@ -1321,6 +1327,21 @@ const sheathed = await page.evaluate(() => ({
 assert(sheathed.active === null, "숫자키 1번 다시 → 집어넣음");
 assert(!sheathed.swordVisible, "화면에서도 흑도가 사라짐");
 
+// --- 숫자키 없이 마우스로 단축바 칸을 직접 클릭해도 똑같이 뽑힘/집어넣어짐 ---
+assert(await humanClick('.hotbar-slot[data-slot="0"]'), "단축바 1번 칸을 실제 마우스로 클릭 가능");
+await page.waitForTimeout(500);
+const drawnByMouse = await page.evaluate(() => ({
+  active: window.__game.simulation.state.player.activeHotbarSlot,
+  swordVisible: window.__game.renderer.weaponVisible("sword_yoru"),
+}));
+assert(drawnByMouse.active === 0, "마우스 클릭만으로 흑도가 실제로 뽑힘 (숫자키 없이도)");
+assert(drawnByMouse.swordVisible, "3D 화면에도 흑도가 나타남");
+
+assert(await humanClick('.hotbar-slot[data-slot="0"]'), "같은 칸을 다시 클릭 가능");
+await page.waitForTimeout(500);
+const sheathedByMouse = await page.evaluate(() => window.__game.simulation.state.player.activeHotbarSlot);
+assert(sheathedByMouse === null, "다시 클릭하면 마우스만으로 집어넣어짐");
+
 section("18b. 엔마 — 화산 섬 전용 구매 (섬 위치 게이트)");
 await page.evaluate(() => {
   const sim = window.__game.simulation;
@@ -2164,15 +2185,19 @@ const lowLevelPanel = await page.evaluate(() => ({
   rows: document.querySelectorAll(".trainer-row").length,
   jumpBtn: !!document.querySelector("#trainer-jump"),
   jumpRowText: document.querySelectorAll(".trainer-row")[2]?.textContent?.replace(/\s+/g, " ").trim(),
+  teleportRowText: document.querySelectorAll(".trainer-row")[3]?.textContent?.replace(/\s+/g, " ").trim(),
+  teleportBtn: !!document.querySelector("#trainer-teleport"),
   swordBtn: !!document.querySelector('#panel-trainer .buy-btn[data-item="sword_santoryu"]'),
   hakiBtn: !!document.querySelector("#trainer-haki"),
 }));
 console.log("  Lv.10 패널:", JSON.stringify(lowLevelPanel));
 assert(lowLevelPanel.open, "E를 누르면 설인 패널이 열림");
-assert(lowLevelPanel.rows === 3, `삼도류 · 무장색 · 점프 3가지가 보임 (${lowLevelPanel.rows})`);
+assert(lowLevelPanel.rows === 4, `삼도류 · 무장색 · 점프 · 순간이동 4가지가 보임 (${lowLevelPanel.rows})`);
 assert(lowLevelPanel.swordBtn && lowLevelPanel.hakiBtn, "삼도류 구매 · 무장색 습득 버튼이 있음");
 assert(!lowLevelPanel.jumpBtn, "Lv.10에서는 점프 훈련 버튼이 아예 없음");
+assert(!lowLevelPanel.teleportBtn, "Lv.10에서는 순간이동 버튼도 아예 없음");
 assert(/Lv\.125/.test(lowLevelPanel.jumpRowText ?? ""), `무엇이 모자란지 알려줌: "${lowLevelPanel.jumpRowText}"`);
+assert(/Lv\.125/.test(lowLevelPanel.teleportRowText ?? ""), `순간이동도 Lv.125 안내: "${lowLevelPanel.teleportRowText}"`);
 await page.screenshot({ path: "/home/claude/bp-project/scripts/out-26-trainer-locked.png" });
 
 // --- 삼도류 구매 (실제 마우스 클릭) ---
@@ -2335,6 +2360,76 @@ assert(
   tripleJump.gain > doubleJump.gain,
   `3단 점프는 더 높이 (${doubleJump.gain.toFixed(2)}m → ${tripleJump.gain.toFixed(2)}m)`,
 );
+
+// --- 순간이동: 배우기 전에는 R을 눌러도 아무 일도 안 일어남 ---
+await page.evaluate(() => {
+  const p = window.__game.simulation.state.player;
+  p.teleportLearned = false;
+  p.teleportCooldownSec = 0;
+});
+await standByTrainer();
+await page.mouse.move(640, 400);
+await page.keyboard.press("KeyR");
+await page.waitForTimeout(400);
+const noLearnCooldown = await page.evaluate(() => window.__game.simulation.state.player.teleportCooldownSec);
+assert(noLearnCooldown === 0, "순간이동을 배우기 전에는 R을 눌러도 쿨다운조차 시작되지 않음 (아무 일도 안 일어남)");
+
+// --- 설인에게 순간이동 배우기 (실제 클릭) ---
+await page.evaluate(() => { window.__game.simulation.state.player.money = 100000; });
+await page.keyboard.press("KeyE");
+await page.waitForTimeout(600);
+assert(await humanClick("#trainer-teleport"), "설인에게 순간이동 배우기 버튼 클릭 가능");
+const teleportLearnedInfo = await page.evaluate(() => ({
+  learned: window.__game.simulation.state.player.teleportLearned,
+  toast: Array.from(document.querySelectorAll(".toast")).map((t) => t.textContent).join(" | "),
+}));
+console.log("  순간이동 습득:", JSON.stringify(teleportLearnedInfo));
+assert(teleportLearnedInfo.learned === true, "설인에게 돈을 내고 순간이동을 배움");
+assert(/순간이동/.test(teleportLearnedInfo.toast ?? ""), `습득 알림 표시: "${teleportLearnedInfo.toast}"`);
+await page.evaluate(() => window.__game.panels.closeAll());
+await page.waitForTimeout(400);
+
+// --- 실제로 R을 누르면 마우스가 가리키는 곳으로 이동함 ---
+// (쿨다운이 실제로 시작되는지가 raycast까지 전부 성공했다는 가장 확실한 증거입니다 —
+//  beginTeleportCooldown()은 main.ts가 레이캐스트로 착지점을 찾았을 때만 불립니다.)
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const island = window.__game.islands.getIsland("ice");
+  sim.playerController.teleport({ x: island.center.x, y: 5, z: island.center.z });
+});
+await page.waitForTimeout(700);
+const beforeTeleport = await pos();
+await page.mouse.move(640, 400);
+await page.keyboard.press("KeyR");
+await page.waitForTimeout(500);
+const afterTeleport = await page.evaluate(() => ({
+  pos: window.__game.simulation.state.player.position,
+  cooldown: window.__game.simulation.state.player.teleportCooldownSec,
+  badge: document.querySelector("#hud-teleport")?.textContent?.trim(),
+  badgeHidden: document.querySelector("#hud-teleport")?.hidden,
+}));
+console.log("  순간이동 실행:", JSON.stringify({ before: beforeTeleport, after: afterTeleport }));
+assert(afterTeleport.cooldown > 0, `R키를 누르면 쿨다운이 시작됨 = 실제로 순간이동함 (${afterTeleport.cooldown.toFixed(1)}s)`);
+assert(afterTeleport.badgeHidden === false && /이동 대기/.test(afterTeleport.badge ?? ""), `HUD에 쿨다운 배지 표시: "${afterTeleport.badge}"`);
+
+// --- 쿨다운 중에는 다시 못 씀 (위치가 더 바뀌지 않음) ---
+const duringCooldownPos = afterTeleport.pos;
+await page.mouse.move(500, 300);
+await page.keyboard.press("KeyR");
+await page.waitForTimeout(400);
+const stillCooling = await page.evaluate(() => window.__game.simulation.state.player.position);
+assert(
+  Math.abs(stillCooling.x - duringCooldownPos.x) < 0.01 && Math.abs(stillCooling.z - duringCooldownPos.z) < 0.01,
+  "쿨다운 중에는 R을 다시 눌러도 이동하지 않음",
+);
+
+// --- 쿨다운이 다 끝나면 다시 쓸 수 있음 ---
+await page.waitForTimeout(4200);
+await page.mouse.move(640, 400);
+await page.keyboard.press("KeyR");
+await page.waitForTimeout(500);
+const cooldownAgain = await page.evaluate(() => window.__game.simulation.state.player.teleportCooldownSec);
+assert(cooldownAgain > 0, `쿨다운이 끝나면 R을 다시 눌러 새로 쓸 수 있음 (${cooldownAgain.toFixed(1)}s)`);
 
 section("27. 새 HUD — 레벨+경험치 한 줄로 맨 위 · 모든 값에 숫자 표기");
 await page.evaluate(() => {

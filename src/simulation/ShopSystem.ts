@@ -30,7 +30,7 @@ export const CASH_PAYMENT_NOTICE =
 
 /**
  * 상점에서 판매하는 악마의 열매 5종.
- * 블록스피스와 마찬가지로 **악마의 열매는 한 번에 하나만** 먹을 수 있습니다.
+ * **악마의 열매는 한 번에 하나만** 먹을 수 있습니다.
  * 새 열매를 사면 기존에 먹은 열매 능력이 사라지고 새 것으로 교체됩니다.
  */
 export const FRUIT_CATALOG: FruitCatalogEntry[] = [

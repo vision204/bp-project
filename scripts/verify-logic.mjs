@@ -57,6 +57,10 @@ const { SECOND_SEA_LEVEL, SEA_LABELS, otherSea, seaBlockReason, canTravelSea,
         levelsUntilSecondSea, travelSea } = await import("../src/simulation/SeaSystem.ts");
 const { HAKI_PRICE, HAKI_DAMAGE_MULTIPLIER, HAKI_TEACHER_ISLAND_ID, HAKI_MANA_DRAIN_PER_SEC,
         learnHaki, toggleHaki, stepHaki, effectiveMeleeDamage } = await import("../src/simulation/HakiSystem.ts");
+const { TELEPORT_TEACHER_ISLAND_ID, TELEPORT_REQUIRED_LEVEL, TELEPORT_PRICE, TELEPORT_COOLDOWN_SEC,
+        teleportBlockReason, canLearnTeleport, learnTeleport, canUseTeleport,
+        beginTeleportCooldown, stepTeleportCooldown } = await import("../src/simulation/TeleportSystem.ts");
+const { activateHotbarSlot } = await import("../src/simulation/Simulation.ts");
 
 /** 처치 목록 만들기 — 섬 id와 몬스터 종류를 함께 넘겨야 퀘스트가 카운트합니다. */
 function kills(islandId, n, speciesIndex = 0) {
@@ -1827,6 +1831,96 @@ section("다단 점프 — Lv.125에서 2단, 이후 100레벨마다 1단");
   assert(jumpBlockReason(p) === "maxed", "최대치에 도달하면 maxed");
 }
 
+section("R키 순간이동 — 얼음 섬 설인에게 Lv.125부터 배움");
+{
+  assert(TELEPORT_TEACHER_ISLAND_ID === "ice", "얼음 섬에서 배움");
+  assert(TELEPORT_REQUIRED_LEVEL === 125, `요구 레벨 125 (${TELEPORT_REQUIRED_LEVEL})`);
+
+  const p = createInitialGameState("pirate").player;
+  assert(p.teleportLearned === false, "처음에는 못 배운 상태");
+  assert(p.teleportCooldownSec === 0, "처음에는 쿨다운 없음");
+
+  p.level = 124;
+  p.money = 999999;
+  assert(teleportBlockReason(p) === "level", "Lv.124에서는 아직 못 배움");
+  assert(learnTeleport(p, p.events) === false, "시도해도 실패");
+  assert(p.teleportLearned === false, "실패하면 안 배워짐");
+  assert(p.money === 999999, "실패하면 코인도 안 깎임");
+
+  p.level = 125;
+  assert(canLearnTeleport(p) === true, "Lv.125가 되면 배울 수 있음");
+  const before = p.money;
+  assert(learnTeleport(p, p.events) === true, "순간이동 습득");
+  assert(p.teleportLearned === true, "배워짐");
+  assert(p.money === before - TELEPORT_PRICE, `값을 치름 (🪙${TELEPORT_PRICE})`);
+  assert(p.events.some((e) => e.type === "teleport_learned"), "teleport_learned 이벤트 발생");
+
+  assert(teleportBlockReason(p) === "already", "이미 배웠으면 또 못 배움");
+  assert(learnTeleport(p, p.events) === false, "재시도 실패");
+
+  const p2 = createInitialGameState("pirate").player;
+  p2.level = 999;
+  p2.money = 0;
+  assert(teleportBlockReason(p2) === "money", "코인이 없으면 못 배움");
+  assert(learnTeleport(p2, p2.events) === false, "시도해도 실패");
+}
+
+section("R키 순간이동 — 쿨다운");
+{
+  const p = createInitialGameState("pirate").player;
+  p.level = 999;
+  p.money = 999999;
+  learnTeleport(p, p.events);
+
+  assert(canUseTeleport(p) === true, "배운 직후에는 바로 쓸 수 있음");
+  beginTeleportCooldown(p);
+  assert(p.teleportCooldownSec === TELEPORT_COOLDOWN_SEC, `쿨다운 시작 (${p.teleportCooldownSec}s)`);
+  assert(canUseTeleport(p) === false, "쿨다운 중에는 못 씀");
+
+  stepTeleportCooldown(p, TELEPORT_COOLDOWN_SEC / 2);
+  assert(Math.abs(p.teleportCooldownSec - TELEPORT_COOLDOWN_SEC / 2) < 1e-9, "절반만큼 줆");
+  assert(canUseTeleport(p) === false, "아직 쿨다운 중");
+
+  stepTeleportCooldown(p, TELEPORT_COOLDOWN_SEC);
+  assert(p.teleportCooldownSec === 0, "쿨다운이 음수로 내려가지 않고 0에서 멈춤");
+  assert(canUseTeleport(p) === true, "쿨다운이 끝나면 다시 씀");
+
+  const p3 = createInitialGameState("pirate").player; // 안 배운 사람
+  assert(canUseTeleport(p3) === false, "배우지 않았으면 쿨다운이 0이어도 못 씀");
+}
+
+section("단축바 마우스 클릭 = 숫자키 — activateHotbarSlot()");
+{
+  // 숫자키(Simulation.step의 hotbarPressed)와 하단 단축바 마우스 클릭(Hud)이
+  // 완전히 같은 결과를 내는지, 공유 함수 activateHotbarSlot()으로 직접 확인합니다.
+  const p = createInitialGameState("pirate").player;
+  p.hotbar = ["sword_yoru", null, null];
+  p.fruitDrawn = false;
+
+  activateHotbarSlot(p, 0);
+  assert(p.activeHotbarSlot === 0, "0번 슬롯 클릭 → 요루를 뽑음");
+  assert(p.events.some((e) => e.type === "weapon_drawn"), "weapon_drawn 이벤트 발생");
+
+  activateHotbarSlot(p, 0);
+  assert(p.activeHotbarSlot === null, "같은 칸을 다시 클릭 → 집어넣음");
+  assert(p.events.some((e) => e.type === "weapon_sheathed"), "weapon_sheathed 이벤트 발생");
+
+  activateHotbarSlot(p, 0);
+  activateHotbarSlot(p, 3);
+  assert(p.fruitDrawn === true, "3번(열매) 클릭 → 열매를 뽑음");
+  assert(p.activeHotbarSlot === null, "열매를 뽑으면 무기는 자동으로 집어넣어짐");
+  assert(p.events.some((e) => e.type === "fruit_drawn"), "fruit_drawn 이벤트 발생");
+
+  activateHotbarSlot(p, 0);
+  assert(p.fruitDrawn === false, "무기를 다시 클릭하면 열매는 집어넣어짐");
+  assert(p.activeHotbarSlot === 0, "무기가 뽑힘");
+
+  // 빈 칸을 클릭해도 아무 일도 일어나지 않음 (숫자키와 동일)
+  const beforeSlot = p.activeHotbarSlot;
+  activateHotbarSlot(p, 1);
+  assert(p.activeHotbarSlot === beforeSlot, "빈 칸을 클릭해도 그대로");
+}
+
 section("세이브 — 점프 단수와 삼도류도 저장/복원");
 {
   const before = createInitialGameState("pirate");
@@ -1835,6 +1929,8 @@ section("세이브 — 점프 단수와 삼도류도 저장/복원");
   bp.money = 99999;
   bp.level = 400;
   bp.maxJumps = 4;
+  bp.teleportLearned = true;
+  bp.teleportCooldownSec = 3.5;
   buyItem(bp, "sword_santoryu", bp.events);
   toggleHotbar(bp, "sword_santoryu");
 
@@ -1844,6 +1940,8 @@ section("세이브 — 점프 단수와 삼도류도 저장/복원");
   applySaveData(after, saved);
 
   assert(after.player.maxJumps === 4, `점프 단수 복원 (${after.player.maxJumps}단)`);
+  assert(after.player.teleportLearned === true, "순간이동 습득 여부 복원");
+  assert(after.player.teleportCooldownSec === 0, "쿨다운은 저장되지 않고 접속하면 0으로 시작");
   assert(after.player.inventory.some((i) => i.id === "sword_santoryu"),
     "삼도류가 인벤토리에 그대로 복원됨 (상점에 없는 무기라도)");
   assert(after.player.hotbar[0] === "sword_santoryu", "단축바 위치도 복원");

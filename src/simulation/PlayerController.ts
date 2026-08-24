@@ -161,7 +161,7 @@ export class PlayerController {
       return;
     }
 
-    // 카메라가 바라보는 수평 방향 기준으로 이동 (블록스피스처럼 카메라 상대 이동)
+    // 카메라가 바라보는 수평 방향 기준으로 이동 (카메라 상대 이동)
     const forward = { x: Math.sin(this.camYaw), z: Math.cos(this.camYaw) };
     // right = forward × up. Three.js 기본 카메라는 -Z를 보고 오른쪽이 +X이므로,
     // +Z를 보는 이 게임에서는 오른쪽이 -X가 되어야 A/D가 정상 동작합니다.

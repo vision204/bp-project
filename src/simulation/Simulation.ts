@@ -6,6 +6,7 @@ import {
   type ItemId,
   type BoatTierId,
   type StatBlock,
+  type PlayerState,
 } from "../core/GameState";
 import type { InputSnapshot } from "../core/InputManager";
 import { PlayerController } from "./PlayerController";
@@ -21,6 +22,7 @@ import { stepBuffs } from "./BuffSystem";
 import { isInWater, stepWater } from "./WaterSystem";
 import { boatDeckPosition, leaveBoat, stepBoat } from "./BoatSystem";
 import { learnHaki, stepHaki, toggleHaki } from "./HakiSystem";
+import { learnTeleport, stepTeleportCooldown, beginTeleportCooldown } from "./TeleportSystem";
 import { rollGacha } from "./GachaSystem";
 import { learnJump } from "./TrainerSystem";
 import { travelSea, canTravelSea } from "./SeaSystem";
@@ -30,6 +32,35 @@ import { FRUIT_CATALOG } from "./ShopSystem";
 import { buyBoatTier } from "./BoatSystem";
 import { SWIM_SURFACE_Y, islandAt, islandArrivalPosition, getIsland, startIslandFor } from "../world/islands";
 import type { Faction } from "../world/islands";
+
+/**
+ * 단축바 한 칸을 뽑거나 집어넣습니다 (0~2 = 무기 칸, 3 = 열매).
+ * 숫자키(Simulation.step)와 하단 단축바 마우스 클릭(Hud → main.ts) 양쪽에서
+ * 똑같이 쓰기 위해 독립 함수로 뺐습니다. 무기/열매는 한 손이라 상호 배타적이라,
+ * 하나를 뽑으면 다른 하나는 WeaponSystem.toggleDrawn/toggleFruitDrawn이 자동으로
+ * 집어넣습니다.
+ */
+export function activateHotbarSlot(player: PlayerState, slot: number) {
+  if (slot === 3) {
+    const result = toggleFruitDrawn(player);
+    const fruitName = FRUIT_CATALOG.find((f) => f.id === player.equippedFruit)?.name ?? "열매";
+    player.events.push(
+      result === "drawn"
+        ? { type: "fruit_drawn", fruitName }
+        : { type: "fruit_sheathed", fruitName },
+    );
+    return;
+  }
+  const result = toggleDrawn(player, slot);
+  const weapon = weaponFor(player.hotbar[slot]);
+  if (result && weapon) {
+    player.events.push(
+      result === "drawn"
+        ? { type: "weapon_drawn", weaponName: weapon.name }
+        : { type: "weapon_sheathed", weaponName: weapon.name },
+    );
+  }
+}
 
 /**
  * 게임 로직의 최상위 조립부입니다. main.ts(렌더 루프)는 매 프레임
@@ -75,33 +106,17 @@ export class Simulation {
     );
 
     if (input.toggleHakiPressed) toggleHaki(player, player.events);
+    stepTeleportCooldown(player, dt);
 
     // 개발자 모드: F로 비행을 켜고 끕니다 (일반 모드에서는 무시)
     if (player.devMode && input.toggleFlyPressed) {
       player.flying = !player.flying;
     }
 
-    // 숫자키로 단축바 장비를 실제로 뽑거나 집어넣습니다 (로블록스 방식)
-    // 1~3번은 무기, 4번은 열매입니다 — 둘은 상호 배타적이라 하나를 뽑으면
-    // 다른 하나는 자동으로 집어넣어집니다 (WeaponSystem.toggleDrawn/toggleFruitDrawn 참고).
-    if (input.hotbarPressed === 3) {
-      const result = toggleFruitDrawn(player);
-      const fruitName = FRUIT_CATALOG.find((f) => f.id === player.equippedFruit)?.name ?? "열매";
-      player.events.push(
-        result === "drawn"
-          ? { type: "fruit_drawn", fruitName }
-          : { type: "fruit_sheathed", fruitName },
-      );
-    } else if (input.hotbarPressed !== null) {
-      const result = toggleDrawn(player, input.hotbarPressed);
-      const weapon = weaponFor(player.hotbar[input.hotbarPressed]);
-      if (result && weapon) {
-        player.events.push(
-          result === "drawn"
-            ? { type: "weapon_drawn", weaponName: weapon.name }
-            : { type: "weapon_sheathed", weaponName: weapon.name },
-        );
-      }
+    // 숫자키로(혹은 하단 단축바를 마우스로 클릭해서) 단축바 장비를 실제로
+    // 뽑거나 집어넣습니다 — 로직은 activateHotbarSlot()에 모아뒀습니다.
+    if (input.hotbarPressed !== null) {
+      activateHotbarSlot(player, input.hotbarPressed);
     }
 
     if (this.state.boat.riding) {
@@ -207,6 +222,26 @@ export class Simulation {
 
   learnHaki() {
     return learnHaki(this.state.player, this.state.player.events);
+  }
+
+  /** 얼음 섬 설인에게 R키 순간이동 배우기 (Lv.125부터) */
+  learnTeleport() {
+    return learnTeleport(this.state.player, this.state.player.events);
+  }
+
+  /** 단축바 칸을 마우스로 클릭했을 때 — 숫자키를 누른 것과 똑같이 동작합니다 */
+  activateHotbarSlot(slot: number) {
+    activateHotbarSlot(this.state.player, slot);
+  }
+
+  /**
+   * R키 순간이동 — 호출부(main.ts)가 레이캐스트로 찾은 지점으로 실제 이동시킵니다.
+   * 배웠는지·쿨다운인지는 main.ts가 TeleportSystem.canUseTeleport()로 미리 확인합니다.
+   */
+  teleportPlayerTo(pos: { x: number; y: number; z: number }) {
+    this.playerController.teleport(pos);
+    this.state.player.position = { ...pos };
+    beginTeleportCooldown(this.state.player);
   }
 
   /**

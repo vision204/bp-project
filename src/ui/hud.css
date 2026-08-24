@@ -551,21 +551,22 @@ canvas.hide-cursor {
   min-width: 132px;
   padding: 11px 16px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(20, 20, 24, 0.72);
-  color: #fff;
+  border: 1px solid rgba(255, 213, 79, 0.8);
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  color: #302400;
   font-family: inherit;
   font-size: 14px;
   font-weight: bold;
   cursor: pointer;
   text-align: left;
+  box-shadow: 0 4px 14px rgba(255, 179, 0, 0.3);
   transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
 
 .ui-btn:hover {
   transform: translateX(-3px);
-  background: rgba(38, 38, 46, 0.85);
-  border-color: rgba(255, 255, 255, 0.5);
+  background: linear-gradient(180deg, #ffe082, #ffc107);
+  border-color: rgba(255, 224, 130, 0.95);
 }
 
 .ui-btn.shop {
@@ -597,6 +598,15 @@ canvas.hide-cursor {
 .dash-badge.cooling {
   background: rgba(255, 255, 255, 0.16);
   color: rgba(255, 255, 255, 0.65);
+}
+
+.teleport-badge {
+  font-size: 13px;
+  font-weight: bold;
+  background: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.65);
+  padding: 5px 12px;
+  border-radius: 999px;
 }
 
 /* ── 항해 HUD ─────────────────────────────────────────────────── */
@@ -661,7 +671,13 @@ canvas.hide-cursor {
   box-sizing: border-box;
   padding: 6px;
   text-align: center;
+  cursor: pointer;
+  pointer-events: auto;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.hotbar-slot:hover {
+  border-color: rgba(255, 213, 79, 0.7);
 }
 
 .hotbar-slot.empty {
@@ -893,6 +909,7 @@ canvas.hide-cursor {
 .ui-btn.small.guide {
   background: rgba(79, 195, 247, 0.2);
   border-color: rgba(79, 195, 247, 0.6);
+  color: #fff;
 }
 
 .guide-hud {
@@ -917,8 +934,11 @@ canvas.hide-cursor {
 }
 
 .guide-hud-arrow {
-  font-size: 24px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   color: #4fc3f7;
   /* 방향이 홱 바뀌지 않고 부드럽게 돌아가도록 */
   transition: transform 0.12s linear;
@@ -945,6 +965,7 @@ canvas.hide-cursor {
 .ui-btn.small.rank {
   background: rgba(255, 213, 79, 0.2);
   border-color: rgba(255, 213, 79, 0.6);
+  color: #fff;
 }
 
 /* 시작 화면: 로그인 버튼 (구글 계정만 — 게스트 없음) */

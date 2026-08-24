@@ -11,15 +11,15 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(24, 26, 36, 0.96), rgba(14, 15, 22, 0.96));
+  background: linear-gradient(180deg, rgba(20, 18, 14, 0.97), rgba(10, 9, 12, 0.98));
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 213, 79, 0.35);
-  border-radius: 18px;
+  border: 2px solid rgba(255, 213, 79, 0.85);
+  border-radius: 16px;
   padding: 22px 26px 26px;
   color: #fff;
   font-family: "Trebuchet MS", "Malgun Gothic", sans-serif;
   pointer-events: auto;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 5px rgba(255, 213, 79, 0.08), 0 0 24px rgba(255, 179, 0, 0.18);
 }
 
 .shop-panel {
@@ -70,25 +70,28 @@
   font-size: 22px;
   font-weight: bold;
   letter-spacing: 0.02em;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffe28a;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  border-bottom: 2px solid rgba(255, 213, 79, 0.55);
   padding-bottom: 14px;
   margin-bottom: 16px;
 }
 
 .panel-close {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.08);
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: linear-gradient(180deg, #ef5350, #c62828);
   color: #fff;
-  font-size: 15px;
+  font-size: 14px;
+  font-weight: bold;
   cursor: pointer;
   transition: background 0.15s ease, transform 0.15s ease;
 }
 
 .panel-close:hover {
-  background: rgba(255, 82, 82, 0.75);
+  background: linear-gradient(180deg, #ff7a75, #d32f2f);
   transform: scale(1.08);
 }
 
@@ -193,9 +196,16 @@
 }
 
 .inv-slot.filled {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 213, 79, 0.4);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05));
+  border: 1px solid rgba(255, 213, 79, 0.55);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   cursor: default;
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+
+.inv-slot.filled:hover {
+  border-color: rgba(255, 213, 79, 0.9);
+  transform: translateY(-1px);
 }
 
 .inv-qty {
@@ -264,16 +274,16 @@
 .buy-btn {
   flex-shrink: 0;
   padding: 10px 16px;
-  border-radius: 12px;
-  border: none;
-  background: linear-gradient(180deg, #ffd54f, #ffb300);
-  color: #302400;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background: linear-gradient(180deg, #66bb6a, #2e7d32);
+  color: #f1fff1;
   font-size: 13px;
   font-weight: bold;
   cursor: pointer;
   white-space: nowrap;
   transition: transform 0.12s ease, box-shadow 0.12s ease;
-  box-shadow: 0 3px 10px rgba(255, 179, 0, 0.35);
+  box-shadow: 0 3px 10px rgba(46, 125, 50, 0.4);
 }
 
 .buy-btn:hover:not(:disabled) {

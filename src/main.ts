@@ -21,6 +21,7 @@ import { MultiplayerClient } from "./network/MultiplayerClient";
 import { buildCombatStatsSnapshot, drawnWeaponId, processPvpAttacks } from "./network/PvpCombat";
 import { MultiplayerUI } from "./ui/MultiplayerUI";
 import { TradeUI } from "./ui/TradeUI";
+import { canUseTeleport } from "./simulation/TeleportSystem";
 
 export interface StartChoice {
   faction: Faction;
@@ -285,6 +286,7 @@ async function main() {
     },
     onSetGuide: (islandId) => simulation.setGuide(islandId),
     onLearnJump: () => simulation.learnJump(),
+    onLearnTeleport: () => simulation.learnTeleport(),
     onTravelSea: () => {
       // 바다를 건너면 되돌릴 수 없는 이동이라, 그 자리에서 바로 저장합니다.
       const moved = simulation.travelSea();
@@ -333,6 +335,7 @@ async function main() {
     onCancelGuide: () => simulation.setGuide(null),
     onRank: () => panels.toggle("rank"),
     onMultiplayer: () => multiplayerUI.toggle(),
+    onHotbarSlotClick: (slot) => simulation.activateHotbarSlot(slot),
   });
 
   // 개발자 모드는 **세이브를 건드리지 않습니다.** 내 진짜 캐릭터를 만렙 테스트본으로
@@ -408,11 +411,22 @@ async function main() {
     const gameplaySnapshot = (panels.isBlocking() || tradeUI.isBlocking())
       ? { ...snapshot, moveForward: false, moveBackward: false, moveLeft: false, moveRight: false,
           jumpPressed: false, jumpHeld: false, attackPressed: false, abilityPressed: false,
-          interactPressed: false, mouseDeltaX: 0, mouseDeltaY: 0 }
+          interactPressed: false, mouseDeltaX: 0, mouseDeltaY: 0, teleportPressed: false }
       : snapshot;
 
     simulation.step(dt, gameplaySnapshot);
     world.step();
+
+    // R키 순간이동 — 마우스가 가리키는 화면 지점을 3D 지형에 레이캐스트해서 찾습니다.
+    // 카메라를 다루는 건 렌더러뿐이라 시뮬레이션 안이 아니라 여기서 처리합니다.
+    if (gameplaySnapshot.teleportPressed && canUseTeleport(simulation.state.player)) {
+      const hit = renderer.raycastTerrainAt(gameplaySnapshot.mouseClientX, gameplaySnapshot.mouseClientY);
+      if (hit) {
+        simulation.teleportPlayerTo({ x: hit.x, y: hit.y + 1, z: hit.z });
+      } else {
+        simulation.state.player.events.push({ type: "teleport_failed" });
+      }
+    }
 
     // 이번 프레임에 근접/스킬 공격이 나갔다면, PvP가 켜진 다른 진영 플레이어가
     // 사거리 안에 있는지 확인해서 서버에 공격 요청을 보냅니다. CombatSystem은

@@ -28,6 +28,7 @@ import {
   jumpRequiredLevel,
 } from "../simulation/TrainerSystem";
 import { weaponFor } from "../simulation/WeaponSystem";
+import { TELEPORT_PRICE, TELEPORT_REQUIRED_LEVEL, teleportBlockReason } from "../simulation/TeleportSystem";
 
 type StatKey = keyof StatBlock;
 
@@ -63,6 +64,8 @@ export interface PanelCallbacks {
   onFetchRank: () => Promise<RankView | null>;
   /** 설인에게 점프 단계 배우기 */
   onLearnJump: () => void;
+  /** 설인에게 R키 순간이동 배우기 */
+  onLearnTeleport: () => void;
   /** 해적왕에게 부탁해 다른 바다로 건너가기 */
   onTravelSea: () => void;
 }
@@ -648,7 +651,8 @@ export class PanelManager {
     const p = state.player;
     const nextJumps = p.maxJumps + 1;
     const jumpReason = jumpBlockReason(p);
-    const signature = [p.money, p.level, p.maxJumps, p.hakiLearned,
+    const teleportReason = teleportBlockReason(p);
+    const signature = [p.money, p.level, p.maxJumps, p.hakiLearned, p.teleportLearned,
       p.inventory.some((i) => i.id === "sword_santoryu")].join("|");
     if (!this.shouldRender("trainer", signature)) return;
 
@@ -682,6 +686,20 @@ export class PanelManager {
     } else {
       jumpDesc = `<b>${nextJumps}단 점프</b> — 공중에서 ${nextJumps - 1}번 더 뛸 수 있게 됩니다.`;
       jumpBtn = `<button class="buy-btn" id="trainer-jump" ${jumpReason === "money" ? "disabled" : ""}>배우기 · 🪙${jumpPrice(nextJumps).toLocaleString()}</button>`;
+    }
+
+    // ── 순간이동 ──
+    let teleportDesc: string;
+    let teleportBtn: string;
+    if (teleportReason === "already") {
+      teleportDesc = "이미 다 가르쳤다. 다음엔 R키를 잊지 말거라.";
+      teleportBtn = `<button class="buy-btn" disabled>습득함</button>`;
+    } else if (teleportReason === "level") {
+      teleportDesc = `<b>순간이동</b>은 <b>Lv.${TELEPORT_REQUIRED_LEVEL}</b>부터 배울 수 있습니다 (${TELEPORT_REQUIRED_LEVEL - p.level}레벨 남음).`;
+      teleportBtn = `<button class="buy-btn" disabled>Lv.${TELEPORT_REQUIRED_LEVEL} 필요</button>`;
+    } else {
+      teleportDesc = "마우스가 가리키는 곳으로 <b>R키</b>를 눌러 즉시 이동합니다.";
+      teleportBtn = `<button class="buy-btn" id="trainer-teleport" ${teleportReason === "money" ? "disabled" : ""}>배우기 · 🪙${TELEPORT_PRICE.toLocaleString()}</button>`;
     }
 
     const body = this.panels.trainer.querySelector("#trainer-body")!;
@@ -726,6 +744,16 @@ export class PanelManager {
         </div>
         ${jumpBtn}
       </div>
+
+      <div class="trainer-row ${teleportReason === "level" ? "locked" : ""}">
+        <div class="trainer-icon">✨</div>
+        <div class="trainer-info">
+          <div class="trainer-name">순간이동</div>
+          <div class="trainer-desc">${teleportDesc}</div>
+          <div class="trainer-stats">한 번 쓰면 다시 쓸 때까지 잠깐 쉬어야 합니다</div>
+        </div>
+        ${teleportBtn}
+      </div>
     `);
 
     body.querySelector<HTMLButtonElement>('.buy-btn[data-item]')
@@ -734,6 +762,8 @@ export class PanelManager {
       ?.addEventListener("click", () => this.callbacks.onLearnHaki());
     body.querySelector<HTMLButtonElement>("#trainer-jump")
       ?.addEventListener("click", () => this.callbacks.onLearnJump());
+    body.querySelector<HTMLButtonElement>("#trainer-teleport")
+      ?.addEventListener("click", () => this.callbacks.onLearnTeleport());
   }
 
   /**

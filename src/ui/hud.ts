@@ -34,10 +34,12 @@ export class Hud {
   private boatHud!: HTMLDivElement;
   private boatSpeed!: HTMLDivElement;
   private dashBadge!: HTMLDivElement;
+  private teleportBadge!: HTMLDivElement;
   /** 스킬바 구조를 마지막으로 만든 조건 (열매/해금 상태). 바뀔 때만 다시 만듭니다 */
   private skillRowSignature = "";
   private hotbarEl!: HTMLDivElement;
   private hotbarSignature = "";
+  private onHotbarSlotClick!: (slot: number) => void;
   private drownOverlay!: HTMLDivElement;
   private factionBadge!: HTMLDivElement;
   private seaBadge!: HTMLDivElement;
@@ -62,8 +64,11 @@ export class Hud {
       onCancelGuide: () => void;
       onRank: () => void;
       onMultiplayer: () => void;
+      /** 단축바 칸을 마우스로 클릭했을 때 (0~2=무기 칸, 3=열매) — 숫자키와 동일하게 뽑기/집어넣기 */
+      onHotbarSlotClick: (slot: number) => void;
     },
   ) {
+    this.onHotbarSlotClick = buttons.onHotbarSlotClick;
     this.root = document.createElement("div");
     this.root.id = "hud";
     this.root.innerHTML = `
@@ -75,7 +80,7 @@ export class Hud {
         <b>WASD</b> 이동 · <b>Shift</b> 질주 · <b>Space</b> 점프 · <b>Q</b> 대쉬<br/>
         우클릭 드래그 시점 회전 · <b>마우스 휠</b> 카메라 확대/축소 · 좌클릭 근접<br/>
         <b>1~3</b> 무기 뽑기 · <b>4</b> 열매 뽑기 · <b>Z X C V</b> 뽑은 것의 스킬 · 휠을 끝까지 당기면 1인칭<br/>
-        <b>E</b> NPC/배 · <b>I</b> 인벤토리 · <b>K</b> 캐릭터 · <b>J</b> 무장색
+        <b>E</b> NPC/배 · <b>I</b> 인벤토리 · <b>K</b> 캐릭터 · <b>J</b> 무장색 · <b>R</b> 순간이동(배운 뒤)
       </div>
       <div class="side-buttons">
         <button class="ui-btn shop" id="btn-shop">🏪 상점</button>
@@ -86,7 +91,11 @@ export class Hud {
         <button class="ui-btn small multiplayer" id="btn-multiplayer">🌐 멀티플레이</button>
       </div>
       <div class="guide-hud" id="hud-guide" hidden>
-        <div class="guide-hud-arrow" id="hud-guide-arrow">▲</div>
+        <div class="guide-hud-arrow" id="hud-guide-arrow">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2 L20 15 L13 15 L13 22 L11 22 L11 15 L4 15 Z" fill="currentColor"/>
+          </svg>
+        </div>
         <div class="guide-hud-text">
           <div class="guide-hud-name" id="hud-guide-name"></div>
           <div class="guide-hud-dist" id="hud-guide-dist"></div>
@@ -144,6 +153,7 @@ export class Hud {
           <div class="buff-badge" id="hud-buff" hidden></div>
           <div class="haki-badge" id="hud-haki" hidden>무장색 ON</div>
           <div class="dash-badge" id="hud-dash" hidden></div>
+          <div class="teleport-badge" id="hud-teleport" hidden></div>
           <div class="stat-points-badge" id="hud-stat-points" hidden></div>
           <div class="dev-badge" id="hud-dev" hidden></div>
         </div>
@@ -180,6 +190,7 @@ export class Hud {
     this.boatHud = this.root.querySelector("#hud-boat")!;
     this.boatSpeed = this.root.querySelector("#hud-boat-speed")!;
     this.dashBadge = this.root.querySelector("#hud-dash")!;
+    this.teleportBadge = this.root.querySelector("#hud-teleport")!;
     this.hotbarEl = this.root.querySelector("#hud-hotbar")!;
     this.factionBadge = this.root.querySelector("#hud-faction")!;
     this.hpText = this.root.querySelector("#hud-hp-text")!;
@@ -302,6 +313,14 @@ export class Hud {
       this.dashBadge.hidden = true;
     }
 
+    // R키 순간이동 쿨다운 (배운 사람에게만 표시)
+    if (p.teleportLearned && p.teleportCooldownSec > 0) {
+      this.teleportBadge.hidden = false;
+      this.teleportBadge.textContent = `이동 대기 ${p.teleportCooldownSec.toFixed(1)}s`;
+    } else {
+      this.teleportBadge.hidden = true;
+    }
+
     // 하단 중앙 단축바 — 인벤토리에서 올린 장비를 숫자키로 뽑습니다.
     // 1~3번은 무기, 4번은 언제나 지금 먹은 열매입니다(열매는 항상 하나 있으므로).
     // (내용이 바뀔 때만 다시 그려야 클릭·호버가 끊기지 않습니다)
@@ -316,15 +335,20 @@ export class Hud {
           const body = weapon
             ? `<div class="hotbar-icon">${weapon.icon}</div><div class="hotbar-name">${weapon.name}</div>`
             : `<div class="hotbar-empty">비어 있음</div>`;
-          return `<div class="${cls}"><div class="hotbar-key">${slot + 1}</div>${body}</div>`;
+          return `<div class="${cls}" data-slot="${slot}"><div class="hotbar-key">${slot + 1}</div>${body}</div>`;
         })
         .join("");
       const fruit = FRUIT_CATALOG.find((f) => f.id === p.equippedFruit);
       const fruitCls = ["hotbar-slot", "filled", p.fruitDrawn ? "active" : ""].filter(Boolean).join(" ");
       const fruitSlot =
-        `<div class="${fruitCls}"><div class="hotbar-key">4</div>` +
+        `<div class="${fruitCls}" data-slot="3"><div class="hotbar-key">4</div>` +
         `<div class="hotbar-icon">${fruit?.icon ?? "🍈"}</div><div class="hotbar-name">${fruit?.name ?? "열매"}</div></div>`;
       this.hotbarEl.innerHTML = weaponSlots + fruitSlot;
+      // 숫자키를 안 눌러도 마우스로 바로 뽑기/집어넣기 할 수 있게 클릭도 받습니다.
+      this.hotbarEl.querySelectorAll<HTMLDivElement>(".hotbar-slot").forEach((el) => {
+        const slot = Number(el.dataset.slot);
+        el.addEventListener("click", () => this.onHotbarSlotClick(slot));
+      });
     }
 
     // 항해 중 안내
@@ -459,6 +483,12 @@ export class Hud {
           break;
         case "jump_learned":
           this.pushToast(`🦘 ${ev.jumps}단 점프를 익혔습니다!`, "gold");
+          break;
+        case "teleport_learned":
+          this.pushToast("✨ 순간이동을 익혔습니다! R키로 마우스 위치에 이동하세요", "gold");
+          break;
+        case "teleport_failed":
+          // 마우스가 하늘이나 먼 바다를 가리키는 등, 갈 곳을 못 찾은 경우 — 조용히 넘어갑니다.
           break;
         case "sea_changed":
           this.pushToast(`👑 ${ev.seaName}에 도착했습니다 — ${ev.islandName}`, "gold");

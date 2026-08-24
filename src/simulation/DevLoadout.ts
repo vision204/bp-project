@@ -66,6 +66,7 @@ export function applyDevLoadout(state: GameState) {
   p.money = DEV_MONEY;
   p.hakiLearned = true;
   p.maxJumps = MAX_JUMPS;
+  p.teleportLearned = true;
   p.unlockedSecondSea = true;
 
   // 배는 전부 보유 (뱃사공이 최고급 배를 내줍니다)
