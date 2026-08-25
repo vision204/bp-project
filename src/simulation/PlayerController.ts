@@ -4,9 +4,12 @@ import type { PlayerState } from "../core/GameState";
 
 const MOVE_SPEED = 8;
 const SPRINT_SPEED = 14;
-/** Q 대쉬 거리(m)와 쿨다운(초) */
+/**
+ * Q 대쉬 거리(m). 쿨다운은 없고, 대신 마나를 소모합니다 —
+ * 마나가 있는 한 연속으로 계속 쓸 수 있고, 마나가 떨어지면 자연 회복될 때까지 못 씁니다.
+ */
 const DASH_DISTANCE = 11;
-export const DASH_COOLDOWN_SEC = 3;
+export const DASH_MANA_COST = 10;
 const SWIM_SPEED = 4.5;
 const JUMP_SPEED = 9;
 const GRAVITY = 20;
@@ -99,11 +102,11 @@ export class PlayerController {
    *   · W/S — 카메라가 보는 방향 그대로(위아래 포함) 전진·후진
    *   · A/D — 수평 좌우 이동
    *   · Space / Ctrl — 수직 상승·하강
-   *   · Shift — 가속 (3배)
+   *   · Shift — 가속(3배) 토글
    */
   private stepFlight(dt: number, input: InputSnapshot, player: PlayerState) {
-    const speed = FLY_SPEED * (input.sprintHeld ? FLY_BOOST : 1);
-    player.sprinting = input.sprintHeld;
+    const speed = FLY_SPEED * (input.sprintToggledOn ? FLY_BOOST : 1);
+    player.sprinting = input.sprintToggledOn;
 
     // 보는 방향(피치 포함) 단위 벡터
     const cosP = Math.cos(this.camPitch);
@@ -143,7 +146,6 @@ export class PlayerController {
     player.position = next;
     player.grounded = false;
     player.velocity = { x: mx, y: my, z: mz };
-    player.dashCooldownSec = Math.max(0, player.dashCooldownSec - dt);
   }
 
   step(dt: number, input: InputSnapshot, player: PlayerState) {
@@ -168,8 +170,8 @@ export class PlayerController {
     const right = { x: -Math.cos(this.camYaw), z: Math.sin(this.camYaw) };
 
     const swimming = this.swimSurfaceY !== null;
-    // Shift를 누르고 있으면 질주 (물속에서는 적용되지 않음)
-    const sprinting = input.sprintHeld && !swimming;
+    // Shift 한 번으로 질주 켜짐/꺼짐 토글 (물속에서는 적용되지 않음)
+    const sprinting = input.sprintToggledOn && !swimming;
     player.sprinting = sprinting;
     const speed = swimming ? SWIM_SPEED : sprinting ? SPRINT_SPEED : MOVE_SPEED;
 
@@ -199,14 +201,14 @@ export class PlayerController {
       player.yaw = Math.atan2(moveX, moveZ);
     }
 
-    // Q 대쉬 — 바라보는 방향으로 순간 이동 (쿨다운 있음, 마나 불필요)
-    player.dashCooldownSec = Math.max(0, player.dashCooldownSec - dt);
-    if (input.dashPressed && player.dashCooldownSec <= 0) {
-      player.dashCooldownSec = DASH_COOLDOWN_SEC;
-      player.pendingDash = {
-        x: Math.sin(this.camYaw) * DASH_DISTANCE,
-        z: Math.cos(this.camYaw) * DASH_DISTANCE,
-      };
+    // Q 대쉬 — 바라보는 방향으로 순간 이동. 쿨다운은 없고 마나를 소모해서,
+    // 마나가 있는 한 연속으로 계속 쓸 수 있습니다 (다 떨어지면 자연 회복까지 대기).
+    if (input.dashPressed && player.mana >= DASH_MANA_COST) {
+      player.mana -= DASH_MANA_COST;
+      const dx = Math.sin(this.camYaw) * DASH_DISTANCE;
+      const dz = Math.cos(this.camYaw) * DASH_DISTANCE;
+      player.pendingDash = { x: dx, z: dz };
+      player.events.push({ type: "player_dashed", dx, dz });
     }
 
     // 다단 점프.
@@ -272,7 +274,6 @@ export class PlayerController {
     player.aimYaw = this.camYaw;
     this.verticalVelocity = 0;
     player.sprinting = false;
-    player.dashCooldownSec = Math.max(0, player.dashCooldownSec);
   }
 
   /** 돌진 스킬용 — 현재 위치에서 상대 이동. 지형에 막히면 그만큼만 밀려납니다. */

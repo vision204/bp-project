@@ -22,6 +22,15 @@ export const TELEPORT_PRICE = 2000;
 /** 한 번 쓰고 나서 다시 쓸 수 있을 때까지의 시간(초) */
 export const TELEPORT_COOLDOWN_SEC = 4;
 
+/**
+ * 한 번에 이동할 수 있는 최대 거리(m, 3D 직선 거리). 마우스로 이보다 먼
+ * 지점을 가리키면 그 방향으로 이 거리만큼만 이동합니다(전혀 이동하지 않는
+ * "실패" 처리가 아니라, 방향은 존중하되 거리만 잘라내는 "클램프" 방식) —
+ * 실제 클램프 지점 계산(마우스 방향 + 지형 높이 재탐색)은 main.ts가
+ * SceneRenderer의 레이캐스트로 처리합니다.
+ */
+export const TELEPORT_MAX_DISTANCE_M = 30;
+
 /** 순간이동을 배울 수 없는 이유 (배울 수 있으면 null) */
 export type TeleportBlockReason = "already" | "level" | "money" | null;
 

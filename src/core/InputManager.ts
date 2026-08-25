@@ -13,8 +13,8 @@ export interface InputSnapshot {
   moveRight: boolean;
   jumpPressed: boolean; // 이번 프레임에 새로 눌림
   jumpHeld: boolean;
-  /** Shift — 질주 */
-  sprintHeld: boolean;
+  /** Shift — 한 번 누를 때마다 질주 켜짐/꺼짐이 토글됩니다 (누르고 있는 것과 무관) */
+  sprintToggledOn: boolean;
   /** Q — 전방 대쉬 */
   dashPressed: boolean;
   /**
@@ -56,6 +56,8 @@ export class InputManager {
   private zoomDelta = 0;
   private attackQueued = false;
   private rightMouseHeld = false;
+  /** Shift 토글 상태 — 누르고 있는 게 아니라 "한 번 누를 때마다 뒤집힘"을 기억합니다 */
+  private sprintOn = false;
   /** 마지막으로 확인된 마우스 커서의 화면 좌표 — 우클릭 여부와 무관하게 항상 갱신됩니다 */
   private lastMouseClientX = 0;
   private lastMouseClientY = 0;
@@ -149,6 +151,11 @@ export class InputManager {
 
   /** 매 프레임 한 번 호출: 현재 프레임 입력 스냅샷을 만들고 1프레임짜리 상태(justPressed 등)를 리셋합니다. */
   consumeFrame(): InputSnapshot {
+    // Shift는 누르고 있는 동안이 아니라, "이번 프레임에 새로 눌렸을 때" 딱 한 번만 토글을 뒤집습니다.
+    if (this.justPressed.has("ShiftLeft") || this.justPressed.has("ShiftRight")) {
+      this.sprintOn = !this.sprintOn;
+    }
+
     const snapshot: InputSnapshot = {
       moveForward: this.keys.has("KeyW"),
       moveBackward: this.keys.has("KeyS"),
@@ -156,7 +163,7 @@ export class InputManager {
       moveRight: this.keys.has("KeyD"),
       jumpPressed: this.justPressed.has("Space"),
       jumpHeld: this.keys.has("Space"),
-      sprintHeld: this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"),
+      sprintToggledOn: this.sprintOn,
       dashPressed: this.justPressed.has("KeyQ"),
       hotbarPressed: this.justPressed.has("Digit1")
         ? 0

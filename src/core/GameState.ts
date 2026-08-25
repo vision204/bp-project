@@ -203,10 +203,8 @@ export interface PlayerState {
   fruitBuffMultiplier: number;
   fruitBuffRemainingSec: number;
 
-  /** 질주(Shift) 중인지 — HUD 표시용 */
+  /** 질주(Shift 한 번으로 토글) 중인지 — HUD 표시용 */
   sprinting: boolean;
-  /** Q 대쉬 남은 쿨다운(초) */
-  dashCooldownSec: number;
 
   /** 카메라가 바라보는 방향 — 부채꼴/직선 스킬의 조준 기준 */
   aimYaw: number;
@@ -338,6 +336,8 @@ export type GameEvent =
   | { type: "boat_boarded" }
   | { type: "boat_left"; landed: boolean }
   | { type: "island_entered"; islandName: string; recommendedLevel: number }
+  /** Q 대쉬가 실제로 나갔을 때 — 렌더러가 이동 방향으로 바람 이펙트를 띄웁니다 */
+  | { type: "player_dashed"; dx: number; dz: number }
   // --- 멀티플레이 / PvP ---------------------------------------------------
   // CombatSystem은 다른 플레이어의 존재를 전혀 모릅니다(싱글플레이 로직은
   // 그대로 유지). 이 이벤트들은 근접/스킬 공격이 "나갔다"는 사실만 알리고,
@@ -480,7 +480,6 @@ export function createInitialGameState(
       fruitBuffRemainingSec: 0,
 
       sprinting: false,
-      dashCooldownSec: 0,
 
       aimYaw: 0,
       pendingDash: null,

@@ -1097,7 +1097,7 @@ function freshPlayer() {
 function input(overrides = {}) {
   return {
     moveForward: false, moveBackward: false, moveLeft: false, moveRight: false,
-    jumpPressed: false, jumpHeld: false, sprintHeld: false, dashPressed: false, hotbarPressed: null, attackPressed: false,
+    jumpPressed: false, jumpHeld: false, sprintToggledOn: false, dashPressed: false, hotbarPressed: null, attackPressed: false,
     skillPressed: [false, false, false, false],
     interactPressed: false, toggleInventoryPressed: false, toggleStatsPressed: false,
     toggleHakiPressed: false, mouseDeltaX: 0, mouseDeltaY: 0, ...overrides,
@@ -1367,9 +1367,9 @@ section("무기 숙련도(경험치) — 그 무기를 든 채로 낸 근접/무
   assert(weaponExpFromEnemy(100) === Math.round(100 * 0.6), "무기 경험치 비율도 열매와 동일(60%)");
 }
 
-section("이동 — Shift 질주 / Q 대쉬");
-const { DASH_COOLDOWN_SEC } = await import("../src/simulation/PlayerController.ts");
-assert(DASH_COOLDOWN_SEC > 0, `Q 대쉬 쿨다운 ${DASH_COOLDOWN_SEC}초`);
+section("이동 — Shift 질주 토글 / Q 대쉬(쿨다운 없이 마나 소모)");
+const { DASH_MANA_COST } = await import("../src/simulation/PlayerController.ts");
+assert(DASH_MANA_COST > 0, `Q 대쉬 마나 소모량 ${DASH_MANA_COST} (쿨다운 없음)`);
 
 section("퀘스트 레벨 제한 (섬은 갈 수 있지만 의뢰는 못 받음)");
 const gate = createInitialGameState();

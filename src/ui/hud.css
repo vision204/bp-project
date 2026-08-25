@@ -370,28 +370,18 @@ html, body {
   50% { box-shadow: 0 0 12px 2px rgba(209, 196, 233, 0.5); }
 }
 
-/* 열매 레벨 바 */
-.bar-label.fruit {
-  width: 68px;
+/* 검/총/열매 숙련도 바 — 지금 손에 뽑아 든 것 하나만 보임 (화면 우측 하단) */
+.bar-label.mastery {
+  width: 104px;
   font-size: 11px;
-  color: #ce93d8;
+  color: #ffd54f;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.bar-fill.fruit {
-  background: linear-gradient(90deg, #ab47bc, #ce93d8);
-}
-
-/* 무기 숙련도 바 — 지금 손에 든 무기가 있을 때만 보임 */
-.bar-label.weapon {
-  width: 68px;
-  font-size: 11px;
-  color: #ffb74d;
-  white-space: nowrap;
-}
-
-.bar-fill.weapon {
-  background: linear-gradient(90deg, #e65100, #ffb74d);
+.bar-fill.mastery {
+  background: linear-gradient(90deg, #e65100, #ffd54f);
 }
 
 /* Z/X/C/V 스킬 리스트 — 우측 세로 배치 (참조 이미지의 마스터리 패널 스타일) */
@@ -513,6 +503,15 @@ canvas.hide-cursor {
   pointer-events: none;
 }
 
+/* 검/총/열매 숙련도 — 화면 우측 하단 (좌하단 상태 패널과 대칭되는 자리) */
+.mastery-hud {
+  position: absolute;
+  right: 26px;
+  bottom: 22px;
+  width: 240px;
+  pointer-events: none;
+}
+
 /* 상점/인벤토리/캐릭터 — 상태 패널 맨 위, 가로로 나란히 */
 .menu-buttons {
   display: flex;
@@ -597,7 +596,7 @@ canvas.hide-cursor {
   background: rgba(40, 34, 12, 0.8);
 }
 
-/* ── 질주 / 대쉬 뱃지 ──────────────────────────────────────────── */
+/* ── 질주 뱃지 (Q 대쉬는 쿨다운이 없어 따로 뱃지가 없습니다) ────────── */
 .dash-badge {
   font-size: 13px;
   font-weight: bold;
@@ -605,11 +604,6 @@ canvas.hide-cursor {
   color: #06282d;
   padding: 5px 12px;
   border-radius: 999px;
-}
-
-.dash-badge.cooling {
-  background: rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.65);
 }
 
 .teleport-badge {

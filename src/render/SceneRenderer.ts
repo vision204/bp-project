@@ -1,13 +1,15 @@
 import * as THREE from "three";
-import type { EnemyState, GameState, NpcKind } from "../core/GameState";
+import type { EnemyState, GameState, ItemId, NpcKind } from "../core/GameState";
 import { FIRST_PERSON_THRESHOLD, type PlayerController } from "../simulation/PlayerController";
 import { maxWorldRadius } from "../world/islands";
 import { boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
+import { skillsForWeapon } from "../simulation/weaponSkills";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
-import type { RemoteEnemyGhost, RemotePlayerView } from "../network/MultiplayerClient";
+import type { RemoteEnemyGhost, RemotePlayerView, RemoteSkillFx } from "../network/MultiplayerClient";
 import { dist2D } from "../simulation/ShapeMath";
+import { buildEmberOverlayGroup, buildSkillEffectGroup } from "./SkillEffects";
 
 
 const CAMERA_DISTANCE = 6;
@@ -21,6 +23,11 @@ interface BlockyCharacter {
   group: THREE.Group;
   bodyMat: THREE.MeshStandardMaterial;
   legMat: THREE.MeshStandardMaterial;
+  /** 걷기/달리기 모션용 — 엉덩이/어깨 관절에서 흔들리도록 다리·팔을 이 피벗의 자식으로 둡니다 */
+  leftLegPivot: THREE.Group;
+  rightLegPivot: THREE.Group;
+  leftArmPivot: THREE.Group;
+  rightArmPivot: THREE.Group;
 }
 
 /** 아트가 준비되기 전까지, 로블록스 특유의 "블록형" 실루엣을 흉내낸 플레이스홀더 캐릭터. */
@@ -38,20 +45,44 @@ function buildBlockyCharacterParts(color: number): BlockyCharacter {
   head.castShadow = true;
   group.add(head);
 
+  // 다리는 엉덩이(hipY=0.9, 다리 박스의 원래 윗변) 높이에, 팔은 어깨(shoulderY=1.575,
+  // 팔 박스의 원래 윗변) 높이에 피벗을 두고, 메시는 그 피벗 아래로 절반만큼 내려 붙입니다 —
+  // 이렇게 하면 피벗을 회전시켰을 때 다리·팔이 관절에서 진짜로 흔들리는 것처럼 보입니다
+  // (메시 중심을 그대로 돌리면 몸통을 뚫고 앞뒤로 미끄러지듯 움직여 부자연스럽습니다).
+  const hipY = 0.9;
+  const shoulderY = 1.575;
   const legMat = new THREE.MeshStandardMaterial({ color: 0x2b3a67 });
+  let leftLegPivot!: THREE.Group;
+  let rightLegPivot!: THREE.Group;
+  let leftArmPivot!: THREE.Group;
+  let rightArmPivot!: THREE.Group;
   for (const side of [-1, 1]) {
+    const legPivot = new THREE.Group();
+    legPivot.position.set(side * 0.22, hipY, 0);
     const leg = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.9, 0.35), legMat);
-    leg.position.set(side * 0.22, 0.45, 0);
+    leg.position.y = -0.45;
     leg.castShadow = true;
-    group.add(leg);
+    legPivot.add(leg);
+    group.add(legPivot);
 
+    const armPivot = new THREE.Group();
+    armPivot.position.set(side * 0.56, shoulderY, 0);
     const arm = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.85, 0.3), mat);
-    arm.position.set(side * 0.56, 1.15, 0);
+    arm.position.y = -0.425;
     arm.castShadow = true;
-    group.add(arm);
+    armPivot.add(arm);
+    group.add(armPivot);
+
+    if (side === -1) {
+      leftLegPivot = legPivot;
+      leftArmPivot = armPivot;
+    } else {
+      rightLegPivot = legPivot;
+      rightArmPivot = armPivot;
+    }
   }
 
-  return { group, bodyMat: mat, legMat };
+  return { group, bodyMat: mat, legMat, leftLegPivot, rightLegPivot, leftArmPivot, rightArmPivot };
 }
 
 /** 머티리얼 참조가 필요 없는 곳(적·NPC)에서 쓰는 간편 버전 */
@@ -224,6 +255,32 @@ function buildSlingshot(): THREE.Group {
     group.add(band);
   }
 
+  return group;
+}
+
+/**
+ * Q 대쉬 이펙트 — 대쉬 방향으로 짧게 흩날리는 "바람" 줄무늬 몇 가닥.
+ * 그룹째로 위치·회전을 잡아 씌운 뒤, 1초에 걸쳐 옅어지다 사라지도록
+ * SceneRenderer.sync()에서 매 프레임 투명도/크기를 갱신합니다.
+ */
+function buildWindTrailGroup(): THREE.Group {
+  const group = new THREE.Group();
+  const streakCount = 7;
+  for (let i = 0; i < streakCount; i++) {
+    const len = 1.3 + Math.random() * 1.3;
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xdff6ff,
+      transparent: true,
+      opacity: 0.55,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, len), mat);
+    const angle = (Math.random() - 0.5) * 1.1; // 대쉬 방향을 중심으로 살짝 부채꼴로 흩어짐
+    const radius = 0.2 + Math.random() * 0.4;
+    mesh.position.set(Math.sin(angle) * radius, 0.7 + Math.random() * 1.0, -len * 0.15);
+    group.add(mesh);
+  }
   return group;
 }
 
@@ -434,6 +491,19 @@ export class SceneRenderer {
   private islandVisuals: IslandVisual[] = [];
   private environment: EnvironmentHandle | null = null;
 
+  // ── 걷기/달리기 다리·팔 모션 ────────────────────────────────────────────
+  /** 사인파 위상 — 매 프레임 실제 경과 시간만큼 진행시킵니다 (sync()에 dt가 안 들어와서 직접 잽니다) */
+  private walkPhase = 0;
+  /** 지금 다리를 얼마나 흔들고 있는지 (목표치로 서서히 다가갑니다 — 멈출 때 뚝 끊기지 않도록) */
+  private legSwingAmount = 0;
+  private lastAnimTimeMs = performance.now();
+
+  // ── Q 대쉬 바람 이펙트 ──────────────────────────────────────────────────
+  private dashTrails: { group: THREE.Group; startedAtMs: number }[] = [];
+
+  // ── 요루/삼도류/엔마 스킬 이펙트 (내 것 + 다른 플레이어 것 공용) ─────────────
+  private skillEffects: { group: THREE.Group; startedAtMs: number; durationMs: number; growTo: number }[] = [];
+
   constructor(container: HTMLElement, private readonly quality: QualitySettings) {
     // 섬들이 수백 미터 떨어져 있으므로 far plane을 넉넉하게 잡습니다.
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, maxWorldRadius() * 5);
@@ -508,6 +578,52 @@ export class SceneRenderer {
    */
   weaponVisible(id: string) {
     return this.weaponVisuals.get(id)?.visible === true;
+  }
+
+  /** 지금 걷기/달리기 다리 모션이 실제로 흔들리고 있는지 — 검증용으로 노출합니다. */
+  get legSwingActive() {
+    return this.legSwingAmount > 0.05;
+  }
+
+  /** 오른쪽 다리 피벗의 현재 회전 각도(라디안) — 검증용. 0이면 중립(정지) 자세입니다. */
+  get playerLegAngle() {
+    return this.playerParts.rightLegPivot.rotation.x;
+  }
+
+  /** 지금 화면에 떠 있는 Q 대쉬 바람 이펙트 개수 — 검증용으로 노출합니다. */
+  get dashTrailCount() {
+    return this.dashTrails.length;
+  }
+
+  /** 지금 화면에 떠 있는 요루/삼도류/엔마 스킬 이펙트 개수(화상 잉걸불 포함) — 검증용으로 노출합니다. */
+  get activeSkillEffectCount() {
+    return this.skillEffects.length;
+  }
+
+  /**
+   * 스킬 이펙트 하나를 그 자리(x,y,z)에서 aimYaw 방향으로 스폰합니다.
+   * 내 스킬(로컬)이든 다른 플레이어가 쓴 스킬(멀티플레이 중계)이든 이 함수
+   * 하나로 처리합니다 — 판정 도형(shape)만 맞으면 누가 쐈는지는 상관없습니다.
+   * weaponSkills.ts에 등록되지 않은 무기(예: 새총)는 skillsForWeapon이
+   * 빈 배열을 돌려주므로 자연히 아무 것도 스폰되지 않습니다.
+   */
+  private spawnSkillEffect(weaponId: string, slot: number, x: number, y: number, z: number, aimYaw: number, nowMs: number) {
+    const skill = skillsForWeapon(weaponId as ItemId)[slot];
+    if (!skill || skill.shape.kind === "self") return;
+
+    const main = buildSkillEffectGroup(skill, weaponId as ItemId);
+    main.group.position.set(x, y, z);
+    main.group.rotation.y = aimYaw;
+    this.scene.add(main.group);
+    this.skillEffects.push({ group: main.group, startedAtMs: nowMs, durationMs: main.durationMs, growTo: main.growTo });
+
+    const ember = buildEmberOverlayGroup(skill);
+    if (ember) {
+      ember.group.position.set(x, y, z);
+      ember.group.rotation.y = aimYaw;
+      this.scene.add(ember.group);
+      this.skillEffects.push({ group: ember.group, startedAtMs: nowMs, durationMs: ember.durationMs, growTo: ember.growTo });
+    }
   }
 
   /** 멀리 있는 섬을 숨기기 위해 섬 핸들을 등록합니다 (빠른 모드에서만 사용). */
@@ -654,6 +770,25 @@ export class SceneRenderer {
     return { x: p.x, y: p.y, z: p.z };
   }
 
+  /**
+   * 특정 (x,z) 지점 바로 위 높은 곳에서 수직으로 아래를 향해 레이캐스트해서
+   * 그 자리의 실제 지형 높이를 찾습니다. R 순간이동이 최대 거리를 넘는
+   * 지점을 "그 방향으로 최대 거리까지만" 클램프할 때, 클램프된 (x,z)가
+   * 지형 굴곡 위 어디쯤인지 다시 구하기 위해 씁니다 — 그러지 않고 플레이어와
+   * 원래 목표점을 잇는 직선을 그대로 잘라 쓰면 경사·계단 지형에서 땅에
+   * 파묻히거나 공중에 뜰 수 있습니다. 그 자리 위에 섬 지형이 없으면(먼
+   * 바다 등) null을 돌려줍니다.
+   */
+  raycastTerrainDownAt(x: number, z: number): { x: number; y: number; z: number } | null {
+    if (this.islandVisuals.length === 0) return null;
+    this.raycaster.set(new THREE.Vector3(x, 400, z), new THREE.Vector3(0, -1, 0));
+    const groups = this.islandVisuals.map((v) => v.group);
+    const hits = this.raycaster.intersectObjects(groups, true);
+    if (hits.length === 0) return null;
+    const p = hits[0].point;
+    return { x: p.x, y: p.y, z: p.z };
+  }
+
   /** 마우스가 올라간 플레이어 둘레에 테두리를 그리거나(id) 지웁니다(null). */
   setHoverOutline(id: string | null) {
     if (id === this.hoverOutlineId) return;
@@ -700,6 +835,7 @@ export class SceneRenderer {
     playerController: PlayerController,
     enemyGhosts?: ReadonlyMap<string, RemoteEnemyGhost>,
     remotePlayers?: RemotePlayerView[],
+    remoteSkillFx?: RemoteSkillFx[],
   ) {
     // 조명과 안개 — 태양은 플레이어를 따라다니고(어느 바다에서든 그림자가 나오도록),
     // 하늘·안개는 지금 있는 바다의 것을 씁니다.
@@ -711,6 +847,115 @@ export class SceneRenderer {
     // 플레이어
     this.playerVisual.position.set(state.player.position.x, state.player.position.y, state.player.position.z);
     this.playerVisual.rotation.y = state.player.yaw;
+
+    // 걷기/달리기 모션 — 이건 순수 연출이라 시뮬레이션 dt에 얽맬 필요 없이, 여기서
+    // 직접 실제 경과 시간을 재서 다리·팔을 흔듭니다. 질주 중이면 더 빠르고 크게 흔들어
+    // "달리는 모션"이 되고, 멈추면 목표 진폭이 0이 되어 서서히 가라앉습니다.
+    const nowMs = performance.now();
+    const animDt = Math.min(0.1, (nowMs - this.lastAnimTimeMs) / 1000);
+    this.lastAnimTimeMs = nowMs;
+
+    const flying = state.player.devMode && state.player.flying;
+    const horizSpeed = Math.hypot(state.player.velocity.x, state.player.velocity.z);
+    const targetSwing =
+      !flying && !state.boat.riding && horizSpeed > 0.15 ? (state.player.sprinting ? 0.85 : 0.55) : 0;
+    this.legSwingAmount += (targetSwing - this.legSwingAmount) * Math.min(1, animDt * 10);
+    if (this.legSwingAmount > 0.001) {
+      this.walkPhase += animDt * (state.player.sprinting ? 11 : 7);
+    }
+    const swing = Math.sin(this.walkPhase) * this.legSwingAmount;
+    this.playerParts.leftLegPivot.rotation.x = swing;
+    this.playerParts.rightLegPivot.rotation.x = -swing;
+    this.playerParts.leftArmPivot.rotation.x = -swing * 0.75;
+    this.playerParts.rightArmPivot.rotation.x = swing * 0.75;
+
+    // Q 대쉬 — 이번 프레임에 대쉬가 나갔으면 그 방향으로 바람 이펙트를 새로 띄우고,
+    // 떠 있는 이펙트들은 1초에 걸쳐 옅어지다 사라지게 합니다.
+    for (const ev of state.player.events) {
+      if (ev.type === "player_dashed") {
+        const trail = buildWindTrailGroup();
+        trail.position.set(state.player.position.x, state.player.position.y + 1.0, state.player.position.z);
+        trail.rotation.y = Math.atan2(ev.dx, ev.dz);
+        this.scene.add(trail);
+        this.dashTrails.push({ group: trail, startedAtMs: nowMs });
+      }
+    }
+    for (let i = this.dashTrails.length - 1; i >= 0; i--) {
+      const trail = this.dashTrails[i];
+      const t = (nowMs - trail.startedAtMs) / 1000;
+      if (t >= 1) {
+        this.scene.remove(trail.group);
+        trail.group.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            (obj.material as THREE.Material).dispose();
+          }
+        });
+        this.dashTrails.splice(i, 1);
+        continue;
+      }
+      const fade = 1 - t;
+      trail.group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshBasicMaterial) {
+          obj.material.opacity = 0.55 * fade;
+        }
+      });
+      trail.group.scale.setScalar(1 + t * 0.6);
+    }
+
+    // 요루/삼도류/엔마 스킬 이펙트 — 내가 이번 프레임에 스킬을 썼으면 지금
+    // 손에 든 무기 기준으로, 다른 플레이어가 썼다고 서버가 알려준 게 있으면
+    // 그 사람이 보고한 자리에 그대로 스폰합니다.
+    const heldForSkill = drawnWeapon(state.player);
+    if (heldForSkill) {
+      for (const ev of state.player.events) {
+        if (ev.type === "skill_fired") {
+          this.spawnSkillEffect(
+            heldForSkill.id,
+            ev.slot,
+            state.player.position.x,
+            state.player.position.y,
+            state.player.position.z,
+            state.player.aimYaw,
+            nowMs,
+          );
+        }
+      }
+    }
+    if (remoteSkillFx) {
+      for (const fx of remoteSkillFx) {
+        if (!fx.weaponId) continue;
+        this.spawnSkillEffect(fx.weaponId, fx.slot, fx.position.x, fx.position.y, fx.position.z, fx.aimYaw, nowMs);
+      }
+    }
+    for (let i = this.skillEffects.length - 1; i >= 0; i--) {
+      const eff = this.skillEffects[i];
+      const t = (nowMs - eff.startedAtMs) / eff.durationMs;
+      if (t >= 1) {
+        this.scene.remove(eff.group);
+        eff.group.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            (obj.material as THREE.Material).dispose();
+          }
+        });
+        this.skillEffects.splice(i, 1);
+        continue;
+      }
+      const fade = 1 - t;
+      if (eff.growTo > 0) eff.group.scale.setScalar(1 + t * eff.growTo);
+      eff.group.traverse((obj) => {
+        if (!(obj instanceof THREE.Mesh)) return;
+        const mat = obj.material as THREE.MeshBasicMaterial;
+        if (typeof obj.userData.baseOpacity === "number") mat.opacity = obj.userData.baseOpacity * fade;
+        if (obj.userData.role === "shard") {
+          const speed = (obj.userData.speed as number) ?? 1;
+          obj.position.x += (obj.userData.vx as number) * animDt * speed;
+          obj.position.y += ((obj.userData.vy as number) ?? 0) * animDt * speed;
+          obj.position.z += (obj.userData.vz as number) * animDt * speed;
+        }
+      });
+    }
 
     // 손에 든 무기만 보이게 (요루 / 삼도류 / 엔마)
     const held = drawnWeapon(state.player);

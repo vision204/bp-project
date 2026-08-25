@@ -160,6 +160,12 @@ export type ClientMessage =
   | { type: "pvp_toggle"; enabled: boolean }
   | { type: "melee_attack"; targetId: string }
   | { type: "skill_attack"; targetId: string; slot: number }
+  /**
+   * 스킬을 쓸 때마다 순수 연출용으로 보내는 알림 — 데미지 판정(skill_attack)과는
+   * 완전히 별개입니다. PvP를 껐어도, 사거리 안에 아무도 없어도 보내서, 같은 방의
+   * 다른 사람 화면에 내 스킬 이펙트(부채꼴/직선/원형 베기 등)가 보이게 합니다.
+   */
+  | { type: "skill_fx"; slot: number; weaponId: string | null; position: Vec3Like; aimYaw: number }
   | { type: "enemy_states"; enemies: EnemySyncEntry[] }
   // --- 거래 / 선물 ---------------------------------------------------------
   /** 거래를 신청합니다 — 곧바로 거래창이 열리지 않고, 상대에게 "초대"만 갑니다. */
@@ -188,6 +194,8 @@ export type ServerMessage =
   | { type: "pvp_hit_ack"; targetId: string; targetName: string; damage: number }
   /** 공격이 거부됐을 때 (사거리 밖, 쿨다운 중, PvP 꺼짐, 다른 진영 아님 등) */
   | { type: "pvp_rejected"; reason: string }
+  /** 같은 방의 다른 사람이 스킬을 썼다는 순수 연출용 중계 — 그대로 이펙트만 재생합니다. */
+  | { type: "player_skill_fx"; fromId: string; slot: number; weaponId: string | null; position: Vec3Like; aimYaw: number }
   // --- 거래 / 선물 ---------------------------------------------------------
   /** 거래 신청이 상대에게 도착했을 때 — 상대만 받습니다 (수락/거절 버튼을 보여줌). */
   | { type: "trade_invite"; fromId: string; fromName: string }

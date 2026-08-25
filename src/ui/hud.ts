@@ -21,12 +21,11 @@ export class Hud {
   private hakiBadge!: HTMLDivElement;
   private islandBadge!: HTMLDivElement;
   private skillRow!: HTMLDivElement;
-  private fruitLevelLabel!: HTMLDivElement;
-  private fruitExpFill!: HTMLDivElement;
-  private weaponRow!: HTMLDivElement;
-  private weaponLevelLabel!: HTMLDivElement;
-  private weaponExpFill!: HTMLDivElement;
-  private weaponText!: HTMLDivElement;
+  /** 검/총/열매 숙련도 표시 (화면 우측 하단) — 뽑아 든 것 하나만 보여줍니다 */
+  private masteryHud!: HTMLDivElement;
+  private masteryLabel!: HTMLDivElement;
+  private masteryExpFill!: HTMLDivElement;
+  private masteryText!: HTMLDivElement;
   private questBox!: HTMLDivElement;
   private interactionPrompt!: HTMLDivElement;
   private toastContainer!: HTMLDivElement;
@@ -130,20 +129,6 @@ export class Hud {
             <div class="bar-text" id="hud-mp-text">0 / 0</div>
           </div>
         </div>
-        <div class="bar-row">
-          <div class="bar-label fruit" id="hud-fruit-level">열매 Lv.1</div>
-          <div class="bar-track">
-            <div class="bar-fill fruit" id="hud-fruit-exp" style="width:0%"></div>
-            <div class="bar-text" id="hud-fruit-text">0 / 0</div>
-          </div>
-        </div>
-        <div class="bar-row" id="hud-weapon-row" hidden>
-          <div class="bar-label weapon" id="hud-weapon-level">무기 Lv.1</div>
-          <div class="bar-track">
-            <div class="bar-fill weapon" id="hud-weapon-exp" style="width:0%"></div>
-            <div class="bar-text" id="hud-weapon-text">0 / 0</div>
-          </div>
-        </div>
         <div class="top-badges">
           <div class="faction-badge" id="hud-faction">해적</div>
           <div class="jump-badge" id="hud-jump" hidden></div>
@@ -153,6 +138,16 @@ export class Hud {
           <div class="teleport-badge" id="hud-teleport" hidden></div>
           <div class="stat-points-badge" id="hud-stat-points" hidden></div>
           <div class="dev-badge" id="hud-dev" hidden></div>
+        </div>
+      </div>
+      <!-- 검/총/열매를 손에 뽑아 든 동안에만 그 숙련도를 화면 우측 하단에 보여줍니다 -->
+      <div class="mastery-hud" id="hud-mastery" hidden>
+        <div class="bar-row">
+          <div class="bar-label mastery" id="hud-mastery-label">Lv.1</div>
+          <div class="bar-track">
+            <div class="bar-fill mastery" id="hud-mastery-exp" style="width:0%"></div>
+            <div class="bar-text" id="hud-mastery-text">0 / 0</div>
+          </div>
         </div>
       </div>
       <div class="skill-row" id="hud-skills"></div>
@@ -174,12 +169,10 @@ export class Hud {
     this.islandBadge = this.root.querySelector("#hud-island")!;
     this.seaBadge = this.root.querySelector("#hud-sea")!;
     this.skillRow = this.root.querySelector("#hud-skills")!;
-    this.fruitLevelLabel = this.root.querySelector("#hud-fruit-level")!;
-    this.fruitExpFill = this.root.querySelector("#hud-fruit-exp")!;
-    this.weaponRow = this.root.querySelector("#hud-weapon-row")!;
-    this.weaponLevelLabel = this.root.querySelector("#hud-weapon-level")!;
-    this.weaponExpFill = this.root.querySelector("#hud-weapon-exp")!;
-    this.weaponText = this.root.querySelector("#hud-weapon-text")!;
+    this.masteryHud = this.root.querySelector("#hud-mastery")!;
+    this.masteryLabel = this.root.querySelector("#hud-mastery-label")!;
+    this.masteryExpFill = this.root.querySelector("#hud-mastery-exp")!;
+    this.masteryText = this.root.querySelector("#hud-mastery-text")!;
     this.questBox = this.root.querySelector("#hud-quest-box")!;
     this.interactionPrompt = this.root.querySelector("#hud-interaction")!;
     this.toastContainer = this.root.querySelector("#hud-toasts")!;
@@ -193,7 +186,6 @@ export class Hud {
     this.hpText = this.root.querySelector("#hud-hp-text")!;
     this.manaText = this.root.querySelector("#hud-mp-text")!;
     this.expText = this.root.querySelector("#hud-exp-text")!;
-    this.fruitText = this.root.querySelector("#hud-fruit-text")!;
     this.jumpBadge = this.root.querySelector("#hud-jump")!;
     this.devBadge = this.root.querySelector("#hud-dev")!;
 
@@ -236,7 +228,6 @@ export class Hud {
     const hpRatio = p.maxHp > 0 ? p.hp / p.maxHp : 0;
     const mpRatio = p.maxMana > 0 ? p.mana / p.maxMana : 0;
     const expRatio = p.expToNextLevel > 0 ? p.exp / p.expToNextLevel : 0;
-    const fruitRatio = p.fruitExpToNext > 0 ? p.fruitExp / p.fruitExpToNext : 0;
 
     this.hpFill.style.width = `${Math.max(0, hpRatio * 100)}%`;
     this.manaFill.style.width = `${Math.max(0, mpRatio * 100)}%`;
@@ -246,8 +237,6 @@ export class Hud {
     this.manaText.textContent = `${Math.floor(Math.max(0, p.mana)).toLocaleString()} / ${p.maxMana.toLocaleString()}`;
     this.expText.textContent =
       `${Math.floor(p.exp).toLocaleString()} / ${p.expToNextLevel.toLocaleString()} (${Math.floor(expRatio * 100)}%)`;
-    this.fruitText.textContent =
-      `${Math.floor(p.fruitExp).toLocaleString()} / ${p.fruitExpToNext.toLocaleString()} (${Math.floor(fruitRatio * 100)}%)`;
 
     // levelBadge는 "Lv." 뒤의 <span>이므로 숫자만 넣습니다 (예전엔 "Lv. Lv. 1"로 중복 출력됐음)
     this.levelBadge.textContent = p.level.toLocaleString();
@@ -297,15 +286,10 @@ export class Hud {
 
     this.hakiBadge.hidden = !p.hakiActive;
 
-    // Q 대쉬 쿨다운 / 질주 표시
-    if (p.dashCooldownSec > 0) {
-      this.dashBadge.hidden = false;
-      this.dashBadge.textContent = `대쉬 ${p.dashCooldownSec.toFixed(1)}s`;
-      this.dashBadge.classList.add("cooling");
-    } else if (p.sprinting) {
+    // 질주 표시 (Q 대쉬는 쿨다운 없이 마나로 쓰므로 따로 배지가 없습니다 — MP 바로 확인)
+    if (p.sprinting) {
       this.dashBadge.hidden = false;
       this.dashBadge.textContent = "질주 중";
-      this.dashBadge.classList.remove("cooling");
     } else {
       this.dashBadge.hidden = true;
     }
@@ -356,23 +340,26 @@ export class Hud {
     }
     this.drownOverlay.hidden = !p.inWater;
 
-    // 열매 레벨 바 — 늘 보입니다 (스킬을 뽑아 들었는지와 무관하게 진행 상황은 항상 표시).
-    this.fruitLevelLabel.textContent = `열매 Lv.${p.fruitLevel}`;
-    this.fruitExpFill.style.width = `${Math.min(100, (p.fruitExp / p.fruitExpToNext) * 100)}%`;
-
-    // 무기 숙련도 바 — 지금 손에 든 무기가 있을 때만 보입니다.
+    // 숙련도 HUD (화면 우측 하단) — 검/총/열매 중 지금 손에 뽑아 든 것 하나만 보여줍니다.
+    // 숫자키로 아무것도 안 뽑았으면 통째로 숨깁니다.
     const heldWeapon = drawnWeapon(p);
-    if (heldWeapon) {
+    if (p.fruitDrawn) {
+      const fruit = FRUIT_CATALOG.find((f) => f.id === p.equippedFruit);
+      this.masteryHud.hidden = false;
+      this.masteryLabel.textContent = `${fruit?.icon ?? "🍈"} ${fruit?.name ?? "열매"} Lv.${p.fruitLevel}`;
+      this.masteryExpFill.style.width = `${Math.min(100, (p.fruitExp / p.fruitExpToNext) * 100)}%`;
+      this.masteryText.textContent = `${Math.floor(p.fruitExp).toLocaleString()} / ${p.fruitExpToNext.toLocaleString()}`;
+    } else if (heldWeapon) {
       const mastery = p.weaponMastery[heldWeapon.id];
       const level = mastery?.level ?? 1;
       const exp = mastery?.exp ?? 0;
       const expToNext = mastery?.expToNext ?? 1;
-      this.weaponRow.hidden = false;
-      this.weaponLevelLabel.textContent = `${heldWeapon.name} Lv.${level}`;
-      this.weaponExpFill.style.width = `${Math.min(100, (exp / expToNext) * 100)}%`;
-      this.weaponText.textContent = `${Math.floor(exp).toLocaleString()} / ${expToNext.toLocaleString()}`;
+      this.masteryHud.hidden = false;
+      this.masteryLabel.textContent = `${heldWeapon.icon} ${heldWeapon.name} Lv.${level}`;
+      this.masteryExpFill.style.width = `${Math.min(100, (exp / expToNext) * 100)}%`;
+      this.masteryText.textContent = `${Math.floor(exp).toLocaleString()} / ${expToNext.toLocaleString()}`;
     } else {
-      this.weaponRow.hidden = true;
+      this.masteryHud.hidden = true;
     }
 
     // Z/X/C/V 스킬 슬롯 4개.

@@ -514,6 +514,25 @@ export class World {
         this.resolveSkillAttack(conn, msg.targetId, msg.slot, nowMs);
         break;
 
+      case "skill_fx": {
+        // 순수 연출 중계입니다 — 데미지 판정이 아니므로 검증 없이 그대로(위치만
+        // 상식적인 범위로 잘라서) 같은 방 사람들에게 뿌립니다.
+        const slot = Number.isFinite(msg.slot) ? Math.trunc(msg.slot) : 0;
+        const weaponId = typeof msg.weaponId === "string" ? msg.weaponId.slice(0, 64) : null;
+        const position = {
+          x: clampFinite(msg.position?.x, -20000, 20000, conn.position.x),
+          y: clampFinite(msg.position?.y, -500, 2000, conn.position.y),
+          z: clampFinite(msg.position?.z, -20000, 20000, conn.position.z),
+        };
+        const aimYaw = clampFinite(msg.aimYaw, -1000, 1000, conn.aimYaw);
+        this.broadcastRoom(
+          conn.roomId,
+          { type: "player_skill_fx", fromId: conn.id, slot, weaponId, position, aimYaw },
+          conn.id,
+        );
+        break;
+      }
+
       case "enemy_states": {
         const enemies = clampEnemySyncEntries(msg.enemies);
         if (enemies.length > 0) {

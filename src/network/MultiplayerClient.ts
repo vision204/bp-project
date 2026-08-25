@@ -31,7 +31,20 @@ import {
   type RemotePlayerSnapshot,
   type ServerMessage,
   type TradeItem,
+  type Vec3Like,
 } from "./protocol";
+
+/**
+ * 다른 플레이어가 스킬을 썼다고 서버가 알려준 것 — 순수 연출용입니다.
+ * SceneRenderer.sync()가 이 목록을 받아 그 자리에서 이펙트를 한 번 스폰합니다.
+ */
+export interface RemoteSkillFx {
+  fromId: string;
+  slot: number;
+  weaponId: string | null;
+  position: Vec3Like;
+  aimYaw: number;
+}
 
 /** 지금 진행 중인 거래창 상태 — TradeUI가 그대로 읽어서 그립니다. */
 export interface TradeSession {
@@ -135,6 +148,8 @@ export class MultiplayerClient {
   private _tradeSession: TradeSession | null = null;
   private _incomingTradeInvite: IncomingTradeInvite | null = null;
   private _outgoingTradeInvite: OutgoingTradeInvite | null = null;
+  /** 아직 렌더러가 소비하지 않은, 다른 사람의 스킬 이펙트 알림 — 매 프레임 drainSkillFx()로 비웁니다. */
+  private _pendingSkillFx: RemoteSkillFx[] = [];
 
   status: MultiplayerStatus = "disconnected";
   serverUrl = "";
@@ -207,6 +222,7 @@ export class MultiplayerClient {
       this._tradeSession = null;
       this._incomingTradeInvite = null;
       this._outgoingTradeInvite = null;
+      this._pendingSkillFx = [];
       if (wasConnected) {
         this.state.player.events.push({ type: "pvp_disconnected", reason: "연결이 끊어졌습니다" });
       }
@@ -234,6 +250,7 @@ export class MultiplayerClient {
     this._tradeSession = null;
     this._incomingTradeInvite = null;
     this._outgoingTradeInvite = null;
+    this._pendingSkillFx = [];
     // 기본값이 켜짐이므로 연결 해제 후에도 켜짐으로 되돌립니다 (꺼진 채로 남지 않도록).
     this.state.player.pvpEnabled = true;
   }
@@ -300,6 +317,18 @@ export class MultiplayerClient {
           type: "pvp_rejected",
           reason: PVP_REJECT_MESSAGES[msg.reason] ?? msg.reason,
         });
+        break;
+
+      case "player_skill_fx":
+        if (msg.fromId !== this.myId) {
+          this._pendingSkillFx.push({
+            fromId: msg.fromId,
+            slot: msg.slot,
+            weaponId: msg.weaponId,
+            position: msg.position,
+            aimYaw: msg.aimYaw,
+          });
+        }
         break;
 
       case "enemy_states": {
@@ -512,6 +541,19 @@ export class MultiplayerClient {
 
   sendSkillAttack(targetId: string, slot: number) {
     this.send({ type: "skill_attack", targetId, slot });
+  }
+
+  /** 스킬을 쓸 때마다(전투 후보 유무·PvP 여부와 무관하게) 순수 연출용으로 알립니다. */
+  sendSkillFx(slot: number, weaponId: string | null, position: Vec3Like, aimYaw: number) {
+    this.send({ type: "skill_fx", slot, weaponId, position, aimYaw });
+  }
+
+  /** 아직 화면에 반영하지 않은 다른 사람의 스킬 이펙트 알림을 꺼내고 비웁니다 — 매 프레임 한 번씩. */
+  drainSkillFx(): RemoteSkillFx[] {
+    if (this._pendingSkillFx.length === 0) return this._pendingSkillFx;
+    const out = this._pendingSkillFx;
+    this._pendingSkillFx = [];
+    return out;
   }
 
   /** 근접 사거리 안에 있는, 공격 후보가 될 만한 플레이어들 (다른 진영 + 해적끼리). */

@@ -81,3 +81,22 @@ export function processPvpAttacks(state: GameState, mp: MultiplayerClient) {
 export function drawnWeaponId(state: GameState): string | null {
   return drawnWeapon(state.player)?.id ?? null;
 }
+
+/**
+ * 스킬을 쓸 때마다(전투 후보 유무·PvP 켬/끔과 무관하게) 같은 방의 다른 사람
+ * 화면에도 스킬 이펙트가 보이도록 순수 연출용 알림을 보냅니다.
+ *
+ * processPvpAttacks와 굳이 분리해둔 이유: processPvpAttacks는 맨 위에서
+ * `!state.player.pvpEnabled`면 통째로 return해버리는데(데미지 판정이니까 당연),
+ * 이펙트는 PvP를 꺼둔 사람이 써도 다른 사람 눈에는 보여야 자연스러워서
+ * 그 가드에 걸리지 않는 별도 함수로 뒀습니다.
+ */
+export function broadcastSkillFx(state: GameState, mp: MultiplayerClient) {
+  if (!mp.connected) return;
+  const p = state.player;
+  for (const ev of p.events) {
+    if (ev.type === "skill_fired") {
+      mp.sendSkillFx(ev.slot, drawnWeaponId(state), p.position, p.aimYaw);
+    }
+  }
+}

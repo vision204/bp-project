@@ -384,7 +384,7 @@ await page.screenshot({ path: "/home/claude/bp-project/scripts/out-2b-zoomout.pn
 await page.evaluate((d) => { window.__game.simulation.playerController.camDistance = d; }, zoomBase.zoom);
 await page.waitForTimeout(200);
 
-section("3. Shift 질주 / Q 대쉬");
+section("3. Shift 한 번으로 질주 토글 / 달리는 모션 / Q 대쉬(마나 소모·쿨다운 없음)");
 await page.evaluate(() => {
   window.__game.panels.closeAll();
   window.__game.simulation.playerController.teleport({ x: 0, y: 2, z: 0 });
@@ -404,33 +404,93 @@ async function travelDistance(keys, ms) {
 const walkDist = await travelDistance(["KeyW"], 1600);
 await page.evaluate(() => window.__game.simulation.playerController.teleport({ x: 0, y: 2, z: 0 }));
 await page.waitForTimeout(600);
-const sprintDist = await travelDistance(["ShiftLeft", "KeyW"], 1600);
-assert(walkDist > 0.3, `평보 이동 (${walkDist.toFixed(2)}m)`);
-assert(sprintDist > walkDist * 1.2, `Shift+W 질주가 더 빠름 (평보 ${walkDist.toFixed(2)}m → 질주 ${sprintDist.toFixed(2)}m)`);
 
-// Q 대쉬
+// Shift는 누르고 있는 게 아니라 "한 번 탭"만 해도 질주가 계속 유지돼야 합니다.
+await page.keyboard.press("ShiftLeft");
+await page.waitForTimeout(150);
+const sprintToggledOn = await page.evaluate(() => window.__game.simulation.state.player.sprinting);
+assert(sprintToggledOn === true, "Shift를 한 번 탭하면(누르고 있지 않아도) 질주가 켜짐");
+
+const beforeSprintWalk = await pos();
+await page.keyboard.down("KeyW");
+await page.waitForTimeout(1600);
+// 달리는 도중에 실제로 다리 스윙(달리는 모션)이 켜져 있는지 확인합니다.
+const legSwingWhileRunning = await page.evaluate(() => ({
+  active: window.__game.renderer.legSwingActive,
+  angle: window.__game.renderer.playerLegAngle,
+}));
+await page.keyboard.up("KeyW");
+await page.waitForTimeout(150);
+const afterSprintWalk = await pos();
+const sprintDist = Math.hypot(afterSprintWalk.x - beforeSprintWalk.x, afterSprintWalk.z - beforeSprintWalk.z);
+
+assert(walkDist > 0.3, `평보 이동 (${walkDist.toFixed(2)}m)`);
+assert(sprintDist > walkDist * 1.2, `Shift로 토글해둔 질주가 평보보다 빠름 (평보 ${walkDist.toFixed(2)}m → 질주 ${sprintDist.toFixed(2)}m)`);
+assert(legSwingWhileRunning.active, "질주하며 달리는 동안 다리 스윙(달리는 모션)이 켜짐");
+assert(Math.abs(legSwingWhileRunning.angle) > 0.05, `다리가 실제로 회전각을 갖고 흔들림 (${legSwingWhileRunning.angle.toFixed(2)}rad)`);
+
+// 다시 한 번 탭하면 질주가 꺼집니다.
+await page.keyboard.press("ShiftLeft");
+await page.waitForTimeout(150);
+const sprintToggledOff = await page.evaluate(() => window.__game.simulation.state.player.sprinting);
+assert(sprintToggledOff === false, "Shift를 다시 누르면 질주가 꺼짐");
+
+// 멈춰 서 있으면 달리는 모션도 다시 가라앉습니다.
+await page.waitForTimeout(800);
+const legSwingIdle = await page.evaluate(() => window.__game.renderer.legSwingActive);
+assert(!legSwingIdle, "멈춰 서 있으면 달리기 모션이 다시 가라앉음");
+
+// Q 대쉬 — 쿨다운은 없고 마나를 소모합니다. 마나가 있는 한 연속으로 계속 쓸 수 있습니다.
 await page.evaluate(() => {
   const sim = window.__game.simulation;
   sim.playerController.teleport({ x: 0, y: 2, z: 0 });
-  sim.state.player.dashCooldownSec = 0;
+  sim.state.player.mana = sim.state.player.maxMana;
   sim.playerController.camYaw = 0;
 });
 await page.waitForTimeout(900);
+
+const manaBeforeDash = await page.evaluate(() => window.__game.simulation.state.player.mana);
 const beforeDash = await pos();
 await page.keyboard.press("KeyQ");
-await page.waitForTimeout(600);
+await page.waitForTimeout(200);
 const afterDash = await pos();
+const manaAfterDash = await page.evaluate(() => window.__game.simulation.state.player.mana);
 const dashDist = Math.hypot(afterDash.x - beforeDash.x, afterDash.z - beforeDash.z);
 assert(dashDist > 5, `Q로 전방 대쉬 (${dashDist.toFixed(2)}m 순간 이동)`);
 assert(afterDash.z > beforeDash.z, `바라보는 방향(+Z)으로 대쉬 (z ${beforeDash.z.toFixed(1)} → ${afterDash.z.toFixed(1)})`);
+assert(manaBeforeDash - manaAfterDash >= 8, `대쉬가 마나를 소모함 (${manaBeforeDash.toFixed(0)} → ${manaAfterDash.toFixed(0)})`);
 
-const dashCd = await page.evaluate(() => ({
-  cd: window.__game.simulation.state.player.dashCooldownSec,
-  badge: document.querySelector("#hud-dash")?.textContent,
-  badgeVisible: !document.querySelector("#hud-dash")?.hidden,
-}));
-assert(dashCd.cd > 0, `대쉬 쿨다운 시작 (${dashCd.cd.toFixed(1)}초)`);
-assert(dashCd.badgeVisible && /대쉬/.test(dashCd.badge ?? ""), `HUD에 쿨다운 표시: "${dashCd.badge}"`);
+// 대쉬 방향으로 바람 이펙트가 떴다가, 1초 정도 지나면 사라지는지
+const trailJustAfter = await page.evaluate(() => window.__game.renderer.dashTrailCount);
+assert(trailJustAfter > 0, `대쉬 방향으로 바람 이펙트가 나타남 (${trailJustAfter}개)`);
+await page.waitForTimeout(1300);
+const trailAfterFade = await page.evaluate(() => window.__game.renderer.dashTrailCount);
+assert(trailAfterFade === 0, "1초 정도 지나면 바람 이펙트가 사라짐");
+
+// 쿨다운이 없으므로, 마나만 있으면 곧바로 다시 대쉬할 수 있어야 합니다.
+// (첫 대쉬로 옮겨간 자리가 섬 가장자리/바다 근처일 수 있어, 안전한 출발점으로 되돌린 뒤 다시 잽니다)
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  sim.playerController.teleport({ x: 0, y: 2, z: 0 });
+  sim.state.player.mana = sim.state.player.maxMana;
+  sim.playerController.camYaw = 0;
+});
+await page.waitForTimeout(600);
+const beforeDash2 = await pos();
+await page.keyboard.press("KeyQ");
+await page.waitForTimeout(200);
+const afterDash2 = await pos();
+const dashDist2 = Math.hypot(afterDash2.x - beforeDash2.x, afterDash2.z - beforeDash2.z);
+assert(dashDist2 > 5, `쿨다운 없이 곧바로 다시 대쉬 가능 (${dashDist2.toFixed(2)}m)`);
+
+// 마나가 다 떨어지면 대쉬가 막힙니다.
+await page.evaluate(() => { window.__game.simulation.state.player.mana = 0; });
+const beforeDash3 = await pos();
+await page.keyboard.press("KeyQ");
+await page.waitForTimeout(200);
+const afterDash3 = await pos();
+const dashDist3 = Math.hypot(afterDash3.x - beforeDash3.x, afterDash3.z - beforeDash3.z);
+assert(dashDist3 < 1, `마나가 없으면 대쉬가 나가지 않음 (이동 ${dashDist3.toFixed(2)}m)`);
 
 section("4. 우클릭 시 커서 숨김");
 const cursorBefore = await page.evaluate(() => getComputedStyle(document.querySelector("canvas")).cursor);
@@ -1069,13 +1129,13 @@ const fruitKill = await page.evaluate(() => ({
   dead: !window.__game.simulation.state.enemies.find((e) => e.id === window.__targetId).alive,
   fruitExp: window.__game.simulation.state.player.fruitExp,
   fruitLevel: window.__game.simulation.state.player.fruitLevel,
-  barWidth: document.querySelector("#hud-fruit-exp")?.style.width,
-  label: document.querySelector("#hud-fruit-level")?.textContent,
+  barWidth: document.querySelector("#hud-mastery-exp")?.style.width,
+  label: document.querySelector("#hud-mastery-label")?.textContent,
 }));
 assert(fruitKill.dead, "열매 스킬(Z)로 처치");
 assert(fruitKill.fruitExp > 0 || fruitKill.fruitLevel > 1, `열매 막타 → 열매 경험치 획득 (exp=${fruitKill.fruitExp}, lv=${fruitKill.fruitLevel})`);
-assert(fruitKill.barWidth !== "0%", `열매 경험치 바가 채워짐 (${fruitKill.barWidth})`);
-assert(/열매/.test(fruitKill.label ?? ""), `열매 레벨 라벨 표시: "${fruitKill.label}"`);
+assert(fruitKill.barWidth !== "0%", `열매 경험치 바(우측 하단 숙련도 HUD)가 채워짐 (${fruitKill.barWidth})`);
+assert(/열매|Lv\./.test(fruitKill.label ?? ""), `열매 레벨 라벨 표시(우측 하단): "${fruitKill.label}"`);
 await page.screenshot({ path: "/home/claude/bp-project/scripts/out-18-fruit-exp.png" });
 
 section("15. 스텟 실제 조정 (실제 마우스 클릭)");
@@ -1492,6 +1552,24 @@ assert(gunDrawn.active === gunSlot, "숫자키로 새총을 실제로 장착함"
 assert(gunDrawn.visible, "3D 화면에 새총이 손에 나타남");
 await page.screenshot({ path: "/home/claude/bp-project/scripts/out-18c-gun-drawn.png" });
 
+// 숙련도 HUD가 화면 우측 하단으로 옮겨졌는지 — 새총을 뽑은 동안에만 보여야 합니다.
+const masteryOnGunDrawn = await page.evaluate(() => {
+  const el = document.querySelector("#hud-mastery");
+  const statusEl = document.querySelector(".hud-status");
+  const r = el?.getBoundingClientRect();
+  const statusR = statusEl?.getBoundingClientRect();
+  return {
+    hidden: el?.hidden,
+    label: document.querySelector("#hud-mastery-label")?.textContent,
+    onRightHalf: r ? r.left > window.innerWidth / 2 : false,
+    rightOfStatus: r && statusR ? r.left > statusR.right : false,
+  };
+});
+assert(masteryOnGunDrawn.hidden === false, "새총을 뽑으면 숙련도 HUD가 보임");
+assert(/새총/.test(masteryOnGunDrawn.label ?? ""), `숙련도 HUD에 새총 표시: "${masteryOnGunDrawn.label}"`);
+assert(masteryOnGunDrawn.onRightHalf, "숙련도 HUD가 화면 우측(x가 화면 절반보다 큼)에 있음");
+assert(masteryOnGunDrawn.rightOfStatus, "숙련도 HUD가 좌하단 상태 패널보다 오른쪽에 있음");
+
 // 원거리 사거리 밖 몬스터 근처로 이동해서, 근접 사거리보다 훨씬 먼 거리에서도
 // 마우스가 가리키는 방향(aimYaw)으로 실제 데미지가 들어가는지 확인합니다.
 await page.evaluate(() => {
@@ -1518,6 +1596,10 @@ assert(hpAfterShot < hpBeforeShot,
 await page.keyboard.press(`Digit${gunSlot + 1}`);
 await page.waitForTimeout(500);
 assert(!(await page.evaluate(() => window.__game.renderer.weaponVisible("gun_slingshot"))), "다시 누르면 화면에서 사라짐");
+assert(
+  (await page.evaluate(() => document.querySelector("#hud-mastery")?.hidden)) === true,
+  "무기를 집어넣으면 숙련도 HUD도 다시 숨겨짐",
+);
 
 section("19. 빠른 배 구매");
 await page.evaluate(() => {
@@ -2516,6 +2598,9 @@ await page.evaluate(() => {
   p.maxMana = 200; p.mana = 50;
   p.fruitLevel = 7; p.fruitExpToNext = 800; p.fruitExp = 200;
   p.money = 1234567;
+  // 숙련도 HUD(우측 하단)는 이제 열매를 뽑아 든 동안에만 보이므로, 확인 전에 뽑아 둡니다.
+  p.fruitDrawn = true;
+  p.activeHotbarSlot = null;
 });
 await page.waitForTimeout(500);
 const hudView = await page.evaluate(() => {
@@ -2531,8 +2616,8 @@ const hudView = await page.evaluate(() => {
     exp: txt("#hud-exp-text"),
     hp: txt("#hud-hp-text"),
     mp: txt("#hud-mp-text"),
-    fruit: txt("#hud-fruit-text"),
-    fruitLabel: txt("#hud-fruit-level"),
+    fruit: txt("#hud-mastery-text"),
+    fruitLabel: txt("#hud-mastery-label"),
     money: txt("#hud-money"),
     jump: txt("#hud-jump"),
     levelRow: box(".level-row"),
@@ -2852,6 +2937,152 @@ assert(!!reopen.btn && !reopen.disabled, "한 번 연 뒤에는 레벨이 낮아
 await page.evaluate(() => window.__game.panels.closeAll());
 await page.evaluate(() => localStorage.removeItem("bloxfruits-web/save-v1"));
 
+section("29. 요루/삼도류/엔마 스킬 이펙트");
+
+// 요루(부채꼴) — 스킬을 쓰면 이펙트가 스폰되고, 시간이 지나면 사라지는지 전체 수명을 확인합니다.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const p = sim.state.player;
+  if (!p.inventory.some((i) => i.id === "sword_yoru")) {
+    p.inventory.push({ id: "sword_yoru", name: "요루", description: "", icon: "⚔️", quantity: 1, usable: false, equippable: true });
+  }
+  p.hotbar[0] = "sword_yoru";
+  p.activeHotbarSlot = 0;
+  p.fruitDrawn = false;
+  p.mana = 999;
+  p.maxMana = 999;
+  p.aimYaw = 0;
+});
+await page.waitForTimeout(200);
+const yoruDrawn = await page.evaluate(() => window.__game.renderer.weaponVisible("sword_yoru"));
+assert(yoruDrawn, "요루를 손에 든 상태로 만듦 (스킬 이펙트 테스트 준비)");
+
+const yoruVfxBefore = await page.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+await page.keyboard.press("KeyZ"); // yoru_z: 칼바람 베기 (부채꼴)
+await page.waitForTimeout(120);
+const yoruVfxDuring = await page.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+console.log(`  요루 Z(칼바람 베기) 이펙트: ${yoruVfxBefore} → ${yoruVfxDuring}`);
+assert(yoruVfxDuring > yoruVfxBefore, `요루 Z 스킬을 쓰면 이펙트가 화면에 스폰됨 (${yoruVfxBefore} → ${yoruVfxDuring})`);
+await page.waitForTimeout(1200);
+const yoruVfxAfter = await page.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+assert(yoruVfxAfter === 0, `스킬 이펙트가 시간이 지나면 사라짐 (남은 개수 ${yoruVfxAfter})`);
+
+// 삼도류(원형) — 다른 무기·다른 판정 모양도 이펙트가 스폰되는지 빠르게 확인.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const p = sim.state.player;
+  if (!p.inventory.some((i) => i.id === "sword_santoryu")) {
+    p.inventory.push({ id: "sword_santoryu", name: "삼도류", description: "", icon: "⚔️", quantity: 1, usable: false, equippable: true });
+  }
+  p.hotbar[1] = "sword_santoryu";
+  p.activeHotbarSlot = 1;
+  p.mana = 999;
+  // Z 슬롯 쿨다운은 무기와 무관하게 슬롯 하나(0=Z)를 공유합니다 — 방금 요루 Z를
+  // 써서 슬롯 0이 아직 쿨다운 중이므로, 무기를 바꿔도 그대로 막힙니다. 리셋해줍니다.
+  p.skillCooldowns = [0, 0, 0, 0];
+});
+await page.waitForTimeout(200);
+const santoryuVfxBefore = await page.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+await page.keyboard.press("KeyZ"); // santoryu_z: 삼도 난무 (원형)
+await page.waitForTimeout(120);
+const santoryuVfxDuring = await page.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+console.log(`  삼도류 Z(삼도 난무) 이펙트: ${santoryuVfxBefore} → ${santoryuVfxDuring}`);
+assert(santoryuVfxDuring > santoryuVfxBefore, `삼도류(원형) 스킬도 이펙트가 스폰됨 (${santoryuVfxBefore} → ${santoryuVfxDuring})`);
+await page.waitForTimeout(1200);
+
+// 엔마(직선 + 화상) — burnDps가 있는 스킬은 메인 이펙트 + 잉걸불이 함께 뜹니다.
+// C 슬롯(화룡 베기)은 무기 숙련 50레벨부터 풀리므로, 직접 숙련도를 올려둡니다.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const p = sim.state.player;
+  if (!p.inventory.some((i) => i.id === "sword_enma")) {
+    p.inventory.push({ id: "sword_enma", name: "엔마", description: "", icon: "⚔️", quantity: 1, usable: false, equippable: true });
+  }
+  p.hotbar[2] = "sword_enma";
+  p.activeHotbarSlot = 2;
+  p.mana = 999;
+  p.weaponMastery["sword_enma"] = { level: 100, exp: 0, expToNext: 999999 };
+  p.skillCooldowns = [0, 0, 0, 0];
+});
+await page.waitForTimeout(200);
+const enmaVfxBefore = await page.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+await page.keyboard.press("KeyC"); // enma_c: 화룡 베기 (부채꼴 + 화상)
+await page.waitForTimeout(120);
+const enmaVfxDuring = await page.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+console.log(`  엔마 C(화룡 베기) 이펙트: ${enmaVfxBefore} → ${enmaVfxDuring}`);
+assert(
+  enmaVfxDuring >= enmaVfxBefore + 2,
+  `화상이 있는 스킬은 메인 이펙트 + 잉걸불, 2개 이상이 함께 뜸 (${enmaVfxBefore} → ${enmaVfxDuring})`,
+);
+await page.waitForTimeout(3500);
+const enmaVfxAfter = await page.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+assert(enmaVfxAfter === 0, `잉걸불도 화상 지속시간이 지나면 다 사라짐 (남은 개수 ${enmaVfxAfter})`);
+
+section("30. R 순간이동 — 최대 거리 제한(30m) 클램프");
+
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const island = window.__game.islands.getIsland("central");
+  // 정확한 지형 높이 위에 세웁니다 — 허공에 살짝 떠 있으면(옛 y값을 대충 잡으면)
+  // 먼 지점일수록 화면 투영이 지평선 근처에서 크게 어긋납니다.
+  const ground = window.__game.renderer.raycastTerrainDownAt(island.center.x, island.center.z);
+  sim.playerController.teleport({ x: island.center.x, y: (ground?.y ?? 0) + 1, z: island.center.z });
+  sim.state.player.teleportLearned = true;
+  sim.state.player.teleportCooldownSec = 0;
+  sim.playerController.camYaw = 0; // +Z 방향을 보게 고정
+  sim.playerController.camPitch = -0.25;
+});
+await page.waitForTimeout(400);
+const beforeClampPos = await pos();
+
+// 목표 지점의 "진짜" 지형 높이를 수직 레이캐스트로 먼저 구한 뒤, 그 정확한
+// 좌표를 화면으로 투영해서 클릭합니다 — 대충 잡은 높이로 투영하면 먼
+// 지점일수록 화면상 위치가 크게 어긋나기 때문입니다.
+const farTarget = await page.evaluate(() => {
+  const g = window.__game;
+  const p = g.simulation.state.player.position;
+  const ground = g.renderer.raycastTerrainDownAt(p.x, p.z + 45);
+  if (!ground) return null;
+  return { ...ground, screen: g.renderer.worldToScreen(ground.x, ground.y, ground.z) };
+});
+console.log("  45m 지점:", JSON.stringify(farTarget));
+assert(farTarget && farTarget.screen, "45m 떨어진 지점의 지형을 찾고 화면에 투영함 (카메라 시야 확인)");
+
+await page.mouse.move(farTarget.screen.x, farTarget.screen.y);
+await page.keyboard.press("KeyR");
+await page.waitForTimeout(500);
+const afterClampPos = await page.evaluate(() => window.__game.simulation.state.player.position);
+const clampDist = Math.hypot(
+  afterClampPos.x - beforeClampPos.x,
+  afterClampPos.y - beforeClampPos.y,
+  afterClampPos.z - beforeClampPos.z,
+);
+console.log(`  클램프 후 실제 이동 거리: ${clampDist.toFixed(2)}m (클릭한 지점은 약 45m)`);
+assert(clampDist <= 31, `최대 거리(30m)를 넘는 지점을 클릭해도 그 언저리까지만 이동함 (${clampDist.toFixed(2)}m)`);
+assert(clampDist >= 20, `그렇다고 아예 이동을 취소하지도 않음 — 방향은 존중해서 상당히 이동함 (${clampDist.toFixed(2)}m)`);
+
+// 최대 거리 안의 가까운 지점은 지금까지처럼 그대로(클램프 없이) 이동해야 합니다.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  sim.state.player.teleportCooldownSec = 0;
+});
+await page.waitForTimeout(200);
+const beforeNearPos = await pos();
+const nearTarget = await page.evaluate(() => {
+  const g = window.__game;
+  const p = g.simulation.state.player.position;
+  const ground = g.renderer.raycastTerrainDownAt(p.x, p.z + 10);
+  if (!ground) return null;
+  return { ...ground, screen: g.renderer.worldToScreen(ground.x, ground.y, ground.z) };
+});
+await page.mouse.move(nearTarget.screen.x, nearTarget.screen.y);
+await page.keyboard.press("KeyR");
+await page.waitForTimeout(500);
+const afterNearPos = await page.evaluate(() => window.__game.simulation.state.player.position);
+const nearDist = Math.hypot(afterNearPos.x - beforeNearPos.x, afterNearPos.y - beforeNearPos.y, afterNearPos.z - beforeNearPos.z);
+console.log(`  10m 지점 이동 거리: ${nearDist.toFixed(2)}m`);
+assert(nearDist > 5 && nearDist < 15, `최대 거리 안쪽은 예전처럼 그대로(클램프 없이) 이동함 (${nearDist.toFixed(2)}m)`);
+
 // ---------------------------------------------------------------------------
 // 멀티플레이 · PvP — 진짜로 서버를 띄우고, 브라우저 두 개(해적 · 해군)를
 // 각각 접속시켜 서로를 실제로 때립니다. server/state.ts가 데미지를 "다시
@@ -3020,6 +3251,33 @@ const mpHpAfter = await page2.evaluate(() => window.__game.simulation.state.play
 console.log(`  PvP 근접 공격: hp ${mpHpBefore} → ${mpHpAfter}`);
 assert(mpHpAfter < mpHpBefore, "서버가 판정한 근접 공격이 실제로 상대 hp를 깎음 (server/state.ts 재계산 경로)");
 assert(mpAckToast, "공격자 화면에 피해 토스트가 뜸 (pvp_hit_ack)");
+
+// 스킬 이펙트는 데미지 판정(skill_attack)과 별개로, 쓸 때마다 순수 연출용
+// 알림(skill_fx)이 서버를 거쳐 같은 방의 다른 사람에게도 중계됩니다 —
+// 사거리 안에 아무도 없어도, PvP를 꺼도 보여야 하는 연출이라 그렇습니다.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const p = sim.state.player;
+  if (!p.inventory.some((i) => i.id === "sword_yoru")) {
+    p.inventory.push({ id: "sword_yoru", name: "요루", description: "", icon: "⚔️", quantity: 1, usable: false, equippable: true });
+  }
+  p.hotbar[0] = "sword_yoru";
+  p.activeHotbarSlot = 0;
+  p.mana = 999;
+  p.maxMana = 999;
+});
+await page.waitForTimeout(200);
+const remoteVfxBefore = await page2.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+await page.mouse.move(640, 400);
+await page.keyboard.press("KeyZ");
+let remoteVfxSeen = false;
+for (let i = 0; i < 15 && !remoteVfxSeen; i++) {
+  await page2.waitForTimeout(100);
+  const now = await page2.evaluate(() => window.__game.renderer.activeSkillEffectCount);
+  if (now > remoteVfxBefore) remoteVfxSeen = true;
+}
+console.log(`  상대 화면 스킬 이펙트 중계: before=${remoteVfxBefore}, 감지됨=${remoteVfxSeen}`);
+assert(remoteVfxSeen, "해적이 스킬을 쓰면 서버를 거쳐 해군(상대) 화면에도 이펙트가 뜸 (player_skill_fx 중계)");
 
 // 같은 진영끼리는 맞아도 안 되는지도 확인합니다 — 해적 두 명을 붙여봅니다.
 const page3 = await browser.newPage({ viewport: { width: 1280, height: 800 } });

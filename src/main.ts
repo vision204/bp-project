@@ -18,10 +18,10 @@ import { totalMeleeCooldown, meleeDps } from "./simulation/CombatSystem";
 import { devDenyMessage, devDenyReason } from "./core/DevAccess";
 import { applyDevLoadout } from "./simulation/DevLoadout";
 import { MultiplayerClient } from "./network/MultiplayerClient";
-import { buildCombatStatsSnapshot, drawnWeaponId, processPvpAttacks } from "./network/PvpCombat";
+import { broadcastSkillFx, buildCombatStatsSnapshot, drawnWeaponId, processPvpAttacks } from "./network/PvpCombat";
 import { MultiplayerUI } from "./ui/MultiplayerUI";
 import { TradeUI } from "./ui/TradeUI";
-import { canUseTeleport } from "./simulation/TeleportSystem";
+import { canUseTeleport, TELEPORT_MAX_DISTANCE_M } from "./simulation/TeleportSystem";
 
 export interface StartChoice {
   faction: Faction;
@@ -422,7 +422,24 @@ async function main() {
     if (gameplaySnapshot.teleportPressed && canUseTeleport(simulation.state.player)) {
       const hit = renderer.raycastTerrainAt(gameplaySnapshot.mouseClientX, gameplaySnapshot.mouseClientY);
       if (hit) {
-        simulation.teleportPlayerTo({ x: hit.x, y: hit.y + 1, z: hit.z });
+        const p = simulation.state.player.position;
+        const dx = hit.x - p.x;
+        const dy = hit.y - p.y;
+        const dz = hit.z - p.z;
+        const dist3D = Math.hypot(dx, dy, dz);
+        let dest = hit;
+        // 최대 거리보다 멀면 이동 자체를 취소하지 않고, 같은 방향으로 최대
+        // 거리까지만 이동합니다 — 클램프된 (x,z) 지점은 지형을 다시
+        // 레이캐스트해서 그 위 실제 높이를 찾고, 섬이 없는 빈 자리(먼 바다
+        // 등)면 직선 보간 높이로 대신합니다.
+        if (dist3D > TELEPORT_MAX_DISTANCE_M) {
+          const scale = TELEPORT_MAX_DISTANCE_M / dist3D;
+          const clampedX = p.x + dx * scale;
+          const clampedZ = p.z + dz * scale;
+          const ground = renderer.raycastTerrainDownAt(clampedX, clampedZ);
+          dest = ground ?? { x: clampedX, y: p.y + dy * scale, z: clampedZ };
+        }
+        simulation.teleportPlayerTo({ x: dest.x, y: dest.y + 1, z: dest.z });
       } else {
         simulation.state.player.events.push({ type: "teleport_failed" });
       }
@@ -432,6 +449,7 @@ async function main() {
     // 사거리 안에 있는지 확인해서 서버에 공격 요청을 보냅니다. CombatSystem은
     // 여전히 몬스터만 알기 때문에 이 확인은 시뮬레이션 바깥, 여기서 합니다.
     processPvpAttacks(simulation.state, multiplayer);
+    broadcastSkillFx(simulation.state, multiplayer);
 
     // 상점 NPC 앞이나 배 위에서 E를 누르면 시뮬레이션이 "요청"만 남기고,
     // 실제 패널을 여는 건 UI 레이어인 여기서 처리합니다.
@@ -441,7 +459,13 @@ async function main() {
 
     ocean.update(simulation.state.elapsedSec);
 
-    renderer.sync(simulation.state, simulation.playerController, multiplayer.enemyGhosts, multiplayer.players);
+    renderer.sync(
+      simulation.state,
+      simulation.playerController,
+      multiplayer.enemyGhosts,
+      multiplayer.players,
+      multiplayer.drainSkillFx(),
+    );
     renderer.render();
     hud.update(simulation.state, panels.isBlocking());
     panels.update(simulation.state);
