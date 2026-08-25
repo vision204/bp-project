@@ -48,7 +48,7 @@ export interface SaveData {
   level: number;
   exp: number;
   money: number;
-  stats: { mana: number; attack: number; health: number; fruit: number };
+  stats: { attack: number; defense: number; sword: number; gun: number; fruit: number };
   unspentStatPoints: number;
 
   equippedFruit: FruitAbilityId;
@@ -155,13 +155,29 @@ export function applySaveData(state: GameState, raw: unknown): boolean {
   p.exp = clampInt(data.exp, 0, p.expToNextLevel - 1, 0);
   p.money = clampInt(data.money, 0, Number.MAX_SAFE_INTEGER, 0);
 
-  const stats = (data.stats ?? {}) as Partial<SaveData["stats"]>;
-  p.stats = {
-    mana: clampInt(stats.mana, 0, MAX_LEVEL * 3, 0),
-    attack: clampInt(stats.attack, 0, MAX_LEVEL * 3, 0),
-    health: clampInt(stats.health, 0, MAX_LEVEL * 3, 0),
-    fruit: clampInt(stats.fruit, 0, MAX_LEVEL * 3, 0),
-  };
+  // 5스탯(공격/방어/검/총/열매) 체계 이전에는 4스탯(마나/공격력/체력/열매)이었습니다.
+  // "defense" 키가 없으면서 예전 키(mana/health)가 있는 세이브는 예전 형식으로 보고,
+  // 마나+공격력을 공격 하나로 합치고 체력을 방어로 옮겨 마이그레이션합니다.
+  // 검/총은 그때 없던 스텟이라 0부터 새로 찍습니다 — 쓴 적 없는 포인트를 잃는 게
+  // 아니라(unspentStatPoints는 그대로 복원), 그 두 스텟만 아직 안 찍힌 상태가 됩니다.
+  const rawStats = (data.stats ?? {}) as Record<string, unknown>;
+  const readStat = (key: string) => clampInt(rawStats[key], 0, MAX_LEVEL * 3, 0);
+  const isLegacyStats = rawStats.defense === undefined && (rawStats.mana !== undefined || rawStats.health !== undefined);
+  p.stats = isLegacyStats
+    ? {
+        attack: readStat("mana") + readStat("attack"),
+        defense: readStat("health"),
+        sword: 0,
+        gun: 0,
+        fruit: readStat("fruit"),
+      }
+    : {
+        attack: readStat("attack"),
+        defense: readStat("defense"),
+        sword: readStat("sword"),
+        gun: readStat("gun"),
+        fruit: readStat("fruit"),
+      };
   p.unspentStatPoints = clampInt(data.unspentStatPoints, 0, MAX_LEVEL * 3, 0);
 
   if (typeof data.equippedFruit === "string" && FRUIT_IDS.has(data.equippedFruit as FruitAbilityId)) {

@@ -193,6 +193,40 @@ function buildEnma(): THREE.Group {
   return group;
 }
 
+/**
+ * 새총 — 첫 원거리 무기. 도검류와 실루엣이 확실히 다르도록 Y자 나무 틀 +
+ * 고무줄 형태로 표현합니다. 오른손에 쥔 것처럼 요루/엔마와 같은 자리에 둡니다.
+ */
+function buildSlingshot(): THREE.Group {
+  const group = new THREE.Group();
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0x8d5524, roughness: 0.8 });
+  const bandMat = new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: 0.6 });
+
+  // 손잡이
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.55, 8), woodMat);
+  handle.position.y = 0;
+  group.add(handle);
+
+  // Y자 갈래 (양쪽으로 벌어진 두 가지)
+  for (const side of [-1, 1]) {
+    const fork = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.42, 8), woodMat);
+    fork.position.set(side * 0.14, 0.42, 0);
+    fork.rotation.z = side * -0.5;
+    fork.castShadow = true;
+    group.add(fork);
+  }
+
+  // 고무줄 (양쪽 갈래를 잇는 얇은 띠)
+  for (const side of [-1, 1]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.5, 0.03), bandMat);
+    band.position.set(side * 0.22, 0.5, 0.08);
+    band.rotation.z = side * 0.28;
+    group.add(band);
+  }
+
+  return group;
+}
+
 /** 부두에 정박하는 작은 배 (플레이스홀더 지오메트리) */
 interface BoatVisual {
   group: THREE.Group;
@@ -438,6 +472,13 @@ export class SceneRenderer {
     enma.position.set(0.7, 0.78, 0.05);
     enma.rotation.set(0.22, 0, -0.5);
     this.registerWeaponVisual("sword_enma", enma);
+
+    // 새총 — 요루·엔마와 같은 오른손 자리에 쥡니다.
+    const slingshot = buildSlingshot();
+    slingshot.scale.setScalar(0.75);
+    slingshot.position.set(0.7, 0.78, 0.05);
+    slingshot.rotation.set(0.22, 0, -0.5);
+    this.registerWeaponVisual("gun_slingshot", slingshot);
 
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;

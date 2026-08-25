@@ -51,6 +51,10 @@ export interface CombatStatsSnapshot {
   activeHotbarSlot: number | null;
   hotbar: (string | null)[];
   abilityDamageMultiplier: number;
+  /** 도검류 데미지 배율 (검 스텟에서 파생) — weaponDamageMultiplier 재계산에 필요 */
+  swordDamageMultiplier: number;
+  /** 원거리 무기(새총 등) 데미지 배율 (총 스텟에서 파생) */
+  gunDamageMultiplier: number;
   fruitLevel: number;
   fruitBuffMultiplier: number;
   equippedFruit: string;

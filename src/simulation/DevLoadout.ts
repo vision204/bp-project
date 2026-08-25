@@ -55,13 +55,13 @@ export function applyDevLoadout(state: GameState) {
   p.expToNextLevel = expRequiredForLevel(p.level);
   p.exp = 0;
 
-  // 레벨업으로 받았을 스텟 포인트를 4개 스텟에 고르게 나눠 찍어둡니다.
+  // 레벨업으로 받았을 스텟 포인트를 5개 스텟에 고르게 나눠 찍어둡니다.
   // 안 찍고 포인트만 주면 최대 체력이 100인 채라, 접촉 데미지 640짜리 섬에서
   // 무적을 끄는 순간 바로 죽습니다 — "테스트가 되는 상태"로 만들어 두는 게 목적입니다.
   const totalPoints = (p.level - 1) * STAT_POINTS_PER_LEVEL;
-  const each = Math.floor(totalPoints / 4);
-  p.stats = { mana: each, attack: each, health: each, fruit: each };
-  p.unspentStatPoints = totalPoints - each * 4;
+  const each = Math.floor(totalPoints / 5);
+  p.stats = { attack: each, defense: each, sword: each, gun: each, fruit: each };
+  p.unspentStatPoints = totalPoints - each * 5;
 
   p.money = DEV_MONEY;
   p.hakiLearned = true;
@@ -83,9 +83,12 @@ export function applyDevLoadout(state: GameState) {
     equippable: entry.equippable,
   }));
 
-  // 무기는 단축바에 미리 올려둡니다 (숫자키로 바로 뽑아볼 수 있게)
+  // 무기는 단축바에 미리 올려둡니다 (숫자키로 바로 뽑아볼 수 있게).
+  // 단축바는 3칸뿐인데 무기가 4종(도검 3 + 새총 1)이라 전부는 못 올립니다 —
+  // 새총도 바로 테스트해볼 수 있게 도검 하나를 새총으로 바꿔 넣습니다.
   const weapons = p.inventory.filter((i) => i.equippable).map((i) => i.id);
-  p.hotbar = [weapons[0] ?? null, weapons[1] ?? null, weapons[2] ?? null];
+  const swordIds = weapons.filter((id) => id !== "gun_slingshot");
+  p.hotbar = [swordIds[0] ?? null, "gun_slingshot", swordIds[1] ?? null];
   p.activeHotbarSlot = null;
   p.fruitDrawn = false;
 

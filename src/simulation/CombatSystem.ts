@@ -175,9 +175,29 @@ export function meleeDps(player: PlayerState) {
   return totalMeleeDamage(player) / totalMeleeCooldown(player);
 }
 
-/** 근접 공격 (좌클릭) — 플레이어 주변 원형 판정 */
+/**
+ * 근접 공격 (좌클릭) — 기본은 플레이어 주변 원형 판정입니다.
+ *
+ * 새총처럼 rangedAttack이 있는 무기를 들었으면 원형 대신, 조준 방향(카메라
+ * 기준 aimYaw)으로 길게 뻗는 직선 판정을 씁니다 — "마우스가 가리키는 방향으로
+ * 쏜다"는 원거리 무기의 정체성을 살린 판정입니다. 이 게임은 3인칭 카메라-상대
+ * 조준 방식이라, 다른 직선형 스킬들과 마찬가지로 aimYaw를 그대로 재사용합니다.
+ */
 function applyMelee(player: PlayerState, enemies: EnemyState[], events: GameEvent[]) {
   const damage = totalMeleeDamage(player);
+  const weapon = drawnWeapon(player);
+
+  if (weapon?.rangedAttack) {
+    const origin = { x: player.position.x, z: player.position.z, aimYaw: player.aimYaw };
+    const shape = { kind: "line" as const, range: weapon.rangedAttack.range, width: weapon.rangedAttack.width };
+    for (const enemy of enemies) {
+      if (!enemy.alive) continue;
+      if (!pointInShape(origin, enemy.position.x, enemy.position.z, shape)) continue;
+      dealDamage(player, enemy, damage, "melee", events);
+    }
+    return;
+  }
+
   const range = totalMeleeRange(player);
   for (const enemy of enemies) {
     if (!enemy.alive) continue;

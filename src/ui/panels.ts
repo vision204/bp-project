@@ -40,9 +40,10 @@ function escapeHtml(text: string): string {
 }
 
 const STAT_LABELS: Record<StatKey, string> = {
-  mana: "마나",
-  attack: "공격력",
-  health: "체력",
+  attack: "공격", // 마나 + 공격력을 합친 스텟 — 최대마나와 근접 데미지 둘 다 올립니다
+  defense: "방어", // 예전 "체력" 스텟과 같은 역할(최대체력)
+  sword: "검", // 도검류(요루·삼도류·엔마) 데미지 배율
+  gun: "총", // 새총 등 원거리 무기 데미지 배율
   fruit: "열매",
 };
 
@@ -375,8 +376,8 @@ export class PanelManager {
   private renderStats(state: GameState) {
     const p = state.player;
     const signature = [
-      p.level, p.unspentStatPoints, p.stats.mana, p.stats.attack, p.stats.health, p.stats.fruit,
-      p.maxHp, p.maxMana, p.meleeDamage, p.abilityDamageMultiplier,
+      p.level, p.unspentStatPoints, p.stats.attack, p.stats.defense, p.stats.sword, p.stats.gun, p.stats.fruit,
+      p.maxHp, p.maxMana, p.meleeDamage, p.swordDamageMultiplier, p.gunDamageMultiplier, p.abilityDamageMultiplier,
       p.hakiLearned, p.hakiActive, p.fruitLevel, p.fruitExp, p.fruitExpToNext,
     ].join("|");
     if (!this.shouldRender("stats", signature)) return;
@@ -402,9 +403,10 @@ export class PanelManager {
       </div>
       ${rows}
       <div class="stats-derived">
-        <div>최대 체력: ${p.maxHp}</div>
-        <div>최대 마나: ${p.maxMana}</div>
-        <div>근접 공격력: ${p.meleeDamage}${p.hakiActive ? ` → <b style="color:#d1c4e9">${Math.round(effectiveMeleeDamage(p))}</b>` : ""}</div>
+        <div>최대 체력 (방어): ${p.maxHp}</div>
+        <div>최대 마나 / 근접 공격력 (공격): ${p.maxMana} / ${p.meleeDamage}${p.hakiActive ? ` → <b style="color:#d1c4e9">${Math.round(effectiveMeleeDamage(p))}</b>` : ""}</div>
+        <div>검 데미지 배율: x${p.swordDamageMultiplier.toFixed(2)}</div>
+        <div>총 데미지 배율: x${p.gunDamageMultiplier.toFixed(2)}</div>
         <div>열매 능력 배율: x${p.abilityDamageMultiplier.toFixed(2)}</div>
         <div>무장색: ${p.hakiLearned ? (p.hakiActive ? "발동 중 (J)" : "습득함 (J로 발동)") : "미습득"}</div>
         <div>열매 레벨: Lv.${p.fruitLevel} (${p.fruitExp}/${p.fruitExpToNext})</div>

@@ -30,6 +30,8 @@ export function buildCombatStatsSnapshot(state: GameState): CombatStatsSnapshot 
     activeHotbarSlot: p.activeHotbarSlot,
     hotbar: [...p.hotbar],
     abilityDamageMultiplier: p.abilityDamageMultiplier,
+    swordDamageMultiplier: p.swordDamageMultiplier,
+    gunDamageMultiplier: p.gunDamageMultiplier,
     fruitLevel: p.fruitLevel,
     fruitBuffMultiplier: p.fruitBuffMultiplier,
     equippedFruit: p.equippedFruit,

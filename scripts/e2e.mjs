@@ -293,21 +293,26 @@ await page.waitForTimeout(200);
 const d2 = await measureMoveDirection("KeyD");
 assert(d2.dot > 0, `시점 회전 후에도 D키 → 화면 오른쪽 (내적 ${d2.dot.toFixed(2)})`);
 
-section("2. UI 배치 — 상태바 좌상단 · 상점 버튼");
+section("2. UI 배치 — 상태바 좌하단 · 상점 버튼");
 const layout = await page.evaluate(() => {
   const status = document.querySelector(".hud-status").getBoundingClientRect();
   const shopBtn = document.querySelector("#btn-shop");
   const btnRect = shopBtn.getBoundingClientRect();
   return {
-    status: { top: Math.round(status.top), left: Math.round(status.left) },
+    status: { bottom: Math.round(window.innerHeight - status.bottom), left: Math.round(status.left) },
     shopBtn: { exists: !!shopBtn, text: shopBtn.textContent, top: Math.round(btnRect.top), right: Math.round(window.innerWidth - btnRect.right) },
     viewport: { w: window.innerWidth, h: window.innerHeight },
   };
 });
 console.log("  레이아웃:", JSON.stringify(layout));
-assert(layout.status.top < layout.viewport.h / 3, `상태바가 화면 위쪽 (top=${layout.status.top}px)`);
+// 참조 이미지 배치로 바뀌면서 상태바가 좌상단 → 좌하단으로 이동했습니다.
+assert(layout.status.bottom < layout.viewport.h / 3, `상태바가 화면 아래쪽 (bottom=${layout.status.bottom}px)`);
 assert(layout.status.left < layout.viewport.w / 3, `상태바가 화면 왼쪽 (left=${layout.status.left}px)`);
 assert(layout.shopBtn.exists && /상점/.test(layout.shopBtn.text), `상점 버튼 존재: "${layout.shopBtn.text.trim()}"`);
+
+// 화면에 늘 떠 있던 키 설명 문구는 삭제되었어야 합니다 (참조 이미지에는 없음).
+const controlsHintGone = await page.evaluate(() => document.querySelector(".controls-hint") === null);
+assert(controlsHintGone, "화면의 키 설명(controls-hint)이 삭제됨");
 
 // 상점 NPC는 없어야 함
 const shopNpcCount = await page.evaluate(
@@ -1077,22 +1082,22 @@ section("15. 스텟 실제 조정 (실제 마우스 클릭)");
 await page.evaluate(() => {
   const p = window.__game.simulation.state.player;
   p.unspentStatPoints = 8;
-  p.stats.mana = 0; p.stats.attack = 0; p.stats.health = 0; p.stats.fruit = 0;
+  p.stats.attack = 0; p.stats.defense = 0; p.stats.sword = 0; p.stats.gun = 0; p.stats.fruit = 0;
   window.__game.panels.openPanel("stats");
 });
 await page.waitForTimeout(500);
 
 // 패널 DOM이 매 프레임 교체되지 않는지 (교체되면 사람 클릭이 먹지 않음)
 const domStable = await page.evaluate(async () => {
-  const first = document.querySelector('.round-btn[data-stat="health"]');
+  const first = document.querySelector('.round-btn[data-stat="defense"]');
   await new Promise((r) => setTimeout(r, 400));
-  return { same: first === document.querySelector('.round-btn[data-stat="health"]'), inDoc: document.contains(first) };
+  return { same: first === document.querySelector('.round-btn[data-stat="defense"]'), inDoc: document.contains(first) };
 });
 assert(domStable.same && domStable.inDoc, "패널 DOM이 매 프레임 교체되지 않고 유지됨 (실제 클릭 가능 조건)");
 
 const statsBefore = await page.evaluate(() => ({ ...window.__game.simulation.state.player.stats }));
 const hpBefore = await page.evaluate(() => window.__game.simulation.state.player.maxHp);
-for (const stat of ["health", "attack", "mana", "fruit"]) {
+for (const stat of ["defense", "attack", "sword", "gun", "fruit"]) {
   assert(await humanClick(`.round-btn[data-stat="${stat}"]`), `${stat} + 버튼 실제 클릭 가능`);
 }
 const statsAfter = await page.evaluate(() => ({ ...window.__game.simulation.state.player.stats }));
@@ -1101,10 +1106,10 @@ const after = await page.evaluate(() => ({
   points: window.__game.simulation.state.player.unspentStatPoints,
 }));
 console.log("  스텟:", JSON.stringify(statsBefore), "→", JSON.stringify(statsAfter));
-assert(statsAfter.health === 1 && statsAfter.attack === 1 && statsAfter.mana === 1 && statsAfter.fruit === 1,
-  `4개 스텟이 모두 실제로 올라감 (${JSON.stringify(statsAfter)})`);
-assert(after.points === 4, `포인트 8 → ${after.points} (4개 소모)`);
-assert(after.maxHp === hpBefore + 12, `체력 스텟이 최대체력에 반영 (${hpBefore} → ${after.maxHp})`);
+assert(statsAfter.defense === 1 && statsAfter.attack === 1 && statsAfter.sword === 1 && statsAfter.gun === 1 && statsAfter.fruit === 1,
+  `5개 스텟이 모두 실제로 올라감 (${JSON.stringify(statsAfter)})`);
+assert(after.points === 3, `포인트 8 → ${after.points} (5개 소모)`);
+assert(after.maxHp === hpBefore + 12, `방어 스텟이 최대체력에 반영 (${hpBefore} → ${after.maxHp})`);
 await page.screenshot({ path: "/home/claude/bp-project/scripts/out-15-stats.png" });
 await page.evaluate(() => window.__game.panels.closeAll());
 
@@ -1447,6 +1452,73 @@ await page.keyboard.press(`Digit${enmaSlot + 1}`);
 await page.waitForTimeout(500);
 assert(!(await page.evaluate(() => window.__game.renderer.weaponVisible("sword_enma"))), "다시 누르면 화면에서 사라짐");
 
+section("18c. 새총 — 원거리 무기 구매 · 마우스 방향 원거리 공격");
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const p = sim.state.player;
+  window.__game.panels.closeAll();
+  p.money = 5000;
+  p.inventory = [];
+  p.hotbar = [null, null, null];
+  p.activeHotbarSlot = null;
+  window.__game.panels.openPanel("shop");
+});
+await page.waitForTimeout(500);
+
+assert(await humanClick('.buy-btn[data-item="gun_slingshot"]'), "상점 무기 코너에서 새총 구매 버튼 클릭 가능");
+const gunBought = await page.evaluate(() => ({
+  inv: window.__game.simulation.state.player.inventory.map((i) => i.id),
+  money: window.__game.simulation.state.player.money,
+}));
+assert(gunBought.inv.includes("gun_slingshot"), `새총이 인벤토리에 들어감 (${gunBought.inv.join(",")})`);
+assert(gunBought.money === 5000 - 300, `가격 300 차감 (${gunBought.money})`);
+
+await page.evaluate(() => window.__game.panels.openPanel("inventory"));
+await page.waitForTimeout(400);
+assert(await humanClick('.inv-slot[data-item="gun_slingshot"]'), "인벤토리에서 새총 클릭 가능");
+await page.evaluate(() => window.__game.panels.closeAll());
+await page.waitForTimeout(300);
+const gunHotbarred = await page.evaluate(() => window.__game.simulation.state.player.hotbar);
+const gunSlot = gunHotbarred.indexOf("gun_slingshot");
+assert(gunSlot !== -1, `단축바에 새총이 올라감 (${gunHotbarred.join(",")})`);
+
+await page.keyboard.press(`Digit${gunSlot + 1}`);
+await page.waitForTimeout(500);
+const gunDrawn = await page.evaluate(() => ({
+  active: window.__game.simulation.state.player.activeHotbarSlot,
+  visible: window.__game.renderer.weaponVisible("gun_slingshot"),
+}));
+assert(gunDrawn.active === gunSlot, "숫자키로 새총을 실제로 장착함");
+assert(gunDrawn.visible, "3D 화면에 새총이 손에 나타남");
+await page.screenshot({ path: "/home/claude/bp-project/scripts/out-18c-gun-drawn.png" });
+
+// 원거리 사거리 밖 몬스터 근처로 이동해서, 근접 사거리보다 훨씬 먼 거리에서도
+// 마우스가 가리키는 방향(aimYaw)으로 실제 데미지가 들어가는지 확인합니다.
+await page.evaluate(() => {
+  const sim = window.__game.simulation;
+  const p = sim.state.player;
+  p.hp = p.maxHp;
+  p.meleeRemainingCooldownSec = 0;
+  const t = sim.state.enemies.find((e) => e.islandId === "desert");
+  t.alive = true; t.hp = 999999; // 원샷에 죽지 않게 크게 잡아 "맞았는지"만 확인
+  // 몬스터 정면 15유닛 떨어진 곳에 섭니다 — 근접 사거리(2.2)보다 훨씬 멀지만 새총 사거리(22) 안입니다.
+  sim.playerController.teleport({ x: t.position.x + 15, y: 1.5, z: t.position.z });
+  window.__targetId = t.id;
+});
+await page.waitForTimeout(600);
+await aimAt(await page.evaluate(() => window.__targetId));
+const hpBeforeShot = (await enemyById(await page.evaluate(() => window.__targetId))).hp;
+await page.mouse.click(640, 400);
+await page.waitForTimeout(500);
+const hpAfterShot = (await enemyById(await page.evaluate(() => window.__targetId))).hp;
+assert(hpAfterShot < hpBeforeShot,
+  `근접 사거리 밖(15칸)에서도 조준 방향으로 새총 데미지가 들어감 (${hpBeforeShot} → ${hpAfterShot})`);
+
+// 집어넣기
+await page.keyboard.press(`Digit${gunSlot + 1}`);
+await page.waitForTimeout(500);
+assert(!(await page.evaluate(() => window.__game.renderer.weaponVisible("gun_slingshot"))), "다시 누르면 화면에서 사라짐");
+
 section("19. 빠른 배 구매");
 await page.evaluate(() => {
   window.__game.simulation.state.player.money = 5000;
@@ -1534,7 +1606,7 @@ const devChar = await page.evaluate(() => {
 console.log("  만렙 캐릭터:", JSON.stringify({ ...devChar, stats: Object.values(devChar.stats).join("/") }));
 assert(devChar.level === devChar.topTier, `만렙으로 시작 (Lv.${devChar.level.toLocaleString()})`);
 assert(devChar.money >= 1_000_000, `코인 ${devChar.money.toLocaleString()}`);
-assert(devChar.unspent < 4 && Object.values(devChar.stats).every((v) => v > 0),
+assert(devChar.unspent < 5 && Object.values(devChar.stats).every((v) => v > 0),
   `스텟이 실제로 찍혀 있음 (${Object.values(devChar.stats).join("/")}) — 남은 포인트 ${devChar.unspent}`);
 assert(devChar.maxHp > 10000, `최대 체력 ${devChar.maxHp.toLocaleString()} — 최고 난도 섬에서도 버팀`);
 assert(devChar.haki && devChar.jumps === 10 && devChar.secondSea,
@@ -1542,7 +1614,9 @@ assert(devChar.haki && devChar.jumps === 10 && devChar.secondSea,
 assert(devChar.boats === 3, `배 ${devChar.boats}종 전부 보유`);
 assert(devChar.weapons.includes("sword_yoru") && devChar.weapons.includes("sword_santoryu"),
   `무기 전부 보유 (${devChar.weapons.join(",")})`);
-assert(devChar.hotbar[0] !== null, `단축바에 미리 올라감 (${devChar.hotbar.join(",")})`);
+assert(devChar.weapons.includes("gun_slingshot"), `새총도 보유 (${devChar.weapons.join(",")})`);
+assert(devChar.hotbar[0] !== null && devChar.hotbar.includes("gun_slingshot"),
+  `단축바에 미리 올라감, 새총 포함 (${devChar.hotbar.join(",")})`);
 
 // 만렙이라 해적왕에게 바로 갈 수 있어야 합니다
 await page.evaluate(() => {
@@ -1571,7 +1645,7 @@ await page.waitForTimeout(400);
 const saveGuard = await page.evaluate(async () => {
   // 진짜 캐릭터가 있는 것처럼 세이브를 하나 심어둡니다
   const decoy = { version: 1, faction: "pirate", level: 42, exp: 0, money: 777,
-    stats: { mana: 1, attack: 1, health: 1, fruit: 1 }, unspentStatPoints: 0,
+    stats: { attack: 1, defense: 1, sword: 1, gun: 1, fruit: 1 }, unspentStatPoints: 0,
     equippedFruit: "ice_spike", fruitLevel: 1, fruitExp: 0, hakiLearned: false,
     maxJumps: 1, unlockedSecondSea: false, inventory: [], hotbar: [null, null, null],
     ownedBoats: ["dinghy"], quests: [], lastGachaAtMs: null,
@@ -1603,7 +1677,7 @@ await page.reload({ waitUntil: "load" });
 await page.waitForTimeout(600);
 await page.evaluate(() => {
   const decoy = { version: 1, faction: "pirate", level: 42, exp: 0, money: 777,
-    stats: { mana: 1, attack: 1, health: 1, fruit: 1 }, unspentStatPoints: 0,
+    stats: { attack: 1, defense: 1, sword: 1, gun: 1, fruit: 1 }, unspentStatPoints: 0,
     equippedFruit: "ice_spike", fruitLevel: 1, fruitExp: 0, hakiLearned: false,
     maxJumps: 1, unlockedSecondSea: false, inventory: [], hotbar: [null, null, null],
     ownedBoats: ["dinghy"], quests: [], lastGachaAtMs: null,
@@ -2053,7 +2127,7 @@ const progress = await page.evaluate(async () => {
   p.level = 77;
   p.exp = 12;
   p.money = 3456;
-  p.stats = { mana: 3, attack: 4, health: 5, fruit: 6 };
+  p.stats = { attack: 4, defense: 5, sword: 2, gun: 1, fruit: 6 };
   p.equippedFruit = "sand_storm";
   p.fruitLevel = 19;
   p.hakiLearned = true;

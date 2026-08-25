@@ -2,7 +2,8 @@
 // 이 모듈들은 Three.js나 Rapier에 의존하지 않는 순수 TypeScript라 가능한 방식입니다.
 const { createInitialGameState, expRequiredForLevel } = await import("../src/core/GameState.ts");
 const { grantExp } = await import("../src/simulation/Leveling.ts");
-const { allocateStatPoint, recomputeDerivedStats } = await import("../src/simulation/StatSystem.ts");
+const { allocateStatPoint, recomputeDerivedStats, MANA_PER_POINT, SWORD_DMG_MULT_PER_POINT, GUN_DMG_MULT_PER_POINT } =
+  await import("../src/simulation/StatSystem.ts");
 const { DUMMY_EXP_REWARD, createInitialEnemies } = await import("../src/simulation/EnemyManager.ts");
 const { createQuests, createNpcs, canAcceptQuest, stepInteraction: stepInteractionQ } = await import("../src/simulation/QuestSystem.ts");
 const { FRUIT_CATALOG, ITEM_CATALOG, WEAPON_CATALOG, buyFruit, buyItem,
@@ -100,13 +101,14 @@ assert(player.unspentStatPoints === 3, `레벨업당 스텟 포인트 3 지급 (
 assert(player.hp === player.maxHp, "레벨업 시 체력 완전 회복");
 
 const prevMaxHp = player.maxHp;
-assert(allocateStatPoint(player, "health") === true, "체력 스텟 배분 성공");
-assert(player.maxHp === prevMaxHp + 12, `체력 스텟 1당 최대체력 +12 (maxHp=${player.maxHp})`);
-allocateStatPoint(player, "mana");
-assert(player.maxMana === 58, `마나 스텟 1당 최대마나 +8 (maxMana=${player.maxMana})`);
+assert(allocateStatPoint(player, "defense") === true, "방어 스텟 배분 성공");
+assert(player.maxHp === prevMaxHp + 12, `방어 스텟 1당 최대체력 +12 (maxHp=${player.maxHp})`);
 allocateStatPoint(player, "attack");
-assert(player.meleeDamage === 10, `공격력 스텟 1당 근접뎀 +2 (meleeDamage=${player.meleeDamage})`);
-assert(allocateStatPoint(player, "fruit") === false, "포인트 없을 때 배분 실패 처리");
+assert(player.maxMana === 58, `공격 스텟 1당 최대마나 +8 (maxMana=${player.maxMana})`);
+assert(player.meleeDamage === 10, `공격 스텟 1당 근접뎀 +2 (meleeDamage=${player.meleeDamage})`);
+allocateStatPoint(player, "sword");
+assert(Math.abs(player.swordDamageMultiplier - 1.06) < 1e-9, `검 스텟 1당 데미지 배율 +6% (swordDamageMultiplier=${player.swordDamageMultiplier})`);
+assert(allocateStatPoint(player, "gun") === false, "포인트 없을 때 배분 실패 처리");
 
 section("레벨 곡선 (235레벨 도달 가능성)");
 // 예전 1.35배 지수 곡선은 50레벨만 가도 1억 경험치가 필요해 사실상 불가능했습니다.
@@ -1540,7 +1542,7 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   bp.expToNextLevel = expRequiredForLevel(137);
   bp.exp = 250;
   bp.money = 4820;
-  bp.stats = { mana: 12, attack: 30, health: 41, fruit: 7 };
+  bp.stats = { attack: 30, defense: 41, sword: 6, gun: 4, fruit: 7 };
   bp.unspentStatPoints = 5;
   bp.equippedFruit = "dark_wave";
   bp.fruitLevel = 42;
@@ -1585,6 +1587,11 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
 
   // 파생값은 저장하지 않고 다시 계산합니다
   assert(ap.maxHp === 100 + 41 * 12, `최대 체력을 스텟에서 다시 계산 (${ap.maxHp})`);
+  assert(ap.maxMana === 50 + 30 * MANA_PER_POINT, `최대 마나를 공격 스텟에서 다시 계산 (${ap.maxMana})`);
+  assert(Math.abs(ap.swordDamageMultiplier - (1 + 6 * SWORD_DMG_MULT_PER_POINT)) < 1e-9,
+    `검 데미지 배율을 검 스텟에서 다시 계산 (${ap.swordDamageMultiplier})`);
+  assert(Math.abs(ap.gunDamageMultiplier - (1 + 4 * GUN_DMG_MULT_PER_POINT)) < 1e-9,
+    `총 데미지 배율을 총 스텟에서 다시 계산 (${ap.gunDamageMultiplier})`);
   assert(ap.hp === ap.maxHp, "접속하면 풀피로 시작");
   assert(ap.expToNextLevel === expRequiredForLevel(137), "요구 경험치도 다시 계산");
   assert(ap.activeHotbarSlot === null, "무기는 집어넣은 상태로 시작");
@@ -1608,7 +1615,7 @@ section("세이브 방어 — 이상한 값이 들어와도 안 깨짐");
     level: 999999999,
     exp: -50,
     money: -1000,
-    stats: { mana: 1e12, attack: "많이", health: NaN, fruit: -3 },
+    stats: { attack: "많이", defense: NaN, sword: 1e12, gun: "많이", fruit: -3 },
     unspentStatPoints: Infinity,
     equippedFruit: "우주_열매",
     fruitLevel: 9999,
@@ -1634,8 +1641,9 @@ section("세이브 방어 — 이상한 값이 들어와도 안 깨짐");
   assert(p.level === MAX_LEVEL, `레벨이 상한(${MAX_LEVEL})으로 잘림 — 실제 ${p.level}`);
   assert(p.exp >= 0 && p.exp < p.expToNextLevel, `경험치가 정상 범위 (${p.exp})`);
   assert(p.money === 0, `음수 코인은 0으로 (${p.money})`);
-  assert(p.stats.health === 0 && p.stats.attack === 0, "숫자가 아닌 스텟은 0으로");
+  assert(p.stats.attack === 0 && p.stats.defense === 0 && p.stats.gun === 0, "숫자가 아닌 스텟은 0으로");
   assert(p.stats.fruit === 0, "음수 스텟도 0으로");
+  assert(p.stats.sword >= 0 && Number.isFinite(p.stats.sword), `너무 큰 스텟도 유한한 값으로 잘림 (${p.stats.sword})`);
   assert(Number.isFinite(p.unspentStatPoints), `Infinity 포인트가 유한한 값으로 (${p.unspentStatPoints})`);
   assert(FRUIT_CATALOG.some((f) => f.id === p.equippedFruit) || p.equippedFruit === "magma_fist",
     `존재하지 않는 열매는 무시 (${p.equippedFruit})`);
@@ -1656,6 +1664,41 @@ section("세이브 방어 — 이상한 값이 들어와도 안 깨짐");
   assert(islandAt(0, 0) !== null && ISLANDS.some((i) => i.id === st.currentIslandId),
     `없는 섬이면 시작 섬으로 (${st.currentIslandId})`);
   assert(p.hp > 0 && p.hp === p.maxHp, "복원 후에도 체력이 정상");
+}
+
+section("세이브 데이터 — 예전 4스텟(마나/공격/체력/열매) 세이브 이전");
+{
+  // defense 키가 없고 mana/health 키가 있으면 예전 포맷으로 보고,
+  // 공격=마나+공격, 방어=체력, 검/총=0으로 옮겨줍니다.
+  const st = createInitialGameState("pirate");
+  st.quests = createQuests();
+  const legacy = {
+    version: 1,
+    faction: "pirate",
+    level: 20,
+    exp: 5,
+    money: 100,
+    stats: { mana: 12, attack: 9, health: 41, fruit: 6 },
+    unspentStatPoints: 2,
+    equippedFruit: "magma_fist",
+    fruitLevel: 1,
+    fruitExp: 0,
+    hakiLearned: false,
+    inventory: [],
+    hotbar: [null, null, null],
+    weaponMastery: [],
+    ownedBoats: ["dinghy"],
+    quests: [],
+    lastGachaAtMs: null,
+    currentIslandId: "hub",
+    savedAtMs: 1_700_000_000_000,
+  };
+  assert(applySaveData(st, legacy) === true, "예전 포맷 세이브도 예외 없이 복원됨");
+  const p = st.player;
+  assert(p.stats.attack === 12 + 9, `공격 = 예전 마나+공격 합산 (${p.stats.attack})`);
+  assert(p.stats.defense === 41, `방어 = 예전 체력 그대로 (${p.stats.defense})`);
+  assert(p.stats.sword === 0 && p.stats.gun === 0, "검/총 스텟은 0에서 시작");
+  assert(p.stats.fruit === 6, "열매 스텟은 그대로 이전");
 }
 
 section("파이어베이스 설정 — 코드에 기본값이 박혀 있어 설정 없이도 동작");
@@ -2179,9 +2222,9 @@ section("개발자 모드 — 허용 계정만 · 만렙 테스트 캐릭터 · 
 
   // 스텟을 "주기만" 하면 최대 체력이 100인 채라 접촉 데미지 한 방에 죽습니다.
   // 실제로 찍혀 있어야 테스트가 됩니다.
-  assert(p.unspentStatPoints < 4, `남은 포인트가 거의 없음 (${p.unspentStatPoints}) — 실제로 찍혀 있음`);
+  assert(p.unspentStatPoints < 5, `남은 포인트가 거의 없음 (${p.unspentStatPoints}) — 실제로 찍혀 있음`);
   const stats = Object.values(p.stats);
-  assert(stats.every((v) => v > 0), `4개 스텟에 고르게 배분됨 (${stats.join("/")})`);
+  assert(stats.every((v) => v > 0), `5개 스텟에 고르게 배분됨 (${stats.join("/")})`);
   const hardestHit = Math.max(...ISLANDS.flatMap((i) => i.species.map((s) => s.contactDamage)));
   assert(p.maxHp > hardestHit * 10,
     `최대 체력 ${p.maxHp.toLocaleString()} — 가장 아픈 몬스터(${hardestHit})의 ` +

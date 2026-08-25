@@ -76,19 +76,10 @@ export class Hud {
       <div class="drown-overlay" id="hud-drown" hidden>
         <div class="drown-text">숨이 막힙니다! 섬으로 헤엄쳐 돌아가세요</div>
       </div>
-      <div class="controls-hint">
-        <b>WASD</b> 이동 · <b>Shift</b> 질주 · <b>Space</b> 점프 · <b>Q</b> 대쉬<br/>
-        우클릭 드래그 시점 회전 · <b>마우스 휠</b> 카메라 확대/축소 · 좌클릭 근접<br/>
-        <b>1~3</b> 무기 뽑기 · <b>4</b> 열매 뽑기 · <b>Z X C V</b> 뽑은 것의 스킬 · 휠을 끝까지 당기면 1인칭<br/>
-        <b>E</b> NPC/배 · <b>I</b> 인벤토리 · <b>K</b> 캐릭터 · <b>J</b> 무장색 · <b>R</b> 순간이동(배운 뒤)
-      </div>
-      <div class="side-buttons">
-        <button class="ui-btn shop" id="btn-shop">🏪 상점</button>
-        <button class="ui-btn" id="btn-inventory">🎒 인벤토리</button>
-        <button class="ui-btn" id="btn-stats">📊 캐릭터</button>
-        <button class="ui-btn small guide" id="btn-guide">🧭 섬 가이드</button>
-        <button class="ui-btn small rank" id="btn-rank">🏆 랭킹</button>
-        <button class="ui-btn small multiplayer" id="btn-multiplayer">🌐 멀티플레이</button>
+      <div class="tl-icons">
+        <button class="icon-btn" id="btn-guide" title="섬 가이드">🧭</button>
+        <button class="icon-btn" id="btn-rank" title="랭킹">🏆</button>
+        <button class="icon-btn" id="btn-multiplayer" title="멀티플레이">🌐</button>
       </div>
       <div class="guide-hud" id="hud-guide" hidden>
         <div class="guide-hud-arrow" id="hud-guide-arrow">
@@ -110,7 +101,14 @@ export class Hud {
       <div class="island-badge" id="hud-island">시작 섬</div>
       <div class="sea-badge" id="hud-sea">첫 번째 바다</div>
       <div class="hud-status">
-        <!-- 레벨 + 경험치를 한 줄로 합쳐 맨 위에 둡니다 -->
+        <!-- 메뉴 버튼 3개를 상태 패널 맨 위에 둡니다 (참조 이미지의 좌하단 메뉴 배치) -->
+        <div class="menu-buttons">
+          <button class="ui-btn shop" id="btn-shop">🏪 상점</button>
+          <button class="ui-btn" id="btn-inventory">🎒 인벤토리</button>
+          <button class="ui-btn" id="btn-stats">📊 캐릭터</button>
+        </div>
+        <div class="money-line" id="hud-money">🪙 0</div>
+        <!-- 레벨 + 경험치를 한 줄로 합쳐 둡니다 -->
         <div class="level-row">
           <div class="level-chip">Lv.<span id="hud-level">1</span></div>
           <div class="bar-track level-track">
@@ -148,7 +146,6 @@ export class Hud {
         </div>
         <div class="top-badges">
           <div class="faction-badge" id="hud-faction">해적</div>
-          <div class="money-badge" id="hud-money">🪙 0</div>
           <div class="jump-badge" id="hud-jump" hidden></div>
           <div class="buff-badge" id="hud-buff" hidden></div>
           <div class="haki-badge" id="hud-haki" hidden>무장색 ON</div>
@@ -409,10 +406,11 @@ export class Hud {
                 const unlocked = isUnlocked(slot);
                 const reqLabel = activeMode === "fruit" ? "열매" : "무기";
                 const body = unlocked
-                  ? `<div class="skill-name">${skill.name}</div><div class="skill-cost">${skill.manaCost} MP</div>` +
+                  ? `<div class="skill-body"><div class="skill-name">${skill.name}</div><div class="skill-cost">${skill.manaCost} MP</div></div>` +
                     `<div class="cooldown-overlay" hidden></div>`
-                  : `<div class="skill-lock">🔒</div><div class="skill-lock-req">${reqLabel} Lv.${skill.unlockFruitLevel}</div>`;
-                return `<div class="skill-slot ${unlocked ? "" : "locked"}"><div class="skill-key">${SLOT_KEYS[slot]}</div>${body}</div>`;
+                  : `<div class="skill-body"><div class="skill-lock">🔒</div><div class="skill-lock-req">${reqLabel} Lv.${skill.unlockFruitLevel}</div></div>`;
+                // 이름을 왼쪽에, 키 배지를 오른쪽 끝에 두는 리스트형 배치 (참조 이미지의 마스터리 패널 스타일)
+                return `<div class="skill-slot ${unlocked ? "" : "locked"}">${body}<div class="skill-key">${SLOT_KEYS[slot]}</div></div>`;
               })
               .join("");
     }

@@ -12,9 +12,11 @@ export interface WeaponDef {
   id: ItemId;
   name: string;
   icon: string;
+  /** 도검류(sword)인지 새총 등 원거리(gun)인지 — 스텟 배율(검/총)이 갈립니다 */
+  weaponType: "sword" | "gun";
   /** 근접 공격 데미지 배율 */
   damageMultiplier: number;
-  /** 근접 사거리 추가치(m) — 큰 검일수록 멀리 닿습니다 */
+  /** 근접 사거리 추가치(m) — 큰 검일수록 멀리 닿습니다. 원거리 무기는 rangedAttack을 대신 씁니다 */
   bonusRange: number;
   /**
    * 근접 공격 쿨다운 배율 (1 = 그대로, 0.7 = 30% 빨라짐).
@@ -25,6 +27,11 @@ export interface WeaponDef {
   description: string;
   /** 이 무기를 살 수 있는 섬 id — 정해져 있으면 화면 상점에서 그 섬에 있을 때만 구매 버튼이 열립니다. */
   islandLock?: string;
+  /**
+   * 설정되어 있으면 좌클릭 공격이 원형 근접 판정 대신, 조준 방향(카메라 기준)으로
+   * 길게 뻗는 직선 판정을 씁니다 — "마우스가 가리키는 방향으로 쏘는" 원거리 무기용.
+   */
+  rangedAttack?: { range: number; width: number };
 }
 
 export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
@@ -32,6 +39,7 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     id: "sword_yoru",
     name: "요루 (흑도)",
     icon: "🗡️",
+    weaponType: "sword",
     damageMultiplier: 2.6,
     bonusRange: 1.6,
     attackSpeedMultiplier: 1,
@@ -44,6 +52,7 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     id: "sword_santoryu",
     name: "삼도류",
     icon: "⚔️",
+    weaponType: "sword",
     damageMultiplier: 2.9,
     bonusRange: 1.2,
     attackSpeedMultiplier: 0.65, // 공격 속도 35% 빠름
@@ -58,12 +67,27 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     id: "sword_enma",
     name: "엔마",
     icon: "🗡️",
+    weaponType: "sword",
     damageMultiplier: 2.3,
     bonusRange: 2.0,
     attackSpeedMultiplier: 0.9,
     price: 700,
     description: "화산 섬에서만 파는 붉은 장검. 얇고 긴 칼날 덕에 사거리가 가장 길고 다루기도 가볍습니다.",
     islandLock: "volcano",
+  },
+  // 첫 원거리 무기. 검류보다 데미지는 약하지만, 좌클릭하면 몬스터에게 다가가지
+  // 않고도 카메라(마우스)가 가리키는 방향으로 길게 뻗는 사격 판정을 씁니다.
+  gun_slingshot: {
+    id: "gun_slingshot",
+    name: "새총",
+    icon: "🔫",
+    weaponType: "gun",
+    damageMultiplier: 1.5, // 검류(2.3~2.9)보다 낮게 — 원거리인 대신 한 방은 약합니다
+    bonusRange: 0, // 원거리 판정은 rangedAttack을 씁니다 — 이 값은 쓰이지 않습니다
+    attackSpeedMultiplier: 1,
+    price: 300,
+    description: "가볍고 값싼 원거리 무기. 검보다 데미지는 약하지만, 마우스가 가리키는 방향으로 멀리서 쏠 수 있습니다.",
+    rangedAttack: { range: 22, width: 2.4 },
   },
 };
 
@@ -82,8 +106,15 @@ export function drawnWeapon(player: PlayerState): WeaponDef | null {
   return weaponFor(player.hotbar[player.activeHotbarSlot]);
 }
 
+/**
+ * 손에 든 무기의 데미지 배율 = 무기 자체 배율 × 스텟에서 파생된 배율.
+ * 도검류는 검(sword) 스텟, 새총 같은 원거리 무기는 총(gun) 스텟을 봅니다.
+ */
 export function weaponDamageMultiplier(player: PlayerState) {
-  return drawnWeapon(player)?.damageMultiplier ?? 1;
+  const weapon = drawnWeapon(player);
+  if (!weapon) return 1;
+  const statMultiplier = weapon.weaponType === "gun" ? player.gunDamageMultiplier : player.swordDamageMultiplier;
+  return weapon.damageMultiplier * statMultiplier;
 }
 
 export function weaponBonusRange(player: PlayerState) {

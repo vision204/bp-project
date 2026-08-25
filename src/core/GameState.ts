@@ -35,15 +35,29 @@ export interface EnemyStatus {
   burnRemainingSec: number;
 }
 
-/** 레벨업으로 얻는 포인트를 배분하는 4가지 스텟. */
+/**
+ * 레벨업으로 얻는 포인트를 배분하는 5가지 스텟.
+ *   · attack — 근접(맨손) 공격력 + 최대 마나 (예전의 "마나"와 "공격력"을 하나로 합쳤습니다)
+ *   · defense — 최대 체력 (예전의 "체력" 스텟과 완전히 같은 역할, 이름만 바뀌었습니다)
+ *   · sword — 도검류(요루·삼도류·엔마) 데미지 배율
+ *   · gun — 새총 등 원거리 무기 데미지 배율
+ *   · fruit — 악마의 열매 능력 데미지 배율
+ */
 export interface StatBlock {
-  mana: number;
   attack: number;
-  health: number;
+  defense: number;
+  sword: number;
+  gun: number;
   fruit: number;
 }
 
-export type ItemId = "potion_small" | "potion_exp" | "sword_yoru" | "sword_santoryu" | "sword_enma";
+export type ItemId =
+  | "potion_small"
+  | "potion_exp"
+  | "sword_yoru"
+  | "sword_santoryu"
+  | "sword_enma"
+  | "gun_slingshot";
 
 /** 배 등급 — 비쌀수록 빠르고 잘 돕니다 */
 export type BoatTierId = "dinghy" | "clipper" | "galewind";
@@ -158,10 +172,14 @@ export interface PlayerState {
   stats: StatBlock;
   unspentStatPoints: number;
   abilityDamageMultiplier: number; // stats.fruit로부터 파생
+  /** 도검류(요루·삼도류·엔마)에만 곱해지는 배율 — stats.sword로부터 파생 */
+  swordDamageMultiplier: number;
+  /** 새총 등 원거리 무기에만 곱해지는 배율 — stats.gun으로부터 파생 */
+  gunDamageMultiplier: number;
 
   meleeCooldownSec: number;
   meleeRemainingCooldownSec: number;
-  meleeDamage: number; // stats.attack으로부터 파생
+  meleeDamage: number; // stats.attack으로부터 파생 (마나와 합쳐진 스텟입니다)
   meleeRange: number;
 
   /**
@@ -441,9 +459,11 @@ export function createInitialGameState(
       exp: 0,
       expToNextLevel: expRequiredForLevel(1),
 
-      stats: { mana: 0, attack: 0, health: 0, fruit: 0 },
+      stats: { attack: 0, defense: 0, sword: 0, gun: 0, fruit: 0 },
       unspentStatPoints: 0,
       abilityDamageMultiplier: 1,
+      swordDamageMultiplier: 1,
+      gunDamageMultiplier: 1,
 
       meleeCooldownSec: 0.5,
       meleeRemainingCooldownSec: 0,

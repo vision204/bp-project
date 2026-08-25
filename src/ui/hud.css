@@ -78,16 +78,6 @@ html, body {
   border: 1px solid rgba(255, 255, 255, 0.25);
 }
 
-.money-badge {
-  font-size: 16px;
-  font-weight: bold;
-  background: rgba(20, 20, 24, 0.55);
-  padding: 5px 14px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 213, 79, 0.4);
-  color: #ffd54f;
-}
-
 .bar-row {
   display: flex;
   align-items: center;
@@ -208,19 +198,6 @@ html, body {
   font-size: 22px;
   font-weight: bold;
   border-radius: 14px;
-}
-
-.controls-hint {
-  position: absolute;
-  top: 20px;
-  left: 26px;
-  font-size: 13px;
-  line-height: 1.7;
-  opacity: 0.85;
-  max-width: 320px;
-  background: rgba(20, 20, 24, 0.35);
-  padding: 10px 14px;
-  border-radius: 12px;
 }
 
 .quest-box {
@@ -417,40 +394,50 @@ html, body {
   background: linear-gradient(90deg, #e65100, #ffb74d);
 }
 
-/* Z/X/C/V 스킬바 */
+/* Z/X/C/V 스킬 리스트 — 우측 세로 배치 (참조 이미지의 마스터리 패널 스타일) */
 .skill-row {
   position: absolute;
-  right: 30px;
-  bottom: 30px;
+  right: 26px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
+  width: 240px;
+  pointer-events: none;
 }
 
 .skill-slot {
   position: relative;
-  width: 92px;
-  height: 92px;
-  border-radius: 16px;
-  background: rgba(20, 20, 20, 0.68);
-  border: 2px solid rgba(255, 255, 255, 0.45);
+  width: 100%;
+  min-height: 48px;
+  border-radius: 10px;
+  background: rgba(10, 9, 12, 0.85);
+  border: 1px solid rgba(255, 213, 79, 0.55);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  text-align: left;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.skill-body {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 6px;
-  box-sizing: border-box;
-  text-align: center;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  gap: 2px;
+  min-width: 0;
 }
 
 .skill-key {
-  position: absolute;
-  top: -10px;
-  left: -8px;
+  flex: 0 0 auto;
   width: 26px;
   height: 26px;
-  border-radius: 8px;
+  border-radius: 7px;
   background: linear-gradient(180deg, #ffd54f, #ffb300);
   color: #302400;
   font-size: 14px;
@@ -462,9 +449,12 @@ html, body {
 }
 
 .skill-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: bold;
   line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .skill-cost {
@@ -477,7 +467,7 @@ html, body {
 }
 
 .skill-slot.locked {
-  background: rgba(12, 12, 12, 0.72);
+  background: rgba(12, 12, 12, 0.78);
   border-color: rgba(255, 255, 255, 0.16);
   color: rgba(255, 255, 255, 0.45);
 }
@@ -488,7 +478,7 @@ html, body {
 }
 
 .skill-lock {
-  font-size: 20px;
+  font-size: 15px;
   opacity: 0.7;
 }
 
@@ -500,13 +490,13 @@ html, body {
 .skill-slot .cooldown-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.72);
+  background: rgba(0, 0, 0, 0.75);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: 18px;
   font-weight: bold;
-  border-radius: 14px;
+  border-radius: 10px;
 }
 
 /* 우클릭으로 시점을 돌리는 동안 커서 숨김 */
@@ -514,57 +504,43 @@ canvas.hide-cursor {
   cursor: none;
 }
 
-/* ── 상태 패널: 좌측 상단 ───────────────────────────────────────── */
+/* ── 상태 패널: 좌측 하단 (참조 이미지 배치) ───────────────────────── */
 .hud-status {
   position: absolute;
   left: 22px;
-  top: 20px;
-  width: 340px;
-}
-
-/* 조작 안내는 좌측 하단으로 */
-.controls-hint {
-  top: auto;
-  left: 22px;
   bottom: 22px;
-  max-width: 360px;
-  font-size: 12.5px;
-  opacity: 0.8;
+  width: 320px;
+  pointer-events: none;
 }
 
-.controls-hint b {
-  color: #ffd54f;
-}
-
-/* ── 우측 버튼 (상점 등) ────────────────────────────────────────── */
-.side-buttons {
-  position: absolute;
-  right: 26px;
-  top: 20px;
+/* 상점/인벤토리/캐릭터 — 상태 패널 맨 위, 가로로 나란히 */
+.menu-buttons {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  margin-bottom: 8px;
   pointer-events: auto;
 }
 
 .ui-btn {
-  min-width: 132px;
-  padding: 11px 16px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
   border-radius: 12px;
   border: 1px solid rgba(255, 213, 79, 0.8);
   background: linear-gradient(180deg, #ffd54f, #ffb300);
   color: #302400;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 12.5px;
   font-weight: bold;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
   box-shadow: 0 4px 14px rgba(255, 179, 0, 0.3);
   transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+  white-space: nowrap;
 }
 
 .ui-btn:hover {
-  transform: translateX(-3px);
+  transform: translateY(-3px);
   background: linear-gradient(180deg, #ffe082, #ffc107);
   border-color: rgba(255, 224, 130, 0.95);
 }
@@ -580,9 +556,45 @@ canvas.hide-cursor {
   background: linear-gradient(180deg, #ffe082, #ffc107);
 }
 
-/* 퀘스트 박스가 버튼과 겹치지 않도록 아래로 */
-.quest-box {
-  top: 172px;
+/* 코인 — 상태 패널 안, 진한 초록색 큰 글씨 (참조 이미지 스타일) */
+.money-line {
+  font-size: 20px;
+  font-weight: bold;
+  color: #69f0ae;
+  margin-bottom: 6px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 8px rgba(105, 240, 174, 0.35);
+}
+
+/* ── 좌측 상단 보조 아이콘 (가이드 · 랭킹 · 멀티플레이) ─────────────── */
+.tl-icons {
+  position: absolute;
+  left: 22px;
+  top: 20px;
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(20, 20, 24, 0.68);
+  color: #fff;
+  font-size: 17px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.icon-btn:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 213, 79, 0.7);
+  background: rgba(40, 34, 12, 0.8);
 }
 
 /* ── 질주 / 대쉬 뱃지 ──────────────────────────────────────────── */
@@ -900,16 +912,10 @@ canvas.hide-cursor {
   color: #c8e6c9;
 }
 
-/* ── 섬 가이드 버튼 (작게) + 화면 나침반 ─────────────────────────────────── */
-.ui-btn.small {
-  padding: 8px 14px;
-  font-size: 14px;
-}
-
-.ui-btn.small.guide {
-  background: rgba(79, 195, 247, 0.2);
+/* ── 좌상단 아이콘 버튼 색 구분 (가이드 · 랭킹 · 멀티플레이) ────────────── */
+#btn-guide {
+  background: rgba(79, 195, 247, 0.22);
   border-color: rgba(79, 195, 247, 0.6);
-  color: #fff;
 }
 
 .guide-hud {
@@ -962,10 +968,14 @@ canvas.hide-cursor {
 
 .guide-hud-cancel:hover { background: rgba(229, 57, 53, 0.4); }
 
-.ui-btn.small.rank {
-  background: rgba(255, 213, 79, 0.2);
+#btn-rank {
+  background: rgba(255, 213, 79, 0.22);
   border-color: rgba(255, 213, 79, 0.6);
-  color: #fff;
+}
+
+#btn-multiplayer {
+  background: rgba(129, 199, 132, 0.22);
+  border-color: rgba(129, 199, 132, 0.6);
 }
 
 /* 시작 화면: 로그인 버튼 (구글 계정만 — 게스트 없음) */
