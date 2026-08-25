@@ -14,3 +14,11 @@
 export function expRequiredForLevel(level: number): number {
   return Math.round(40 + Math.pow(level, 1.6) * 6);
 }
+
+/**
+ * 캐릭터 레벨 상한. 대저택(마지막 섬) 최상위 종족("저택의 주인")의 적정
+ * 레벨(1900 + 50×3 = 2050)보다 여유 있게 위로 잡아, 마지막 콘텐츠까지 다
+ * 겪고도 조금 더 올릴 여지를 남겨둡니다. 이 레벨에 도달하면 grantExp(Leveling.ts)가
+ * 더 이상 레벨도 스탯 포인트도 올리지 않습니다.
+ */
+export const MAX_LEVEL = 2056;

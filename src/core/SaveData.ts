@@ -22,6 +22,7 @@ import {
   type ItemId,
   type Sea,
 } from "./GameState";
+import { MAX_LEVEL } from "./ExpCurve";
 import { ISLANDS, getIsland, startIslandFor } from "../world/islands";
 import { recomputeDerivedStats } from "../simulation/StatSystem";
 import { fruitExpRequiredForLevel, MAX_FRUIT_LEVEL } from "../simulation/FruitLeveling";
@@ -33,8 +34,9 @@ import { MAX_JUMPS } from "../simulation/TrainerSystem";
 
 export const SAVE_VERSION = 1;
 
-/** 캐릭터 레벨 상한 — 두 번째 바다 최고 종족(Lv.2050)보다 넉넉히 위 */
-export const MAX_LEVEL = 2500;
+// 캐릭터 레벨 상한(MAX_LEVEL)은 core/ExpCurve.ts에 있습니다 — 실제 만렙 게임플레이
+// 캡(grantExp가 거기서 멈춤)과 "조작된 세이브 값을 자르는 선"이 서로 다른 숫자면
+// 만렙을 넘겨 조작한 세이브가 통과할 수 있으므로, 두 군데서 같은 값을 하나만 씁니다.
 
 export interface SavedQuest {
   islandId: string;
