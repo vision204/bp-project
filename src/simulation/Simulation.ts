@@ -15,8 +15,9 @@ import { stepEnemyAI } from "./EnemyAI";
 import { stepCombat, stepEnemyStatuses } from "./CombatSystem";
 import { acceptQuest, createNpcs, createQuests, stepInteraction, applyKillsToQuests } from "./QuestSystem";
 import { stepMana } from "./ManaSystem";
+import { stepHp } from "./HpSystem";
 import { allocateStatPoint, recomputeDerivedStats } from "./StatSystem";
-import { buyFruit, buyItem } from "./ShopSystem";
+import { buyFruit, buyItem, payCrewCreationFee } from "./ShopSystem";
 import { useItem } from "./InventorySystem";
 import { stepBuffs } from "./BuffSystem";
 import { isInWater, stepWater } from "./WaterSystem";
@@ -99,10 +100,19 @@ export class Simulation {
     const player = this.state.player;
     this.state.nowMs = nowMs;
 
+    // 서리 발판(X)이 켜져 있고, 그걸 켠 지점에서 반경(5m) 안이면 "얼어붙은 바다" —
+    // 실제로 물에 빠지지 않고 그 위를 걸을 수 있습니다.
+    const ON_ICE_RADIUS = 5;
+    const onIce =
+      player.iceWalkActive &&
+      player.iceWalkCenter !== null &&
+      Math.hypot(player.position.x - player.iceWalkCenter.x, player.position.z - player.iceWalkCenter.z) <= ON_ICE_RADIUS;
+
     // 이전 프레임 위치를 기준으로 물에 잠겼는지 판단해 부력을 켜고 끕니다.
-    // (배를 타고 있으면 물에 빠진 게 아니므로 부력도 익사도 적용하지 않습니다)
+    // (배를 타고 있으면 물에 빠진 게 아니므로 부력도 익사도 적용하지 않습니다.
+    //  얼어붙은 바다 위에서도 가라앉지 않도록 같은 부력 표면을 씁니다.)
     this.playerController.setSwimSurface(
-      !this.state.boat.riding && isInWater(player) ? SWIM_SURFACE_Y : null,
+      !this.state.boat.riding && (isInWater(player) || onIce) ? SWIM_SURFACE_Y : null,
     );
 
     if (input.toggleHakiPressed) toggleHaki(player, player.events);
@@ -130,9 +140,9 @@ export class Simulation {
       this.playerController.teleport(deck);
       if (input.interactPressed) this.leaveBoat();
     } else {
-      this.playerController.step(dt, input, player);
+      this.playerController.step(dt, input, player, nowMs);
     }
-    stepCombat(dt, input, player, this.state.enemies);
+    stepCombat(dt, input, player, this.state.enemies, nowMs);
 
     // 돌진 스킬이 요청한 이동을 물리 바디에 반영 (지형에 막히면 그만큼만 이동)
     if (player.pendingDash) {
@@ -152,12 +162,13 @@ export class Simulation {
       });
     applyKillsToQuests(this.state.quests, kills);
 
-    stepEnemyAI(this.state.enemies, player, dt, player.events);
+    stepEnemyAI(this.state.enemies, player, dt, player.events, nowMs);
     stepInteraction(this.state, input);
-    stepMana(player, dt);
+    stepMana(player, dt, nowMs);
+    stepHp(player, dt, nowMs);
     stepBuffs(player, dt);
     stepHaki(player, dt, player.events);
-    if (!this.state.boat.riding) stepWater(player, dt);
+    if (!this.state.boat.riding && !onIce) stepWater(player, dt, nowMs);
     else player.inWater = false;
     stepEnemies(this.state.enemies, dt);
     stepGuide(this.state); // 목적지에 도착하면 길안내 자동 종료
@@ -214,6 +225,11 @@ export class Simulation {
 
   buyBoat(tierId: BoatTierId) {
     return buyBoatTier(this.state.player, tierId, this.state.player.events);
+  }
+
+  /** 해적 사단 생성 비용(🪙1000)을 낼 수 있으면 차감하고 true를 돌려줍니다 — 실제 생성 요청은 호출부가 서버로 보냅니다. */
+  payCrewCreationFee() {
+    return payCrewCreationFee(this.state.player, this.state.player.events);
   }
 
   useItem(itemId: ItemId) {
@@ -310,6 +326,10 @@ export class Simulation {
     player.mana = player.maxMana;
     player.inWater = false;
     player.hakiActive = false;
+    player.frozenRemainingSec = 0;
+    player.iceWalkActive = false;
+    player.iceWalkCenter = null;
+    player.lightningFormRemainingSec = 0;
     this.state.boat.riding = false;
     player.position = { ...arrival };
     this.playerController.teleport(arrival);

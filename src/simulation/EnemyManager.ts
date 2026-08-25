@@ -61,7 +61,7 @@ export function createInitialEnemies(): EnemyState[] {
           respawnTimerSec: 0,
           expReward: exp,
           moneyReward: money,
-          status: { slowFactor: 1, slowRemainingSec: 0, burnDps: 0, burnRemainingSec: 0 },
+          status: { slowFactor: 1, slowRemainingSec: 0, burnDps: 0, burnRemainingSec: 0, freezeRemainingSec: 0 },
 
           aggroRange: AGGRO_RANGE,
           chaseSpeed: CHASE_SPEED,
@@ -87,7 +87,7 @@ export function stepEnemies(enemies: EnemyState[], dt: number) {
         // 쫓아오다 죽었을 수도 있으니 리스폰 시 원래 스폰 지점으로 되돌림
         enemy.position = { ...enemy.spawnPosition };
         // 상태이상(둔화·화상)도 함께 초기화
-        enemy.status = { slowFactor: 1, slowRemainingSec: 0, burnDps: 0, burnRemainingSec: 0 };
+        enemy.status = { slowFactor: 1, slowRemainingSec: 0, burnDps: 0, burnRemainingSec: 0, freezeRemainingSec: 0 };
       }
     }
   }

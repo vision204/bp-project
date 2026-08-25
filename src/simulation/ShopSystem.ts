@@ -154,6 +154,27 @@ export function buyFruit(player: PlayerState, fruitId: FruitAbilityId, events: G
   return true;
 }
 
+/** 중앙섬에서 해적 사단을 새로 만드는 데 드는 코인 */
+export const CREW_CREATION_COST = 1000;
+
+/**
+ * 해적 사단 생성 비용을 차감합니다. 사단 자체(이름 중복 확인, 저장 등)는
+ * 멀티플레이 서버(server/crews.ts)가 관리하므로, 여기서는 "코인을 낼 자격이
+ * 되는지"만 확인합니다 — 성공하면 그다음에 실제 생성 요청을 서버로 보냅니다.
+ */
+export function payCrewCreationFee(player: PlayerState, events: GameEvent[]): boolean {
+  if (player.faction !== "pirate") {
+    events.push({ type: "purchase_failed", reason: "해적만 사단을 만들 수 있습니다" });
+    return false;
+  }
+  if (player.money < CREW_CREATION_COST) {
+    events.push({ type: "purchase_failed", reason: "코인이 부족합니다" });
+    return false;
+  }
+  player.money -= CREW_CREATION_COST;
+  return true;
+}
+
 /** 살 수 있는 모든 물건 (상점 + 설인 전용 무기) */
 export const ALL_PURCHASABLE: ItemCatalogEntry[] = [
   ...ITEM_CATALOG,

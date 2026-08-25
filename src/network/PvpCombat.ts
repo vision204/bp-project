@@ -13,10 +13,16 @@ import type { GameState } from "../core/GameState";
 import { totalMeleeRange } from "../simulation/CombatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import { weaponMasteryLevel } from "../simulation/WeaponLeveling";
+import { dist2D } from "../simulation/ShapeMath";
 import { skillsForFruit } from "../simulation/skills";
 import { skillsForWeapon } from "../simulation/weaponSkills";
-import type { CombatStatsSnapshot } from "./protocol";
-import type { MultiplayerClient } from "./MultiplayerClient";
+import { LIGHTNING_CONTACT_INTERVAL_MS, type CombatStatsSnapshot } from "./protocol";
+import type { MultiplayerClient, RemotePlayerView } from "./MultiplayerClient";
+
+/** 뇌광 질주(번개 열매 X)의 변신 수치 — src/simulation/skills.ts가 유일한 출처입니다. */
+const LIGHTNING_FORM_SKILL = skillsForFruit("thunder_strike")[1];
+/** 마지막으로 lightning_contact를 보낸 시각 — 서버와 같은 간격으로 스스로 걸러서 보냅니다. */
+let lastLightningSentAtMs = 0;
 
 /** 현재 스텟으로부터 서버 동기화용 스냅샷을 만듭니다. */
 export function buildCombatStatsSnapshot(state: GameState): CombatStatsSnapshot {
@@ -70,10 +76,46 @@ export function processPvpAttacks(state: GameState, mp: MultiplayerClient) {
     } else if (ev.type === "skill_fired") {
       const skill = activeSkillsFor(state)[ev.slot];
       if (!skill || skill.shape.kind === "self") continue;
-      for (const target of mp.shapeCandidates(skill.shape)) {
+      let candidates = mp.shapeCandidates(skill.shape);
+      // 낙뢰처럼 "근처 가장 가까운 대상 하나"만 노리는 스킬은 서버도 같은 이름의
+      // 후보 하나만 검증하므로, 여기서도 가장 가까운 후보 하나만 골라 보냅니다.
+      if (skill.autoTargetNearest && candidates.length > 1) {
+        const p = state.player;
+        candidates = [
+          candidates.reduce((nearest, cur) =>
+            dist2D(p.position.x, p.position.z, cur.renderX, cur.renderZ) <
+            dist2D(p.position.x, p.position.z, nearest.renderX, nearest.renderZ)
+              ? cur
+              : nearest,
+          ),
+        ];
+      }
+      for (const target of candidates) {
         mp.sendSkillAttack(target.snapshot.id, ev.slot);
       }
     }
+  }
+}
+
+/**
+ * 뇌광 질주(번개 열매 X) — 번개 변신 중이면, 접촉 반경 안에 있는 PvP 후보들에게
+ * 짧은 간격으로 반복 접촉 피해 요청을 보냅니다. NPC(몬스터)에게 주는 피해는
+ * CombatSystem.stepLightningForm이 이미 매 프레임 직접 처리하므로 여기서는
+ * 다른 플레이어만 다룹니다 — 다른 사람의 체력은 서버를 거쳐야만 바뀔 수 있어서입니다.
+ */
+export function processLightningForm(state: GameState, mp: MultiplayerClient, nowMs: number) {
+  if (!mp.connected || !state.player.pvpEnabled) return;
+  if (state.player.lightningFormRemainingSec <= 0) return;
+  if (nowMs - lastLightningSentAtMs < LIGHTNING_CONTACT_INTERVAL_MS) return;
+
+  const radius = LIGHTNING_FORM_SKILL?.lightningFormContactRadius ?? 0;
+  if (radius <= 0) return;
+  const nearby: RemotePlayerView[] = mp.meleeCandidates(radius);
+  if (nearby.length === 0) return;
+
+  lastLightningSentAtMs = nowMs;
+  for (const target of nearby) {
+    mp.sendLightningContact(target.snapshot.id);
   }
 }
 

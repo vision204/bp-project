@@ -1,5 +1,6 @@
 import type { FruitAbilityId, GameState, ItemId, StatBlock } from "../core/GameState";
-import { CASH_PAYMENT_NOTICE, FRUIT_CATALOG, ITEM_CATALOG, WEAPON_CATALOG } from "../simulation/ShopSystem";
+import { CASH_PAYMENT_NOTICE, CREW_CREATION_COST, FRUIT_CATALOG, ITEM_CATALOG, WEAPON_CATALOG } from "../simulation/ShopSystem";
+import type { MultiplayerClient } from "../network/MultiplayerClient";
 import { BOAT_TIERS } from "../simulation/BoatSystem";
 import { HAKI_DAMAGE_MULTIPLIER, HAKI_PRICE, effectiveMeleeDamage } from "../simulation/HakiSystem";
 import { QUEST_KILL_TARGET } from "../simulation/QuestSystem";
@@ -32,6 +33,13 @@ import { TELEPORT_PRICE, TELEPORT_REQUIRED_LEVEL, teleportBlockReason } from "..
 
 type StatKey = keyof StatBlock;
 
+/** 다른 사람이 정한 사단 이름이 그대로 HTML로 들어가지 않도록 이스케이프합니다. */
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) =>
+    ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;",
+  );
+}
+
 const STAT_LABELS: Record<StatKey, string> = {
   attack: "공격", // 마나 + 공격력을 합친 스텟 — 최대마나와 근접 데미지 둘 다 올립니다
   defense: "방어", // 예전 "체력" 스텟과 같은 역할(최대체력)
@@ -60,9 +68,27 @@ export interface PanelCallbacks {
   onLearnTeleport: () => void;
   /** 해적왕에게 부탁해 다른 바다로 건너가기 */
   onTravelSea: () => void;
+  /** 해적 사단 패널을 열 때 — 서버에 최신 사단 목록을 요청합니다 */
+  onOpenCrew: () => void;
+  /** 코인을 낸 뒤(성공 시) 새 사단 생성을 서버에 요청 */
+  onCreateCrew: (name: string) => void;
+  onJoinCrew: (crewId: string) => void;
+  onLeaveCrew: () => void;
 }
 
-export type PanelId = "stats" | "inventory" | "shop" | "haki" | "quest" | "fruit_dealer" | "dev" | "gacha" | "guide" | "trainer" | "sea";
+export type PanelId =
+  | "stats"
+  | "inventory"
+  | "shop"
+  | "haki"
+  | "quest"
+  | "fruit_dealer"
+  | "dev"
+  | "gacha"
+  | "guide"
+  | "trainer"
+  | "sea"
+  | "crew";
 
 /**
  * 캐릭터(스텟) · 인벤토리 · 상점 · 항해, 네 개의 모달형 패널을 관리합니다.
@@ -85,6 +111,8 @@ export class PanelManager {
   private renderSignature: Partial<Record<PanelId, string>> = {};
   /** 퀘스트 패널을 연 토벌대장이 있는 섬 */
   private questIslandId: string | null = null;
+  /** 해적 사단 패널이 접속/사단 정보를 읽어오는 곳 — main.ts가 생성 직후 setMultiplayer로 넘겨줍니다 */
+  private multiplayer: MultiplayerClient | null = null;
 
   constructor(
     container: HTMLElement,
@@ -204,6 +232,14 @@ export class PanelManager {
         <div class="panel-body" id="quest-body"></div>
       </div>
 
+      <div class="panel crew-panel" id="panel-crew" hidden>
+        <div class="panel-header">
+          <span>🏴‍☠️ 해적 사단</span>
+          <button class="panel-close" data-close="crew">✕</button>
+        </div>
+        <div class="panel-body" id="crew-body"></div>
+      </div>
+
     `;
     container.appendChild(this.root);
 
@@ -219,6 +255,7 @@ export class PanelManager {
       guide: this.root.querySelector("#panel-guide")!,
       trainer: this.root.querySelector("#panel-trainer")!,
       sea: this.root.querySelector("#panel-sea")!,
+      crew: this.root.querySelector("#panel-crew")!,
     };
 
     // 무장색 대화창의 예/아니오
@@ -233,8 +270,14 @@ export class PanelManager {
     });
   }
 
+  /** main.ts가 MultiplayerClient를 만든 직후 한 번 호출 — 해적 사단 패널이 접속/사단 정보를 읽는 곳입니다. */
+  setMultiplayer(mp: MultiplayerClient) {
+    this.multiplayer = mp;
+  }
+
   toggle(panel: PanelId) {
     this.open = this.open === panel ? null : panel;
+    if (this.open === "crew") this.callbacks.onOpenCrew();
     this.applyVisibility();
   }
 
@@ -245,6 +288,7 @@ export class PanelManager {
       if (!islandId) return;
       this.questIslandId = islandId;
     }
+    if (panel === "crew") this.callbacks.onOpenCrew();
     this.open = panel;
     this.applyVisibility();
   }
@@ -322,6 +366,9 @@ export class PanelManager {
         break;
       case "sea":
         this.renderSea(state);
+        break;
+      case "crew":
+        this.renderCrew(state);
         break;
     }
   }
@@ -1039,6 +1086,99 @@ export class PanelManager {
         this.callbacks.onAcceptQuest(islandId, btn.dataset.species!);
         this.closeAll();
       });
+    });
+  }
+
+  /**
+   * 해적 사단(길드) — 중앙섬 전용, 해적 진영만 이용할 수 있습니다.
+   * 사단 목록·내 사단 정보는 GameState가 아니라 MultiplayerClient(서버)가
+   * 들고 있으므로, state 대신 this.multiplayer를 직접 읽습니다.
+   */
+  private renderCrew(state: GameState) {
+    const mp = this.multiplayer;
+    const p = state.player;
+    const connected = mp?.connected ?? false;
+    const myCrew = mp?.myCrew ?? null;
+    const list = mp?.crewList ?? [];
+    const signature = [
+      connected,
+      p.faction,
+      p.money,
+      myCrew?.id,
+      myCrew?.totalBounty,
+      myCrew?.memberCount,
+      list.map((c) => `${c.id}:${c.totalBounty}:${c.memberCount}`).join(","),
+    ].join("|");
+    if (!this.shouldRender("crew", signature)) return;
+
+    const body = this.panels.crew.querySelector("#crew-body")!;
+
+    if (!connected) {
+      this.setHtml(
+        body,
+        `<div class="crew-intro">해적 사단은 멀티플레이 서버에 접속해 있어야 이용할 수 있습니다. 좌상단 🌐 버튼으로 먼저 접속하세요.</div>`,
+      );
+      return;
+    }
+    if (p.faction !== "pirate") {
+      this.setHtml(body, `<div class="crew-intro">해적 사단은 해적 진영 전용입니다.</div>`);
+      return;
+    }
+
+    if (myCrew) {
+      this.setHtml(
+        body,
+        `
+        <div class="crew-mine">
+          <div class="crew-mine-name">🏴‍☠️ ${escapeHtml(myCrew.name)}</div>
+          <div class="crew-mine-stats">사단원 ${myCrew.memberCount}명 · 누적 점수 ${myCrew.totalBounty.toLocaleString()}</div>
+          <div class="crew-mine-bonus">PvP로 플레이어를 처치할 때마다 현상금 <b>+${myCrew.perKillBonus}</b> (사단 누적 점수 1만마다 +1씩 늘어납니다)</div>
+          <button class="buy-btn cancel" id="crew-leave-btn">사단 탈퇴</button>
+        </div>
+      `,
+      );
+      body.querySelector<HTMLButtonElement>("#crew-leave-btn")?.addEventListener("click", () => this.callbacks.onLeaveCrew());
+      return;
+    }
+
+    const canAfford = p.money >= CREW_CREATION_COST;
+    const rows =
+      list.length === 0
+        ? `<div class="crew-empty">아직 만들어진 사단이 없습니다 — 첫 사단을 만들어보세요!</div>`
+        : list
+            .map(
+              (c) => `
+          <div class="crew-row">
+            <div class="crew-row-info">
+              <div class="crew-row-name">${escapeHtml(c.name)}</div>
+              <div class="crew-row-sub">사단원 ${c.memberCount}명 · 누적 점수 ${c.totalBounty.toLocaleString()} · 킬 보너스 +${c.perKillBonus}</div>
+            </div>
+            <button class="buy-btn" data-join="${c.id}">가입</button>
+          </div>
+        `,
+            )
+            .join("");
+
+    this.setHtml(
+      body,
+      `
+      <div class="crew-intro">🪙${CREW_CREATION_COST.toLocaleString()}을 내고 새 사단을 만들거나, 이미 있는 사단에 가입할 수 있습니다.</div>
+      <div class="crew-create">
+        <input type="text" id="crew-name-input" maxlength="20" placeholder="새 사단 이름" />
+        <button class="buy-btn" id="crew-create-btn" ${canAfford ? "" : "disabled"}>만들기 · 🪙${CREW_CREATION_COST.toLocaleString()}</button>
+      </div>
+      <div class="crew-list">${rows}</div>
+    `,
+    );
+
+    body.querySelector<HTMLButtonElement>("#crew-create-btn")?.addEventListener("click", () => {
+      const input = body.querySelector<HTMLInputElement>("#crew-name-input");
+      const name = input?.value.trim() ?? "";
+      if (!name) return;
+      this.callbacks.onCreateCrew(name);
+    });
+    body.querySelectorAll<HTMLButtonElement>(".buy-btn[data-join]").forEach((btn) => {
+      btn.addEventListener("click", () => this.callbacks.onJoinCrew(btn.dataset.join!));
     });
   }
 }

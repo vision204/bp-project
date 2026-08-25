@@ -1225,12 +1225,23 @@ assert(onAxis.status.slowFactor === 0.5, `아이스 랜스 둔화 적용 (x${onA
 section("돌진 / 자기 강화");
 const pDash = freshPlayer();
 pDash.equippedFruit = "thunder_strike";
-pDash.fruitLevel = 25; // X = 뇌광 질주 (dash)
+pDash.fruitLevel = 1; // Z = 선더 스트라이크 (dash)
 pDash.aimYaw = 0;
 pDash.events = [];
-stepCombat(0.016, input({ skillPressed: [false, true, false, false] }), pDash, []);
+stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pDash, []);
 assert(pDash.pendingDash !== null, "돌진 요청 생성됨");
-assert(Math.abs(pDash.pendingDash.z - 12) < 0.001, `정면(+Z)으로 12m 돌진 요청 (z=${pDash.pendingDash.z.toFixed(2)})`);
+assert(Math.abs(pDash.pendingDash.z - 6) < 0.001, `정면(+Z)으로 6m 돌진 요청 (z=${pDash.pendingDash.z.toFixed(2)})`);
+
+// X = 뇌광 질주 (토글형 번개 변신) — 켜짐/꺼짐 확인
+const pToggle = freshPlayer();
+pToggle.equippedFruit = "thunder_strike";
+pToggle.fruitLevel = 25;
+pToggle.aimYaw = 0;
+pToggle.events = [];
+stepCombat(0.016, input({ skillPressed: [false, true, false, false] }), pToggle, []);
+assert(pToggle.lightningFormRemainingSec > 0, "뇌광 질주 발동 시 변신 지속시간 설정됨");
+stepCombat(0.016, input({ skillPressed: [false, true, false, false] }), pToggle, []);
+assert(pToggle.lightningFormRemainingSec === 0, "다시 X를 누르면 토글이 꺼짐 (무료)");
 
 const pBuff = freshPlayer();
 pBuff.equippedFruit = "rubber_barrage";
@@ -1392,8 +1403,11 @@ section("무기 숙련도(경험치) — 그 무기를 든 채로 낸 근접/무
 }
 
 section("이동 — Shift 질주 토글 / Q 대쉬(쿨다운 없이 마나 소모)");
-const { DASH_MANA_COST } = await import("../src/simulation/PlayerController.ts");
-assert(DASH_MANA_COST > 0, `Q 대쉬 마나 소모량 ${DASH_MANA_COST} (쿨다운 없음)`);
+const { DASH_MANA_COST_PERCENT } = await import("../src/simulation/PlayerController.ts");
+assert(
+  DASH_MANA_COST_PERCENT > 0,
+  `Q 대쉬 마나 소모량 최대 마나의 ${(DASH_MANA_COST_PERCENT * 100).toFixed(0)}% (쿨다운 없음)`,
+);
 
 section("퀘스트 레벨 제한 (섬은 갈 수 있지만 의뢰는 못 받음)");
 const gate = createInitialGameState();

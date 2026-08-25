@@ -200,9 +200,11 @@ html, body {
   border-radius: 14px;
 }
 
+/* 현상금 랭킹이 이제 맨 위 자리를 쓰므로, 퀘스트 박스는 그 아래(140px)로 내렸습니다
+   (요청: 랭킹 UI를 더 상단으로) — 둘 다 떠 있을 때 겹치지 않도록. */
 .quest-box {
   position: absolute;
-  top: 20px;
+  top: 160px;
   right: 26px;
   background: rgba(20, 20, 24, 0.65);
   border: 1px solid rgba(255, 213, 79, 0.4);
@@ -219,12 +221,10 @@ html, body {
   font-size: 15px;
 }
 
-/* ── 현상금 랭킹 (화면 우측 상단, 퀘스트 박스 아래) ───────────────────
-   퀘스트 박스와 같은 top:20px/right:26px를 쓰면 둘 다 떠 있을 때
-   겹치므로, 퀘스트 박스가 웬만해선 다 들어갈 높이(140px) 아래에 둡니다. */
+/* ── 현상금 랭킹 (화면 우측 최상단) ───────────────────────────────── */
 .bounty-panel {
   position: absolute;
-  top: 160px;
+  top: 20px;
   right: 26px;
   background: rgba(20, 20, 24, 0.65);
   border: 1px solid rgba(255, 213, 79, 0.4);
@@ -232,6 +232,7 @@ html, body {
   padding: 12px 16px;
   width: 240px;
   font-size: 13px;
+  pointer-events: auto;
 }
 
 .bounty-header {
@@ -239,6 +240,32 @@ html, body {
   color: #ffd54f;
   font-size: 15px;
   margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bounty-collapse-btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 213, 79, 0.5);
+  background: rgba(255, 213, 79, 0.12);
+  color: #ffd54f;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.bounty-collapse-btn:hover {
+  background: rgba(255, 213, 79, 0.28);
+}
+
+.bounty-panel.collapsed .bounty-sub,
+.bounty-panel.collapsed .bounty-list {
+  display: none;
 }
 
 .bounty-sub {

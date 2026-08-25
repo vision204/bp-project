@@ -40,9 +40,21 @@ import {
 } from "../src/simulation/CombatSystem";
 import { isSlotUnlocked, skillsForFruit } from "../src/simulation/skills";
 import { isWeaponSlotUnlocked, skillsForWeapon } from "../src/simulation/weaponSkills";
+import { fruitLevelDamageMultiplier } from "../src/simulation/FruitLeveling";
 import { dist2D, pointInShape } from "../src/simulation/ShapeMath";
 import {
+  addCrewBounty,
+  crewBonusForKill,
+  crewOf,
+  createCrew,
+  joinCrew,
+  leaveCrew,
+  listCrews,
+  summarize as summarizeCrew,
+} from "./crews";
+import {
   CONE_LATENCY_BUFFER_DEG,
+  LIGHTNING_CONTACT_INTERVAL_MS,
   MAX_ENEMY_SYNC_ENTRIES,
   MAX_TRADE_SLOTS,
   RANGE_LATENCY_BUFFER_M,
@@ -58,6 +70,9 @@ import {
   type TradeCloseReason,
   type TradeItem,
 } from "../src/network/protocol";
+
+/** 뇌광 질주(번개 열매 X)의 변신 수치 — src/simulation/skills.ts가 유일한 출처입니다. */
+const LIGHTNING_FORM_SKILL = skillsForFruit("thunder_strike")[1];
 
 /** 데미지 상한선 — 정상적인 만렙 캐릭터의 최고 한 방(대략 수백~수천 단위)보다
  *  넉넉히 위지만, 무한대나 1e9 같은 조작값은 확실히 걸러냅니다. */
@@ -210,6 +225,8 @@ export interface Connection {
   ws: WebSocket;
   roomId: string;
   name: string;
+  /** 이 브라우저의 영구 id(hello의 uid) — 해적 사단 가입 여부를 여기로 찾습니다. hello 전에는 빈 문자열. */
+  uid: string;
   faction: Faction;
   position: { x: number; y: number; z: number };
   yaw: number;
@@ -229,6 +246,8 @@ export interface Connection {
   stats: CombatStatsSnapshot;
   lastMeleeAtMs: number;
   lastSkillAtMs: Record<number, number>;
+  /** 뇌광 질주(번개 열매 X) 접촉 피해 요청의 마지막 처리 시각 — 도배 방지용. */
+  lastLightningAtMs: number;
   lastSeenMs: number;
   msgTimestamps: number[];
   /** 지금 진행 중인 거래(있으면). 거래 중이 아니면 null.
@@ -323,6 +342,7 @@ export class World {
       ws,
       roomId,
       name: name.slice(0, 24) || "이름없음",
+      uid: "",
       faction,
       position: { x: 0, y: 0, z: 0 },
       yaw: 0,
@@ -355,6 +375,7 @@ export class World {
       }),
       lastMeleeAtMs: 0,
       lastSkillAtMs: {},
+      lastLightningAtMs: 0,
       lastSeenMs: Date.now(),
       msgTimestamps: [],
       trade: null,
@@ -510,11 +531,18 @@ export class World {
     if (!msg || typeof msg !== "object") return;
 
     switch (msg.type) {
-      case "hello":
+      case "hello": {
         // 접속 직후 이름/진영을 다시 보낼 수 있게 허용 (재연결 등)
         if (typeof msg.name === "string") conn.name = msg.name.slice(0, 24) || conn.name;
         if (msg.faction === "pirate" || msg.faction === "marine") conn.faction = msg.faction;
+        // uid로 이 브라우저가 어느 해적 사단 소속인지 찾아서 바로 알려줍니다.
+        if (typeof msg.uid === "string" && msg.uid) {
+          conn.uid = msg.uid.slice(0, 128);
+          const crew = crewOf(conn.uid);
+          this.send(conn, { type: "crew_status", crew: crew ? summarizeCrew(crew) : null });
+        }
         break;
+      }
 
       case "state": {
         conn.position = {
@@ -724,6 +752,40 @@ export class World {
         break;
       }
 
+      case "lightning_contact":
+        this.resolveLightningContact(conn, msg.targetId, nowMs);
+        break;
+
+      // --- 해적 사단(길드) ---------------------------------------------------
+      case "crew_create": {
+        const result = createCrew(conn.uid, typeof msg.name === "string" ? msg.name : "", nowMs);
+        if ("error" in result) {
+          this.send(conn, { type: "crew_error", reason: result.error });
+          break;
+        }
+        this.send(conn, { type: "crew_status", crew: summarizeCrew(result) });
+        break;
+      }
+
+      case "crew_join": {
+        const result = joinCrew(conn.uid, typeof msg.crewId === "string" ? msg.crewId : "");
+        if ("error" in result) {
+          this.send(conn, { type: "crew_error", reason: result.error });
+          break;
+        }
+        this.send(conn, { type: "crew_status", crew: summarizeCrew(result) });
+        break;
+      }
+
+      case "crew_leave":
+        leaveCrew(conn.uid);
+        this.send(conn, { type: "crew_status", crew: null });
+        break;
+
+      case "crew_list_request":
+        this.send(conn, { type: "crew_list", crews: listCrews() });
+        break;
+
       case "ping":
         this.send(conn, { type: "pong" });
         break;
@@ -763,9 +825,44 @@ export class World {
     // 이 한 방으로 실제로 죽었으면(생존 → 사망 전환) 현상금을 적립합니다 — 서버가
     // 직접 확인한 킬만 인정하므로 클라이언트가 스스로 점수를 조작할 방법이 없습니다.
     if (wasAlive && !target.alive) {
-      attacker.bounty += bountyForKill(attacker.level, target.level);
+      let bonus = 0;
+      const crew = crewOf(attacker.uid);
+      if (crew) {
+        // 사단 소속이면 킬마다 추가 보너스 — 사단의 누적 점수가 커질수록 보너스도 커집니다.
+        bonus = crewBonusForKill(crew);
+        addCrewBounty(crew, bonus);
+      }
+      attacker.bounty += bountyForKill(attacker.level, target.level) + bonus;
       this.broadcastRoom(attacker.roomId, { type: "bounty_update", entries: this.bountyEntries(attacker.roomId) });
     }
+  }
+
+  /**
+   * 뇌광 질주(번개 열매 X) 변신 중 접촉 피해 — 근접 공격과 비슷하지만 훨씬 짧은
+   * 간격으로 반복 요청됩니다. 서버가 자체적으로 최소 간격(LIGHTNING_CONTACT_INTERVAL_MS)을
+   * 두어 도배를 막고, 판정에 실패하면 조용히 무시합니다(매번 pvp_rejected를 보내면
+   * 그 자체가 스팸이 되므로).
+   */
+  private resolveLightningContact(attacker: Connection, targetId: string, nowMs: number) {
+    const target = this.connections.get(targetId);
+    if (this.basicPvpCheck(attacker, target) || !target) return;
+    if (nowMs - attacker.lastLightningAtMs < LIGHTNING_CONTACT_INTERVAL_MS) return;
+
+    const radius = (LIGHTNING_FORM_SKILL?.lightningFormContactRadius ?? 0) + RANGE_LATENCY_BUFFER_M;
+    const dps = LIGHTNING_FORM_SKILL?.lightningFormDps ?? 0;
+    if (radius <= 0 || dps <= 0) return;
+    const d = dist2D(attacker.position.x, attacker.position.z, target.position.x, target.position.z);
+    if (d > radius) return;
+
+    attacker.lastLightningAtMs = nowMs;
+    const fakePlayer = asPlayerStateForCombat(attacker.stats, attacker.aimYaw);
+    const tickDamage =
+      dps *
+      (LIGHTNING_CONTACT_INTERVAL_MS / 1000) *
+      fakePlayer.abilityDamageMultiplier *
+      fruitLevelDamageMultiplier(fakePlayer.fruitLevel) *
+      fakePlayer.fruitBuffMultiplier;
+    this.applyDamage(attacker, target, tickDamage, "skill");
   }
 
   private resolveMeleeAttack(attacker: Connection, targetId: string, nowMs: number) {
@@ -857,6 +954,12 @@ export class World {
         ? weaponSkillDamage(fakePlayer, skill, weaponId)
         : 0;
     this.applyDamage(attacker, target, damage, "skill");
+
+    // 빙결 감옥·절대 영도 등 — 실제 이동을 멈추는 건 대상 클라이언트 자신만 할 수
+    // 있으므로(다른 사람의 상태를 대신 바꿀 수 없음) 여기서 알리기만 합니다.
+    if (skill.freezeDurationSec && target.alive) {
+      this.send(target, { type: "pvp_freeze", durationSec: skill.freezeDurationSec });
+    }
   }
 }
 

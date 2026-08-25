@@ -24,6 +24,9 @@ const INTERACT_RANGE = 3.5;
  */
 export const GACHA_ISLAND_ID = "jungle";
 
+/** 해적 사단 접수처가 있는 섬 — 요청대로 "중앙섬"(첫 번째 바다의 중앙 교역섬)입니다. */
+export const CENTRAL_ISLAND_ID = "central";
+
 /** 각 섬 퀘스트의 처치 목표 수 */
 export const QUEST_KILL_TARGET = 7;
 /**
@@ -120,6 +123,18 @@ export function createNpcs(): NpcState[] {
     position: placeOnIsland(hakiIsland, -Math.PI * 0.5, 0.45),
     kind: "haki",
     islandId: hakiIsland.id,
+  });
+
+  // 해적 사단 접수처 — 요청대로 "중앙섬"(첫 번째 바다의 중앙 교역섬)에만 있습니다.
+  // 해적 진영 전용이지만, 설인·해적왕처럼 자격이 안 될 때도 창은 열어서
+  // 왜 안 되는지 보여줍니다 (숨기지 않는 게 이 프로젝트의 일관된 원칙입니다).
+  const crewIsland = getIsland(CENTRAL_ISLAND_ID);
+  npcs.push({
+    id: "npc_pirate_crew",
+    name: "해적 사단 접수처",
+    position: placeOnIsland(crewIsland, Math.PI * 0.65, 0.4),
+    kind: "pirate_crew",
+    islandId: crewIsland.id,
   });
 
   return npcs;
@@ -347,6 +362,15 @@ export function stepInteraction(state: GameState, input: InputSnapshot) {
         ? `${nearestNpc.name}: 이미 무장색을 익혔군. (H키로 발동)`
         : `[E] ${nearestNpc.name} — 무장색 배우기`;
       if (input.interactPressed && !player.hakiLearned) state.uiRequest = "haki";
+      return;
+
+    case "pirate_crew":
+      // 해적 진영 전용 — 다른 진영이어도 창은 열어서 이유를 보여줍니다(설인과 같은 원칙).
+      state.interactionPrompt =
+        player.faction === "pirate"
+          ? `[E] ${nearestNpc.name} — 해적 사단 만들기 · 가입`
+          : `${nearestNpc.name}: 해적 사단은 해적만 만들거나 가입할 수 있다.`;
+      if (input.interactPressed) state.uiRequest = "crew";
       return;
 
     case "dock": {

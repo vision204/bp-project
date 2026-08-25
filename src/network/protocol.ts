@@ -36,6 +36,14 @@ export const RANGE_LATENCY_BUFFER_M = 2.5;
 export const CONE_LATENCY_BUFFER_DEG = 12;
 
 /**
+ * 뇌광 질주(번개 열매 X) 변신 중 접촉 피해 요청의 최소 간격(ms).
+ * 클라이언트(PvpCombat.ts)는 이 간격으로 lightning_contact를 보내고,
+ * 서버(server/state.ts)는 같은 값으로 도배를 막습니다 — 값을 한 곳에서만
+ * 정의해 두 쪽이 어긋나지 않게 합니다.
+ */
+export const LIGHTNING_CONTACT_INTERVAL_MS = 300;
+
+/**
  * 서버가 데미지를 "다시 계산"하는 데 필요한 최소한의 전투 스텟.
  * 공격자가 보낸 숫자(데미지)를 그대로 믿지 않고, 이 값들로 CombatSystem.ts의
  * totalMeleeDamage/skillDamage를 서버에서 직접 호출해 데미지를 새로 구합니다.
@@ -111,6 +119,24 @@ export interface BountyEntry {
   bounty: number;
 }
 
+// ---------------------------------------------------------------------------
+// 해적 사단(길드) — 해적 진영 전용. 중앙섬에서 코인을 내고 만들거나, 만들어진
+// 사단 중 하나를 골라 가입합니다. 서버 파일(server/data/crews.json)에 영구
+// 저장되고, 가입은 브라우저의 영구 id(PlayerId.ts)로 식별하므로 재접속해도
+// 유지됩니다. 여러 사단이 동시에 존재할 수 있고 아무나 골라서 가입할 수 있습니다.
+// ---------------------------------------------------------------------------
+
+/** 사단 하나를 목록/상태로 보여줄 때 필요한 요약 정보. */
+export interface CrewSummary {
+  id: string;
+  name: string;
+  memberCount: number;
+  /** 사단원들이 PvP 킬로 쌓아온 누적 현상금 보너스 점수 — 이 값이 커질수록 아래 perKillBonus도 커집니다. */
+  totalBounty: number;
+  /** 지금 이 사단원이 PvP로 플레이어를 처치했을 때 기본 현상금에 추가로 더 받는 점수 */
+  perKillBonus: number;
+}
+
 /** 최대 9칸 — 거래창 한쪽에 올릴 수 있는 아이템 수. */
 export const MAX_TRADE_SLOTS = 9;
 
@@ -154,7 +180,9 @@ export type TradeCloseReason =
 // ---------------------------------------------------------------------------
 
 export type ClientMessage =
-  | { type: "hello"; name: string; faction: Faction }
+  /** uid는 이 브라우저의 영구 id(PlayerId.ts) — 해적 사단 가입 여부를 재접속 후에도
+   *  알아보기 위해서만 씁니다. 없어도(빈 문자열) 접속 자체는 되지만 사단 기능만 못 씁니다. */
+  | { type: "hello"; name: string; faction: Faction; uid?: string }
   | {
       type: "state";
       position: Vec3Like;
@@ -188,6 +216,18 @@ export type ClientMessage =
   | { type: "trade_accept"; accepted: boolean }
   | { type: "trade_cancel" }
   | { type: "gift_send"; targetId: string; item: TradeItem }
+  // --- 뇌광 질주(번개 열매 X) — 변신 중 스쳐 지나가는 상대에게 지속 피해 -----
+  /** 근접 공격과 별개의, 아주 짧은 간격으로 반복되는 접촉 피해 요청입니다.
+   *  서버가 자체적으로 최소 간격을 두고 걸러서(rate limit) 처리합니다. */
+  | { type: "lightning_contact"; targetId: string }
+  // --- 해적 사단(길드) ------------------------------------------------------
+  /** 중앙섬에서 코인을 낸 뒤 보내는 사단 생성 요청 — 코인 차감은 클라이언트가
+   *  먼저 처리하고(다른 구매들과 같은 신뢰 구조), 서버는 이름과 가입만 담당합니다. */
+  | { type: "crew_create"; name: string }
+  | { type: "crew_join"; crewId: string }
+  | { type: "crew_leave" }
+  /** 사단 패널을 열 때 최신 목록을 요청합니다. */
+  | { type: "crew_list_request" }
   | { type: "ping" };
 
 // ---------------------------------------------------------------------------
@@ -206,6 +246,9 @@ export type ServerMessage =
   | { type: "pvp_hit_ack"; targetId: string; targetName: string; damage: number }
   /** 공격이 거부됐을 때 (사거리 밖, 쿨다운 중, PvP 꺼짐, 다른 진영 아님 등) */
   | { type: "pvp_rejected"; reason: string }
+  /** 얼음 계열 스킬(빙결 감옥·절대 영도 등)에 맞았을 때 — 이 메시지를 받은
+   *  클라이언트가 자기 이동 입력을 이 시간(초) 동안 직접 무시합니다. */
+  | { type: "pvp_freeze"; durationSec: number }
   /** 같은 방의 다른 사람이 스킬을 썼다는 순수 연출용 중계 — 그대로 이펙트만 재생합니다. */
   | { type: "player_skill_fx"; fromId: string; slot: number; weaponId: string | null; position: Vec3Like; aimYaw: number }
   // --- 거래 / 선물 ---------------------------------------------------------
@@ -229,6 +272,14 @@ export type ServerMessage =
   /** 같은 방의 현상금 랭킹 — 접속 직후, 그리고 누군가의 현상금이 바뀌거나(킬)
    *  누가 나갈 때마다 방 전체에 다시 뿌려집니다. */
   | { type: "bounty_update"; entries: BountyEntry[] }
+  // --- 해적 사단(길드) ------------------------------------------------------
+  /** 내가 지금 속한 사단(없으면 null) — 접속 직후(hello 응답)와 생성/가입/탈퇴
+   *  직후에 보내줍니다. perKillBonus는 지금 이 순간 기준의 보너스 점수입니다. */
+  | { type: "crew_status"; crew: CrewSummary | null }
+  /** 존재하는 모든 사단 목록 — crew_list_request에 대한 응답. */
+  | { type: "crew_list"; crews: CrewSummary[] }
+  /** 사단 생성/가입이 실패했을 때 (이름 중복, 이미 가입 중 등) — 토스트용. */
+  | { type: "crew_error"; reason: string }
   | { type: "error"; message: string }
   | { type: "pong" };
 

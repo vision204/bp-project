@@ -15,6 +15,9 @@ import {
 } from "./WeaponSystem";
 import { dist2D, pointInShape } from "./ShapeMath";
 
+/** 뇌광 질주(번개 열매 X)의 변신 수치 — skills.ts가 유일한 출처이므로 여기서 다시 정의하지 않고 그대로 읽습니다. */
+const LIGHTNING_FORM_SKILL = skillsForFruit("thunder_strike")[1];
+
 /**
  * 데미지의 출처.
  *   · "fruit"  — 열매 경험치는 출처가 "fruit"인 막타에만 들어옵니다.
@@ -137,11 +140,27 @@ function applySkill(
 
   if (skill.shape.kind === "self") return;
 
-  for (const enemy of enemies) {
-    if (!enemy.alive) continue;
-    if (!isInShape(player, enemy, skill)) continue;
+  // 낙뢰처럼 조준 없이 "근처 가장 가까운 대상 하나"만 노리는 스킬은, 범위 안에
+  // 있는 후보들 중 가장 가까운 하나만 골라 그 대상에게만 효과를 적용합니다.
+  let targets = enemies.filter((enemy) => enemy.alive && isInShape(player, enemy, skill));
+  if (skill.autoTargetNearest && targets.length > 1) {
+    let nearest = targets[0];
+    let nearestDist = dist2D(player.position.x, player.position.z, nearest.position.x, nearest.position.z);
+    for (const enemy of targets.slice(1)) {
+      const d = dist2D(player.position.x, player.position.z, enemy.position.x, enemy.position.z);
+      if (d < nearestDist) {
+        nearest = enemy;
+        nearestDist = d;
+      }
+    }
+    targets = [nearest];
+  }
 
+  for (const enemy of targets) {
     // 상태이상은 죽기 전에 걸어둡니다 (죽으면 어차피 의미 없음)
+    if (skill.freezeDurationSec) {
+      enemy.status.freezeRemainingSec = skill.freezeDurationSec;
+    }
     if (skill.slowFactor !== undefined && skill.slowDurationSec) {
       enemy.status.slowFactor = skill.slowFactor;
       enemy.status.slowRemainingSec = skill.slowDurationSec;
@@ -217,6 +236,10 @@ export function stepEnemyStatuses(player: PlayerState, enemies: EnemyState[], dt
   for (const enemy of enemies) {
     const st = enemy.status;
 
+    if (st.freezeRemainingSec > 0) {
+      st.freezeRemainingSec = Math.max(0, st.freezeRemainingSec - dt);
+    }
+
     if (st.slowRemainingSec > 0) {
       st.slowRemainingSec = Math.max(0, st.slowRemainingSec - dt);
       if (st.slowRemainingSec === 0) st.slowFactor = 1;
@@ -232,7 +255,35 @@ export function stepEnemyStatuses(player: PlayerState, enemies: EnemyState[], dt
   }
 }
 
-export function stepCombat(dt: number, input: InputSnapshot, player: PlayerState, enemies: EnemyState[]) {
+/**
+ * 뇌광 질주(번개 열매 X) — 번개 변신 중, 접촉 반경 안에 있는 몬스터에게
+ * 매 프레임 지속 피해를 입힙니다 (화상 도트와 같은 "초당 피해 × dt" 방식).
+ * PvP 접촉 피해는 별도로 src/network/PvpCombat.ts가 서버에 요청합니다
+ * (다른 플레이어의 체력은 이 클라이언트가 직접 깎을 수 없으므로).
+ */
+export function stepLightningForm(player: PlayerState, enemies: EnemyState[], dt: number, events: GameEvent[]) {
+  if (player.lightningFormRemainingSec <= 0) return;
+  player.lightningFormRemainingSec = Math.max(0, player.lightningFormRemainingSec - dt);
+
+  const dps = LIGHTNING_FORM_SKILL?.lightningFormDps ?? 0;
+  const radius = LIGHTNING_FORM_SKILL?.lightningFormContactRadius ?? 0;
+  if (dps <= 0 || radius <= 0) return;
+
+  const tickDamage = dps * dt * player.abilityDamageMultiplier * fruitLevelDamageMultiplier(player.fruitLevel) * player.fruitBuffMultiplier;
+  for (const enemy of enemies) {
+    if (!enemy.alive) continue;
+    if (dist2D(player.position.x, player.position.z, enemy.position.x, enemy.position.z) > radius) continue;
+    dealDamage(player, enemy, tickDamage, "fruit", events);
+  }
+}
+
+export function stepCombat(
+  dt: number,
+  input: InputSnapshot,
+  player: PlayerState,
+  enemies: EnemyState[],
+  nowMs: number = Date.now(),
+) {
   // 쿨다운 진행
   player.meleeRemainingCooldownSec = Math.max(0, player.meleeRemainingCooldownSec - dt);
   for (let i = 0; i < player.skillCooldowns.length; i++) {
@@ -244,6 +295,15 @@ export function stepCombat(dt: number, input: InputSnapshot, player: PlayerState
     player.fruitBuffRemainingSec = Math.max(0, player.fruitBuffRemainingSec - dt);
     if (player.fruitBuffRemainingSec === 0) player.fruitBuffMultiplier = 1;
   }
+
+  // 빙결 감옥·절대 영도 등에 맞아 얼어붙은 시간 — 다 지나면 이동 입력이 다시 먹힙니다
+  // (실제로 이동 입력을 무시하는 건 PlayerController.step이 이 값을 직접 읽어서 합니다).
+  if (player.frozenRemainingSec > 0) {
+    player.frozenRemainingSec = Math.max(0, player.frozenRemainingSec - dt);
+  }
+
+  // 뇌광 질주 — 번개 변신 중이면 접촉 반경 안 몬스터에게 지속 피해.
+  stepLightningForm(player, enemies, dt, player.events);
 
   if (input.attackPressed && player.meleeRemainingCooldownSec <= 0) {
     player.meleeRemainingCooldownSec = totalMeleeCooldown(player);
@@ -276,12 +336,22 @@ export function stepCombat(dt: number, input: InputSnapshot, player: PlayerState
         });
         continue;
       }
+
+      // 토글 스킬(서리 발판·뇌광 질주)이 이미 켜져 있으면, 다시 누르는 건
+      // "끄기"입니다 — 마나·쿨다운을 소모하지 않고 즉시 꺼집니다.
+      if (skill.toggle && isToggleActive(player, skill)) {
+        setToggleActive(player, skill, false, player.position);
+        continue;
+      }
+
       if (player.skillCooldowns[slot] > 0) continue;
       if (player.mana < skill.manaCost) continue;
 
       player.skillCooldowns[slot] = skill.cooldownSec;
       player.mana -= skill.manaCost;
+      player.lastManaSpentAtMs = nowMs;
       applySkill(player, enemies, skill, "fruit", skillDamage(player, skill), player.events);
+      if (skill.toggle) setToggleActive(player, skill, true, player.position);
       player.events.push({ type: "skill_fired", slot });
     }
   } else if (weapon) {
@@ -306,8 +376,26 @@ export function stepCombat(dt: number, input: InputSnapshot, player: PlayerState
 
       player.skillCooldowns[slot] = skill.cooldownSec;
       player.mana -= skill.manaCost;
+      player.lastManaSpentAtMs = nowMs;
       applySkill(player, enemies, skill, "weapon", weaponSkillDamage(player, skill, weapon.id), player.events);
       player.events.push({ type: "skill_fired", slot });
     }
+  }
+}
+
+/** 토글 스킬(서리 발판·뇌광 질주)이 지금 켜져 있는지 — 스킬 id로 어느 상태 플래그를 볼지 정합니다. */
+function isToggleActive(player: PlayerState, skill: SkillDef): boolean {
+  if (skill.id === "ice_x") return player.iceWalkActive;
+  if (skill.id === "thunder_x") return player.lightningFormRemainingSec > 0;
+  return false;
+}
+
+/** 토글 스킬을 켜거나 끕니다. 켤 때는 지금 위치를 중심으로 기록합니다(서리 발판의 얼음판 중심). */
+function setToggleActive(player: PlayerState, skill: SkillDef, active: boolean, position: { x: number; z: number }) {
+  if (skill.id === "ice_x") {
+    player.iceWalkActive = active;
+    player.iceWalkCenter = active ? { x: position.x, z: position.z } : null;
+  } else if (skill.id === "thunder_x") {
+    player.lightningFormRemainingSec = active ? skill.lightningFormDurationSec ?? 0 : 0;
   }
 }

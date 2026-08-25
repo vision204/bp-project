@@ -18,7 +18,13 @@ import { totalMeleeCooldown, meleeDps } from "./simulation/CombatSystem";
 import { devDenyMessage, devDenyReason } from "./core/DevAccess";
 import { applyDevLoadout } from "./simulation/DevLoadout";
 import { MultiplayerClient } from "./network/MultiplayerClient";
-import { broadcastSkillFx, buildCombatStatsSnapshot, drawnWeaponId, processPvpAttacks } from "./network/PvpCombat";
+import {
+  broadcastSkillFx,
+  buildCombatStatsSnapshot,
+  drawnWeaponId,
+  processLightningForm,
+  processPvpAttacks,
+} from "./network/PvpCombat";
 import { MultiplayerUI } from "./ui/MultiplayerUI";
 import { TradeUI } from "./ui/TradeUI";
 import { canUseTeleport, TELEPORT_MAX_DISTANCE_M } from "./simulation/TeleportSystem";
@@ -295,8 +301,20 @@ async function main() {
         void saves.flush(Date.now());
       }
     },
+    // 해적 사단 — 코인 차감은 여기(싱글플레이 상태)에서 먼저 처리하고,
+    // 성공했을 때만 실제 생성 요청을 멀티플레이 서버로 보냅니다.
+    onOpenCrew: () => multiplayer.requestCrewList(),
+    onCreateCrew: (name) => {
+      if (simulation.payCrewCreationFee()) multiplayer.sendCrewCreate(name);
+    },
+    onJoinCrew: (crewId) => multiplayer.sendCrewJoin(crewId),
+    onLeaveCrew: () => multiplayer.sendCrewLeave(),
   });
-  // 멀티플레이 — 기본은 선택 사항입니다. 버튼을 눌러 접속하기 전까지는
+  // 멀티플레이 — 개발자 모드는 요청에 따라 무조건 싱글플레이로만 동작합니다.
+  // 접속 버튼 자체를 HUD에서 숨기고(아래 Hud 생성부), 배포 빌드의 자동 접속도
+  // 건너뜁니다 — devMode 인스턴스는 만들어지되 절대 connect()가 호출되지 않습니다.
+  //
+  // 일반 모드에서는 기본이 선택 사항입니다. 버튼을 눌러 접속하기 전까지는
   // 소켓을 열지 않고, 싱글플레이 동작에 아무 영향도 주지 않습니다.
   //
   // 다만 VITE_MULTIPLAYER_AUTOCONNECT가 설정된 빌드(배포용 Netlify 빌드)에서는
@@ -305,11 +323,12 @@ async function main() {
   // 동작에는 아무 영향이 없습니다.
   const multiplayer = new MultiplayerClient(simulation.state);
   const multiplayerUI = new MultiplayerUI(appEl, multiplayer, simulation.state);
+  panels.setMultiplayer(multiplayer);
   // 다른 플레이어에게 마우스를 올리고 짧게 우클릭하면 거래/선물 메뉴가 뜹니다.
   // (InputManager.ts의 우클릭-드래그 카메라 회전은 건드리지 않고, 별도로 판정합니다)
   const tradeUI = new TradeUI(appEl, multiplayer, simulation.state, renderer);
   const env = typeof import.meta !== "undefined" ? (import.meta as { env?: Record<string, string> }).env : undefined;
-  if (env?.VITE_MULTIPLAYER_AUTOCONNECT && env?.VITE_MULTIPLAYER_URL) {
+  if (!devMode && env?.VITE_MULTIPLAYER_AUTOCONNECT && env?.VITE_MULTIPLAYER_URL) {
     const autoName = (user?.name?.trim() || "여행자").slice(0, 12);
     multiplayer.connect(env.VITE_MULTIPLAYER_URL, autoName);
   }
@@ -320,8 +339,11 @@ async function main() {
     onStats: () => panels.toggle("stats"),
     onGuide: () => panels.toggle("guide"),
     onCancelGuide: () => simulation.setGuide(null),
-    onMultiplayer: () => multiplayerUI.toggle(),
+    onMultiplayer: () => {
+      if (!devMode) multiplayerUI.toggle();
+    },
     onHotbarSlotClick: (slot) => simulation.activateHotbarSlot(slot),
+    devMode,
   });
 
   // 개발자 모드는 **세이브를 건드리지 않습니다.** 내 진짜 캐릭터를 만렙 테스트본으로
@@ -436,6 +458,8 @@ async function main() {
     // 여전히 몬스터만 알기 때문에 이 확인은 시뮬레이션 바깥, 여기서 합니다.
     processPvpAttacks(simulation.state, multiplayer);
     broadcastSkillFx(simulation.state, multiplayer);
+    // 뇌광 질주(번개 열매 X) — 변신 중이면 접촉 반경 안 다른 플레이어에게 지속 피해 요청
+    processLightningForm(simulation.state, multiplayer, Date.now());
 
     // 상점 NPC 앞이나 배 위에서 E를 누르면 시뮬레이션이 "요청"만 남기고,
     // 실제 패널을 여는 건 UI 레이어인 여기서 처리합니다.

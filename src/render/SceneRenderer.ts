@@ -460,6 +460,7 @@ const NPC_COLORS = {
   gacha: 0x8bc34a, // 연두 — 정글 섬 열매 도박사
   trainer: 0xe0f7fa, // 설백색 — 얼음 섬 설인
   pirate_king: 0xffd54f, // 황금색 — 두 바다를 잇는 해적왕
+  pirate_crew: 0xff5252, // 붉은색 — 중앙섬 해적 사단 접수처
 } as const;
 
 // 마커는 캔버스에 텍스트로 그립니다. 이모지(⛵ 등)를 쓰면 실사풍 컬러 글리프로
@@ -472,6 +473,7 @@ const NPC_SYMBOLS: Partial<Record<NpcKind, string>> = {
   gacha: "뽑기",
   trainer: "설인",
   pirate_king: "해적왕",
+  pirate_crew: "사단",
 };
 
 export class SceneRenderer {

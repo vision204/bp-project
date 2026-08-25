@@ -458,7 +458,12 @@ const manaAfterDash = await page.evaluate(() => window.__game.simulation.state.p
 const dashDist = Math.hypot(afterDash.x - beforeDash.x, afterDash.z - beforeDash.z);
 assert(dashDist > 5, `Q로 전방 대쉬 (${dashDist.toFixed(2)}m 순간 이동)`);
 assert(afterDash.z > beforeDash.z, `바라보는 방향(+Z)으로 대쉬 (z ${beforeDash.z.toFixed(1)} → ${afterDash.z.toFixed(1)})`);
-assert(manaBeforeDash - manaAfterDash >= 8, `대쉬가 마나를 소모함 (${manaBeforeDash.toFixed(0)} → ${manaAfterDash.toFixed(0)})`);
+// 대쉬 비용은 고정값이 아니라 "최대 마나의 2%" (밸런스 패치) — 최대 마나에 비례해 확인합니다.
+const maxManaForDash = await page.evaluate(() => window.__game.simulation.state.player.maxMana);
+assert(
+  manaBeforeDash - manaAfterDash >= maxManaForDash * 0.02 - 0.01,
+  `대쉬가 마나를 소모함 (최대 마나의 2%): (${manaBeforeDash.toFixed(0)} → ${manaAfterDash.toFixed(0)})`,
+);
 
 // 대쉬 방향으로 바람 이펙트가 떴다가, 1초 정도 지나면 사라지는지
 const trailJustAfter = await page.evaluate(() => window.__game.renderer.dashTrailCount);
@@ -2639,7 +2644,7 @@ assert(
 );
 assert(/250\s*\/\s*1,?000/.test(hudView.exp ?? ""), `경험치에 숫자 표기: "${hudView.exp}"`);
 assert(/25%/.test(hudView.exp ?? ""), `경험치 퍼센트도 표기: "${hudView.exp}"`);
-assert(/300\s*\/\s*400/.test(hudView.hp ?? ""), `체력에 숫자 표기: "${hudView.hp}"`);
+assert(/^\d+\s*\/\s*400$/.test(hudView.hp ?? ""), `체력에 숫자 표기 (자연 회복 중이라 앞자리는 변할 수 있음): "${hudView.hp}"`);
 assert(/^\d+\s*\/\s*200$/.test(hudView.mp ?? ""), `마나에 숫자 표기 (자연 회복 중이라 앞자리는 변함): "${hudView.mp}"`);
 assert(/200\s*\/\s*800/.test(hudView.fruit ?? ""), `열매 경험치에 숫자 표기: "${hudView.fruit}"`);
 assert(/7/.test(hudView.fruitLabel ?? ""), `열매 레벨 표시: "${hudView.fruitLabel}"`);

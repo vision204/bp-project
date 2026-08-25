@@ -9,7 +9,8 @@ const SPRINT_SPEED = 14;
  * 마나가 있는 한 연속으로 계속 쓸 수 있고, 마나가 떨어지면 자연 회복될 때까지 못 씁니다.
  */
 const DASH_DISTANCE = 11;
-export const DASH_MANA_COST = 10;
+/** Q 대쉬 한 번에 소모하는 마나 — 고정값이 아니라 "최대 마나의 2%" (밸런스 패치) */
+export const DASH_MANA_COST_PERCENT = 0.02;
 const SWIM_SPEED = 4.5;
 const JUMP_SPEED = 9;
 const GRAVITY = 20;
@@ -148,7 +149,7 @@ export class PlayerController {
     player.velocity = { x: mx, y: my, z: mz };
   }
 
-  step(dt: number, input: InputSnapshot, player: PlayerState) {
+  step(dt: number, input: InputSnapshot, player: PlayerState, nowMs: number = Date.now()) {
     this.camYaw -= input.mouseDeltaX * MOUSE_SENSITIVITY;
     this.camPitch -= input.mouseDeltaY * MOUSE_SENSITIVITY;
     this.camPitch = Math.max(-1.3, Math.min(0.9, this.camPitch));
@@ -160,6 +161,28 @@ export class PlayerController {
     // 개발자 모드 비행은 물리를 통째로 건너뜁니다.
     if (player.devMode && player.flying) {
       this.stepFlight(dt, input, player);
+      return;
+    }
+
+    // 빙결 감옥·절대 영도 등에 맞아 얼어붙은 동안은 이동·점프·대쉬 입력을 전부 무시합니다
+    // (시점 회전만 됩니다 — 위에서 이미 처리했습니다). 중력/충돌은 그대로 적용해 제자리에 서 있게 합니다.
+    if (player.frozenRemainingSec > 0) {
+      this.verticalVelocity -= GRAVITY * dt;
+      const desiredMovement = { x: 0, y: this.verticalVelocity * dt, z: 0 };
+      this.controller.computeColliderMovement(this.collider, desiredMovement);
+      const corrected = this.controller.computedMovement();
+      const pos = this.body.translation();
+      const newPos = { x: pos.x + corrected.x, y: pos.y + corrected.y, z: pos.z + corrected.z };
+      if (this.swimSurfaceY !== null && newPos.y < this.swimSurfaceY) {
+        newPos.y = this.swimSurfaceY;
+        this.verticalVelocity = 0;
+      }
+      this.body.setNextKinematicTranslation(newPos);
+      if (this.controller.computedGrounded() && this.verticalVelocity < 0) this.verticalVelocity = 0;
+      player.position = newPos;
+      player.grounded = this.controller.computedGrounded();
+      player.velocity = { x: 0, y: this.verticalVelocity, z: 0 };
+      player.sprinting = false;
       return;
     }
 
@@ -203,8 +226,11 @@ export class PlayerController {
 
     // Q 대쉬 — 바라보는 방향으로 순간 이동. 쿨다운은 없고 마나를 소모해서,
     // 마나가 있는 한 연속으로 계속 쓸 수 있습니다 (다 떨어지면 자연 회복까지 대기).
-    if (input.dashPressed && player.mana >= DASH_MANA_COST) {
-      player.mana -= DASH_MANA_COST;
+    // 비용은 고정값이 아니라 최대 마나의 DASH_MANA_COST_PERCENT(2%) — 밸런스 패치.
+    const dashManaCost = player.maxMana * DASH_MANA_COST_PERCENT;
+    if (input.dashPressed && player.mana >= dashManaCost) {
+      player.mana -= dashManaCost;
+      player.lastManaSpentAtMs = nowMs;
       const dx = Math.sin(this.camYaw) * DASH_DISTANCE;
       const dz = Math.cos(this.camYaw) * DASH_DISTANCE;
       player.pendingDash = { x: dx, z: dz };

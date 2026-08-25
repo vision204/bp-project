@@ -1,5 +1,6 @@
 import type { EnemyState, GameEvent, PlayerState } from "../core/GameState";
 import { getIsland } from "../world/islands";
+import { markDamagedNow } from "./HpSystem";
 
 // 스폰 지점에서 이 배수만큼 벌어지면(=플레이어가 몬스터를 섬 반대편까지 끌고 가면)
 // 추적을 포기하고 복귀합니다.
@@ -10,11 +11,20 @@ function dist2D(ax: number, az: number, bx: number, bz: number) {
   return Math.hypot(ax - bx, az - bz);
 }
 
-export function stepEnemyAI(enemies: EnemyState[], player: PlayerState, dt: number, events: GameEvent[]) {
+export function stepEnemyAI(
+  enemies: EnemyState[],
+  player: PlayerState,
+  dt: number,
+  events: GameEvent[],
+  nowMs: number,
+) {
   for (const enemy of enemies) {
     if (!enemy.alive) continue;
 
     enemy.remainingContactCooldownSec = Math.max(0, enemy.remainingContactCooldownSec - dt);
+
+    // 완전히 얼어붙었으면 추적·복귀 이동도, 접촉 공격도 하지 않습니다.
+    if (enemy.status.freezeRemainingSec > 0) continue;
 
     const distToPlayer = dist2D(enemy.position.x, enemy.position.z, player.position.x, player.position.z);
     const distSpawnToPlayer = dist2D(
@@ -37,6 +47,7 @@ export function stepEnemyAI(enemies: EnemyState[], player: PlayerState, dt: numb
       if (distToPlayer <= enemy.contactRange && enemy.remainingContactCooldownSec <= 0) {
         enemy.remainingContactCooldownSec = enemy.contactCooldownSec;
         player.hp = Math.max(0, player.hp - enemy.contactDamage);
+        markDamagedNow(player, nowMs);
         events.push({ type: "player_damaged", amount: enemy.contactDamage });
       }
     } else {

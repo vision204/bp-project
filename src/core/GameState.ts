@@ -33,6 +33,8 @@ export interface EnemyStatus {
   /** 초당 지속 피해 */
   burnDps: number;
   burnRemainingSec: number;
+  /** 완전히 얼어 움직이지 못하는 남은 시간(초). slowFactor와 별개로, 0보다 크면 이동 자체가 멈춥니다. */
+  freezeRemainingSec: number;
 }
 
 /**
@@ -118,7 +120,9 @@ export type NpcKind =
   | "gacha"
   | "trainer"
   /** 해적왕 — 두 바다를 오가게 해주는 유일한 통로 */
-  | "pirate_king";
+  | "pirate_king"
+  /** 해적 사단 접수처 — 중앙섬에서 코인을 내고 해적 사단을 만들거나 가입할 수 있습니다 (해적 진영 전용) */
+  | "pirate_crew";
 
 export interface NpcState {
   id: string;
@@ -288,6 +292,24 @@ export interface PlayerState {
   /** 순간이동 남은 쿨다운(초) — 0이면 바로 다시 쓸 수 있음 */
   teleportCooldownSec: number;
 
+  // --- MP/HP 회복 지연 (밸런스 패치) ---------------------------------------
+  /** 마지막으로 마나를 소모한 실제 시각(epoch ms). null이면 아직 한 번도 안 씀.
+   *  이 시점으로부터 6초가 지나야 마나 자연회복이 다시 시작됩니다. */
+  lastManaSpentAtMs: number | null;
+  /** 마지막으로 피해를 받은 실제 시각(epoch ms). null이면 아직 안 맞음.
+   *  이 시점으로부터 5초 동안 피해를 안 받아야 체력이 서서히 회복되기 시작합니다. */
+  lastDamagedAtMs: number | null;
+
+  // --- 열매 스킬 상태 (얼음/번개 열매 리뉴얼) --------------------------------
+  /** 빙결 감옥·절대 영도 등에 맞아 완전히 얼어붙은 남은 시간(초). 0보다 크면 이동 입력이 무시됩니다. */
+  frozenRemainingSec: number;
+  /** 서리 발판(X)을 켜서 발밑 바다가 얼어붙은 상태인지 */
+  iceWalkActive: boolean;
+  /** 서리 발판을 켠 시점의 위치 — 이 지점을 중심으로 반경 안 바다만 얼어붙습니다 */
+  iceWalkCenter: { x: number; z: number } | null;
+  /** 뇌광 질주(X)로 번개 그 자체가 되어 있는 남은 시간(초). 0보다 크면 스쳐 지나가는 대상에게 지속 피해를 줍니다 */
+  lightningFormRemainingSec: number;
+
   /**
    * 두 번째 바다를 한 번이라도 연 적이 있는지.
    * 첫 항해에만 Lv.1100이 필요하고, 그 뒤로는 레벨과 상관없이 왕복할 수 있게
@@ -395,6 +417,7 @@ export type UiRequest =
   | "gacha"
   | "trainer"
   | "sea"
+  | "crew"
   | null;
 
 export interface GameState {
@@ -503,6 +526,12 @@ export function createInitialGameState(
       teleportLearned: false,
       teleportCooldownSec: 0,
       unlockedSecondSea: false,
+      lastManaSpentAtMs: null,
+      lastDamagedAtMs: null,
+      frozenRemainingSec: 0,
+      iceWalkActive: false,
+      iceWalkCenter: null,
+      lightningFormRemainingSec: 0,
       events: [],
     },
     enemies: [],

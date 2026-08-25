@@ -69,6 +69,8 @@ export class Hud {
   private bountyList!: HTMLDivElement;
   /** 내용이 안 바뀌었으면 innerHTML을 다시 그리지 않기 위한 서명 */
   private bountySignature = "";
+  /** 현상금 랭킹 패널을 접어뒀는지 (우측 상단 ▾ 버튼으로 토글) */
+  private bountyCollapsed = false;
 
   constructor(
     container: HTMLElement,
@@ -81,6 +83,11 @@ export class Hud {
       onMultiplayer: () => void;
       /** 단축바 칸을 마우스로 클릭했을 때 (0~2=무기 칸, 3=열매) — 숫자키와 동일하게 뽑기/집어넣기 */
       onHotbarSlotClick: (slot: number) => void;
+      /**
+       * 개발자 모드에서는 멀티플레이가 완전히 분리됩니다 — 좌상단 멀티플레이
+       * 버튼 자체를 숨겨서 접속 경로를 아예 없앱니다 (요청: "무조건 싱글 플레이").
+       */
+      devMode?: boolean;
     },
   ) {
     this.onHotbarSlotClick = buttons.onHotbarSlotClick;
@@ -93,11 +100,14 @@ export class Hud {
       </div>
       <div class="tl-icons">
         <button class="icon-btn" id="btn-guide" title="섬 가이드">🧭</button>
-        <button class="icon-btn" id="btn-multiplayer" title="멀티플레이">🌐</button>
+        <button class="icon-btn" id="btn-multiplayer" title="멀티플레이" ${buttons.devMode ? "hidden" : ""}>🌐</button>
       </div>
       <!-- 현상금 랭킹 — 같은 방 사람들끼리만 겨루므로 멀티플레이에 접속돼 있을 때만 보입니다 -->
       <div class="bounty-panel" id="hud-bounty" hidden>
-        <div class="bounty-header">🏆 현상금 랭킹</div>
+        <div class="bounty-header">
+          <span>🏆 현상금 랭킹</span>
+          <button class="bounty-collapse-btn" id="bounty-collapse" title="접기/펼치기">▾</button>
+        </div>
         <div class="bounty-sub">같은 방끼리만 · 플레이어를 처치하면 오릅니다</div>
         <div class="bounty-list" id="hud-bounty-list"></div>
       </div>
@@ -225,6 +235,13 @@ export class Hud {
     this.root.querySelector<HTMLButtonElement>("#hud-guide-cancel")!
       .addEventListener("click", buttons.onCancelGuide);
     this.drownOverlay = this.root.querySelector("#hud-drown")!;
+
+    this.root.querySelector<HTMLButtonElement>("#bounty-collapse")!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.bountyCollapsed = !this.bountyCollapsed;
+      this.bountyPanel.classList.toggle("collapsed", this.bountyCollapsed);
+      this.root.querySelector<HTMLButtonElement>("#bounty-collapse")!.textContent = this.bountyCollapsed ? "▸" : "▾";
+    });
   }
 
   private pushToast(text: string, tone: "gold" | "red" | "blue" = "gold") {

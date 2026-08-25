@@ -15,6 +15,8 @@ import type { GameState, InventoryItem, ItemId } from "../core/GameState";
 import type { SkillShape } from "../simulation/skills";
 import { dist2D, pointInShape } from "../simulation/ShapeMath";
 import { applyReceivedItems, removeFromInventory } from "../simulation/TradeSystem";
+import { markDamagedNow } from "../simulation/HpSystem";
+import { getOrCreatePlayerId } from "../core/PlayerId";
 import type { Faction } from "../world/islands";
 import {
   COMBAT_STATS_SYNC_HZ,
@@ -28,6 +30,7 @@ import {
   type BountyEntry,
   type ClientMessage,
   type CombatStatsSnapshot,
+  type CrewSummary,
   type EnemySyncEntry,
   type RemotePlayerSnapshot,
   type ServerMessage,
@@ -153,6 +156,12 @@ export class MultiplayerClient {
   private _pendingSkillFx: RemoteSkillFx[] = [];
   /** 같은 방 현상금 랭킹 — 서버가 보내주는 대로 그대로 들고 있다가 랭킹 패널이 읽습니다. */
   private _bountyEntries: BountyEntry[] = [];
+  /** 이 브라우저(캐릭터)의 영구 id — 재접속해도 같은 사단원으로 인식되도록 hello에 실어 보냅니다. */
+  private readonly playerId = getOrCreatePlayerId();
+  /** 내가 지금 속한 해적 사단(없으면 null) — 서버가 hello 직후와 생성/가입/탈퇴마다 알려줍니다. */
+  private _myCrew: CrewSummary | null = null;
+  /** 존재하는 모든 사단 목록 — 사단 패널을 열 때 요청합니다. */
+  private _crewList: CrewSummary[] = [];
 
   status: MultiplayerStatus = "disconnected";
   serverUrl = "";
@@ -201,6 +210,16 @@ export class MultiplayerClient {
     return this._bountyEntries;
   }
 
+  /** 내가 지금 속한 해적 사단 — 없으면 null. */
+  get myCrew(): CrewSummary | null {
+    return this._myCrew;
+  }
+
+  /** 존재하는 모든 사단 목록 — requestCrewList()로 최신 정보를 받아옵니다. */
+  get crewList(): CrewSummary[] {
+    return this._crewList;
+  }
+
   connect(url: string, name: string) {
     this.disconnect();
     this.serverUrl = url;
@@ -218,7 +237,7 @@ export class MultiplayerClient {
 
     ws.addEventListener("open", () => {
       this.status = "connected";
-      this.send({ type: "hello", name, faction: this.state.player.faction });
+      this.send({ type: "hello", name, faction: this.state.player.faction, uid: this.playerId });
       this.state.player.events.push({ type: "pvp_connected" });
     });
     ws.addEventListener("message", (ev) => this.handleMessage(String(ev.data)));
@@ -232,6 +251,8 @@ export class MultiplayerClient {
       this._outgoingTradeInvite = null;
       this._pendingSkillFx = [];
       this._bountyEntries = [];
+      this._myCrew = null;
+      this._crewList = [];
       if (wasConnected) {
         this.state.player.events.push({ type: "pvp_disconnected", reason: "연결이 끊어졌습니다" });
       }
@@ -261,6 +282,8 @@ export class MultiplayerClient {
     this._outgoingTradeInvite = null;
     this._pendingSkillFx = [];
     this._bountyEntries = [];
+    this._myCrew = null;
+    this._crewList = [];
     // 기본값이 켜짐이므로 연결 해제 후에도 켜짐으로 되돌립니다 (꺼진 채로 남지 않도록).
     this.state.player.pvpEnabled = true;
   }
@@ -313,10 +336,17 @@ export class MultiplayerClient {
         const p = this.state.player;
         const wasAlive = p.hp > 0;
         p.hp = Math.max(0, p.hp - msg.damage);
+        markDamagedNow(p, Date.now());
         p.events.push({ type: "pvp_damage_taken", attackerName: msg.attackerName, damage: msg.damage });
         if (wasAlive && p.hp <= 0) p.events.push({ type: "pvp_defeated", byName: msg.attackerName });
         break;
       }
+
+      // 얼음 계열 스킬(빙결 감옥·절대 영도 등)에 맞았을 때 — 서버가 판정하고
+      // 알려주면, 이동 입력을 무시하는 건 내 클라이언트(PlayerController)의 몫입니다.
+      case "pvp_freeze":
+        this.state.player.frozenRemainingSec = Math.max(this.state.player.frozenRemainingSec, msg.durationSec);
+        break;
 
       case "pvp_hit_ack":
         this.state.player.events.push({ type: "pvp_hit_landed", targetName: msg.targetName, damage: msg.damage });
@@ -444,6 +474,18 @@ export class MultiplayerClient {
       case "bounty_update":
         this._bountyEntries = msg.entries;
         break;
+
+      case "crew_status":
+        this._myCrew = msg.crew;
+        break;
+
+      case "crew_list":
+        this._crewList = msg.crews;
+        break;
+
+      case "crew_error":
+        this.state.player.events.push({ type: "purchase_failed", reason: msg.reason });
+        break;
     }
   }
 
@@ -542,6 +584,33 @@ export class MultiplayerClient {
   /** 거래창 없이 아이템 하나를 바로 선물합니다. */
   sendGift(targetId: string, item: TradeItem) {
     this.send({ type: "gift_send", targetId, item });
+  }
+
+  // --- 해적 사단(길드) ---------------------------------------------------
+
+  /** 사단 패널을 열 때 호출 — 서버가 crew_list로 최신 목록을 돌려줍니다. */
+  requestCrewList() {
+    this.send({ type: "crew_list_request" });
+  }
+
+  /** 코인 차감은 호출부(Simulation.payCrewCreationFee)가 먼저 처리한 뒤 이걸 부릅니다. */
+  sendCrewCreate(name: string) {
+    this.send({ type: "crew_create", name });
+  }
+
+  sendCrewJoin(crewId: string) {
+    this.send({ type: "crew_join", crewId });
+  }
+
+  sendCrewLeave() {
+    this.send({ type: "crew_leave" });
+  }
+
+  // --- 뇌광 질주 접촉 피해 -------------------------------------------------
+
+  /** 번개 형태로 변신 중 스쳐 지나가는 상대에게 지속 피해를 요청합니다 (짧은 간격으로 반복 호출됨). */
+  sendLightningContact(targetId: string) {
+    this.send({ type: "lightning_contact", targetId });
   }
 
   setPvpEnabled(enabled: boolean) {
