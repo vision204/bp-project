@@ -1,10 +1,11 @@
 import * as THREE from "three";
-import type { EnemyState, GameState, ItemId, NpcKind } from "../core/GameState";
+import type { EnemyState, FruitAbilityId, GameState, ItemId, NpcKind } from "../core/GameState";
 import { FIRST_PERSON_THRESHOLD, type PlayerController } from "../simulation/PlayerController";
 import { maxWorldRadius } from "../world/islands";
 import { boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import { skillsForWeapon } from "../simulation/weaponSkills";
+import { skillsForFruit } from "../simulation/skills";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
 import type { RemoteEnemyGhost, RemotePlayerView, RemoteSkillFx } from "../network/MultiplayerClient";
@@ -18,6 +19,13 @@ const CAMERA_HEIGHT_OFFSET = 1.6;
 // (그러지 않으면 카메라가 선체·돛 안쪽에 들어가 화면이 가려집니다)
 const BOAT_CAMERA_DISTANCE = 13;
 const BOAT_CAMERA_HEIGHT_OFFSET = 5;
+
+// 기본 공격(좌클릭) 검 휘두르기 — 짧고 빠르게 한 번 쳤다가 되돌아옵니다.
+const ATTACK_SWING_DURATION_MS = 220;
+/** 오른팔이 추가로 더 접히는 최대 각도(라디안) — 걷기 모션과 더해집니다 */
+const ATTACK_SWING_ARM_AMPLITUDE = 1.3;
+/** 무기 자체가 추가로 더 휘두르는 최대 각도(라디안) */
+const ATTACK_SWING_WEAPON_AMPLITUDE = 1.9;
 
 interface BlockyCharacter {
   group: THREE.Group;
@@ -501,6 +509,11 @@ export class SceneRenderer {
   // ── Q 대쉬 바람 이펙트 ──────────────────────────────────────────────────
   private dashTrails: { group: THREE.Group; startedAtMs: number }[] = [];
 
+  // ── 기본 공격(좌클릭) 검 휘두르기 모션 ────────────────────────────────────
+  /** 각 무기 모델의 "쥐고 있을 때" 기본 회전값 — 휘두르는 동안 여기서부터 튀어나갔다 돌아옵니다 */
+  private weaponBaseRotationX = new Map<string, number>();
+  private attackSwingStartedAtMs = -Infinity;
+
   // ── 요루/삼도류/엔마 스킬 이펙트 (내 것 + 다른 플레이어 것 공용) ─────────────
   private skillEffects: { group: THREE.Group; startedAtMs: number; durationMs: number; growTo: number }[] = [];
 
@@ -561,6 +574,8 @@ export class SceneRenderer {
     visual.visible = false;
     this.playerVisual.add(visual);
     this.weaponVisuals.set(id, visual);
+    // 휘두르기 모션이 여기서부터 튀어나갔다 되돌아올 수 있게 "쥐고 있을 때" 기본 회전을 기억해둡니다.
+    this.weaponBaseRotationX.set(id, visual.rotation.x);
   }
 
   get domElement() {
@@ -595,7 +610,12 @@ export class SceneRenderer {
     return this.dashTrails.length;
   }
 
-  /** 지금 화면에 떠 있는 요루/삼도류/엔마 스킬 이펙트 개수(화상 잉걸불 포함) — 검증용으로 노출합니다. */
+  /** 기본 공격 휘두르기 모션이 지금 재생 중인지 — 검증용으로 노출합니다. */
+  get attackSwingActive() {
+    return performance.now() - this.attackSwingStartedAtMs < ATTACK_SWING_DURATION_MS;
+  }
+
+  /** 지금 화면에 떠 있는 무기/열매 스킬 이펙트 개수(화상 잉걸불 포함) — 검증용으로 노출합니다. */
   get activeSkillEffectCount() {
     return this.skillEffects.length;
   }
@@ -604,14 +624,16 @@ export class SceneRenderer {
    * 스킬 이펙트 하나를 그 자리(x,y,z)에서 aimYaw 방향으로 스폰합니다.
    * 내 스킬(로컬)이든 다른 플레이어가 쓴 스킬(멀티플레이 중계)이든 이 함수
    * 하나로 처리합니다 — 판정 도형(shape)만 맞으면 누가 쐈는지는 상관없습니다.
-   * weaponSkills.ts에 등록되지 않은 무기(예: 새총)는 skillsForWeapon이
-   * 빈 배열을 돌려주므로 자연히 아무 것도 스폰되지 않습니다.
+   * id는 무기 id일 수도, 열매 id일 수도 있습니다(둘의 id 네임스페이스가
+   * 겹치지 않아서 skillsForWeapon → skillsForFruit 순으로 시도하면 됩니다).
+   * 어느 쪽에도 등록되지 않은 id(예: 새총)는 둘 다 빈 배열을 돌려주므로
+   * 자연히 아무 것도 스폰되지 않습니다.
    */
-  private spawnSkillEffect(weaponId: string, slot: number, x: number, y: number, z: number, aimYaw: number, nowMs: number) {
-    const skill = skillsForWeapon(weaponId as ItemId)[slot];
-    if (!skill || skill.shape.kind === "self") return;
+  private spawnSkillEffect(sourceId: string, slot: number, x: number, y: number, z: number, aimYaw: number, nowMs: number) {
+    const skill = skillsForWeapon(sourceId as ItemId)[slot] ?? skillsForFruit(sourceId as FruitAbilityId)[slot];
+    if (!skill) return;
 
-    const main = buildSkillEffectGroup(skill, weaponId as ItemId);
+    const main = buildSkillEffectGroup(skill, sourceId as ItemId | FruitAbilityId);
     main.group.position.set(x, y, z);
     main.group.rotation.y = aimYaw;
     this.scene.add(main.group);
@@ -869,6 +891,12 @@ export class SceneRenderer {
     this.playerParts.leftArmPivot.rotation.x = -swing * 0.75;
     this.playerParts.rightArmPivot.rotation.x = swing * 0.75;
 
+    // 기본 공격(좌클릭) 검 휘두르기 — 짧게 한 번 앞으로 쳤다가 사인 곡선을 그리며 되돌아옵니다.
+    // 걷기 모션 위에 "더해지는" 값이라 걷거나 뛰면서 공격해도 자연스럽게 겹칩니다.
+    const attackSwingT = (nowMs - this.attackSwingStartedAtMs) / ATTACK_SWING_DURATION_MS;
+    const attackSwingArc = attackSwingT >= 0 && attackSwingT < 1 ? Math.sin(attackSwingT * Math.PI) : 0;
+    this.playerParts.rightArmPivot.rotation.x -= attackSwingArc * ATTACK_SWING_ARM_AMPLITUDE;
+
     // Q 대쉬 — 이번 프레임에 대쉬가 나갔으면 그 방향으로 바람 이펙트를 새로 띄우고,
     // 떠 있는 이펙트들은 1초에 걸쳐 옅어지다 사라지게 합니다.
     for (const ev of state.player.events) {
@@ -878,6 +906,8 @@ export class SceneRenderer {
         trail.rotation.y = Math.atan2(ev.dx, ev.dz);
         this.scene.add(trail);
         this.dashTrails.push({ group: trail, startedAtMs: nowMs });
+      } else if (ev.type === "melee_attack_fired") {
+        this.attackSwingStartedAtMs = nowMs;
       }
     }
     for (let i = this.dashTrails.length - 1; i >= 0; i--) {
@@ -906,12 +936,14 @@ export class SceneRenderer {
     // 요루/삼도류/엔마 스킬 이펙트 — 내가 이번 프레임에 스킬을 썼으면 지금
     // 손에 든 무기 기준으로, 다른 플레이어가 썼다고 서버가 알려준 게 있으면
     // 그 사람이 보고한 자리에 그대로 스폰합니다.
+    // 뽑아 든 게 열매면 열매 스킬, 무기면 무기 스킬 — CombatSystem.ts의 판정과 같은 규칙.
     const heldForSkill = drawnWeapon(state.player);
-    if (heldForSkill) {
+    const skillFxSourceId = state.player.fruitDrawn ? state.player.equippedFruit : heldForSkill?.id;
+    if (skillFxSourceId) {
       for (const ev of state.player.events) {
         if (ev.type === "skill_fired") {
           this.spawnSkillEffect(
-            heldForSkill.id,
+            skillFxSourceId,
             ev.slot,
             state.player.position.x,
             state.player.position.y,
@@ -961,6 +993,14 @@ export class SceneRenderer {
     const held = drawnWeapon(state.player);
     for (const [id, visual] of this.weaponVisuals) {
       visual.visible = held?.id === id;
+    }
+    // 지금 손에 든 무기도 팔과 같은 타이밍으로 휘둘러 "검을 휘두르는" 느낌을 냅니다.
+    if (held) {
+      const weaponVisual = this.weaponVisuals.get(held.id);
+      const baseRotationX = this.weaponBaseRotationX.get(held.id) ?? 0;
+      if (weaponVisual) {
+        weaponVisual.rotation.x = baseRotationX - attackSwingArc * ATTACK_SWING_WEAPON_AMPLITUDE;
+      }
     }
 
     // 무장색 발동 → 전신이 검게 변합니다. 상태가 바뀔 때만 머티리얼을 건드립니다.

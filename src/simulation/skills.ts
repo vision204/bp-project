@@ -379,7 +379,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
 };
 
 export function skillsForFruit(fruitId: FruitAbilityId): SkillDef[] {
-  return FRUIT_SKILLS[fruitId];
+  // fruitId가 실제로는 무기 id인 채로 들어오는 경우가 있습니다(예: 렌더러가
+  // "무기 스킬인지 열매 스킬인지" 확실치 않을 때 양쪽을 순서대로 시도).
+  // FRUIT_SKILLS에 없는 키라도 undefined를 그대로 돌려주면 호출부에서
+  // `[...][slot]`이 터지므로, 여기서 빈 배열로 안전하게 막아둡니다.
+  return FRUIT_SKILLS[fruitId] ?? [];
 }
 
 export function allSkills(): SkillDef[] {

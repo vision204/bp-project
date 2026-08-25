@@ -1,4 +1,6 @@
 import type { GameState } from "../core/GameState";
+import type { BountyEntry } from "../network/protocol";
+import { MAX_LEVEL } from "../core/ExpCurve";
 import { formatBuffTime } from "../simulation/BuffSystem";
 import { SEA_LABELS, getIsland } from "../world/islands";
 import { SLOT_KEYS, isSlotUnlocked, skillsForFruit } from "../simulation/skills";
@@ -8,6 +10,16 @@ import { drawnWeapon, weaponFor } from "../simulation/WeaponSystem";
 import { FRUIT_CATALOG } from "../simulation/ShopSystem";
 import { boatTier } from "../simulation/BoatSystem";
 import { guideInfo } from "../simulation/GuideSystem";
+
+/** 다른 사람이 정한 이름이 그대로 HTML로 들어가지 않도록 이스케이프합니다. */
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (ch) =>
+    ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;",
+  );
+}
+
+/** 현상금 랭킹 패널에 실제로 그리는 줄 수 — 방 정원(14명)을 다 보여줄 필요는 없어서, 상위 몇 명만. */
+const BOUNTY_PANEL_TOP_N = 8;
 
 export class Hud {
   private root: HTMLDivElement;
@@ -52,6 +64,11 @@ export class Hud {
   private expText!: HTMLDivElement;
   private fruitText!: HTMLDivElement;
   private jumpBadge!: HTMLDivElement;
+  /** 현상금 랭킹 패널(화면 우측 상단) — 같은 방 사람들끼리만 겨루며, 멀티플레이 접속 중일 때만 보입니다 */
+  private bountyPanel!: HTMLDivElement;
+  private bountyList!: HTMLDivElement;
+  /** 내용이 안 바뀌었으면 innerHTML을 다시 그리지 않기 위한 서명 */
+  private bountySignature = "";
 
   constructor(
     container: HTMLElement,
@@ -61,7 +78,6 @@ export class Hud {
       onStats: () => void;
       onGuide: () => void;
       onCancelGuide: () => void;
-      onRank: () => void;
       onMultiplayer: () => void;
       /** 단축바 칸을 마우스로 클릭했을 때 (0~2=무기 칸, 3=열매) — 숫자키와 동일하게 뽑기/집어넣기 */
       onHotbarSlotClick: (slot: number) => void;
@@ -77,8 +93,13 @@ export class Hud {
       </div>
       <div class="tl-icons">
         <button class="icon-btn" id="btn-guide" title="섬 가이드">🧭</button>
-        <button class="icon-btn" id="btn-rank" title="랭킹">🏆</button>
         <button class="icon-btn" id="btn-multiplayer" title="멀티플레이">🌐</button>
+      </div>
+      <!-- 현상금 랭킹 — 같은 방 사람들끼리만 겨루므로 멀티플레이에 접속돼 있을 때만 보입니다 -->
+      <div class="bounty-panel" id="hud-bounty" hidden>
+        <div class="bounty-header">🏆 현상금 랭킹</div>
+        <div class="bounty-sub">같은 방끼리만 · 플레이어를 처치하면 오릅니다</div>
+        <div class="bounty-list" id="hud-bounty-list"></div>
       </div>
       <div class="guide-hud" id="hud-guide" hidden>
         <div class="guide-hud-arrow" id="hud-guide-arrow">
@@ -188,13 +209,14 @@ export class Hud {
     this.expText = this.root.querySelector("#hud-exp-text")!;
     this.jumpBadge = this.root.querySelector("#hud-jump")!;
     this.devBadge = this.root.querySelector("#hud-dev")!;
+    this.bountyPanel = this.root.querySelector("#hud-bounty")!;
+    this.bountyList = this.root.querySelector("#hud-bounty-list")!;
 
     // 상점은 NPC 없이 화면 버튼으로 언제든 열 수 있습니다.
     this.root.querySelector<HTMLButtonElement>("#btn-shop")!.addEventListener("click", buttons.onShop);
     this.root.querySelector<HTMLButtonElement>("#btn-inventory")!.addEventListener("click", buttons.onInventory);
     this.root.querySelector<HTMLButtonElement>("#btn-stats")!.addEventListener("click", buttons.onStats);
     this.root.querySelector<HTMLButtonElement>("#btn-guide")!.addEventListener("click", buttons.onGuide);
-    this.root.querySelector<HTMLButtonElement>("#btn-rank")!.addEventListener("click", buttons.onRank);
     this.root.querySelector<HTMLButtonElement>("#btn-multiplayer")!.addEventListener("click", buttons.onMultiplayer);
     this.guideHud = this.root.querySelector("#hud-guide")!;
     this.guideArrow = this.root.querySelector("#hud-guide-arrow")!;
@@ -227,7 +249,8 @@ export class Hud {
     // 막대는 비율로, 글씨는 실제 숫자로 — 모든 값에 숫자를 함께 보여줍니다.
     const hpRatio = p.maxHp > 0 ? p.hp / p.maxHp : 0;
     const mpRatio = p.maxMana > 0 ? p.mana / p.maxMana : 0;
-    const expRatio = p.expToNextLevel > 0 ? p.exp / p.expToNextLevel : 0;
+    const atMaxLevel = p.level >= MAX_LEVEL;
+    const expRatio = atMaxLevel ? 1 : p.expToNextLevel > 0 ? p.exp / p.expToNextLevel : 0;
 
     this.hpFill.style.width = `${Math.max(0, hpRatio * 100)}%`;
     this.manaFill.style.width = `${Math.max(0, mpRatio * 100)}%`;
@@ -235,11 +258,13 @@ export class Hud {
 
     this.hpText.textContent = `${Math.ceil(Math.max(0, p.hp)).toLocaleString()} / ${p.maxHp.toLocaleString()}`;
     this.manaText.textContent = `${Math.floor(Math.max(0, p.mana)).toLocaleString()} / ${p.maxMana.toLocaleString()}`;
-    this.expText.textContent =
-      `${Math.floor(p.exp).toLocaleString()} / ${p.expToNextLevel.toLocaleString()} (${Math.floor(expRatio * 100)}%)`;
+    // 만렙이면 더 이상 오르지 않는 경험치 숫자 대신 "MAX"만 보여줍니다.
+    this.expText.textContent = atMaxLevel
+      ? "MAX"
+      : `${Math.floor(p.exp).toLocaleString()} / ${p.expToNextLevel.toLocaleString()} (${Math.floor(expRatio * 100)}%)`;
 
     // levelBadge는 "Lv." 뒤의 <span>이므로 숫자만 넣습니다 (예전엔 "Lv. Lv. 1"로 중복 출력됐음)
-    this.levelBadge.textContent = p.level.toLocaleString();
+    this.levelBadge.textContent = atMaxLevel ? `${p.level.toLocaleString()} (MAX)` : p.level.toLocaleString();
     this.moneyBadge.textContent = `🪙 ${p.money.toLocaleString()}`;
 
     // 다단 점프를 배웠으면 몇 단인지 표시 (기본 1단일 때는 굳이 안 보여줍니다)
@@ -613,5 +638,50 @@ export class Hud {
           break;
       }
     }
+  }
+
+  /**
+   * 현상금 랭킹 패널(화면 우측 상단) — 서버가 보내주는 같은 방 순위를 그대로 그립니다.
+   * 멀티플레이에 접속하지 않았거나(=같은 방이라는 개념 자체가 없음) 아직 서버로부터
+   * 목록을 받지 못했으면 통째로 숨깁니다.
+   */
+  updateBounty(entries: BountyEntry[], myId: string | null, connected: boolean) {
+    if (!connected || entries.length === 0) {
+      this.bountyPanel.hidden = true;
+      this.bountySignature = "";
+      return;
+    }
+    this.bountyPanel.hidden = false;
+
+    // 순위가 하나도 안 바뀌었으면 다시 그리지 않습니다 (매 프레임 호출되므로).
+    const sig = entries.map((e) => `${e.id}:${e.bounty}`).join(",") + `|${myId ?? ""}`;
+    if (sig === this.bountySignature) return;
+    this.bountySignature = sig;
+
+    const top = entries.slice(0, BOUNTY_PANEL_TOP_N);
+    const myIndex = myId ? entries.findIndex((e) => e.id === myId) : -1;
+
+    const rows = top
+      .map((e, i) => {
+        const mine = e.id === myId;
+        const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`;
+        const factionIcon = e.faction === "marine" ? "⚓" : "🏴‍☠️";
+        return `
+          <div class="bounty-row ${mine ? "mine" : ""}">
+            <div class="bounty-place">${medal}</div>
+            <div class="bounty-name">${factionIcon} ${escapeHtml(e.name)}${mine ? ` <span class="bounty-me">나</span>` : ""}</div>
+            <div class="bounty-score">🪙${e.bounty.toLocaleString()}</div>
+          </div>
+        `;
+      })
+      .join("");
+
+    // 내가 상위 목록 밖이면 따로 한 줄 더 붙여서 순위를 알려줍니다.
+    const myLine =
+      myIndex >= BOUNTY_PANEL_TOP_N
+        ? `<div class="bounty-mine-line">내 순위: <b>${myIndex + 1}위</b> · 🪙${entries[myIndex].bounty.toLocaleString()}</div>`
+        : "";
+
+    this.bountyList.innerHTML = rows + myLine;
   }
 }

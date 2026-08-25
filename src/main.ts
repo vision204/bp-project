@@ -11,7 +11,7 @@ import { qualityFor, type QualityId, type QualitySettings } from "./core/Graphic
 import { FACTION_LABELS, type Faction } from "./world/islands";
 import { loadLocalSave } from "./core/Persistence";
 import { applySaveData, type SaveData } from "./core/SaveData";
-import { cloudAvailable, currentUser, fetchLeaderboard, loadCloudSave, signInWithGoogle, type CloudUser } from "./firebase/cloud";
+import { cloudAvailable, currentUser, loadCloudSave, signInWithGoogle, type CloudUser } from "./firebase/cloud";
 import { SaveManager } from "./firebase/SaveManager";
 import { islandArrivalPosition, getIsland } from "./world/islands";
 import { totalMeleeCooldown, meleeDps } from "./simulation/CombatSystem";
@@ -295,19 +295,6 @@ async function main() {
         void saves.flush(Date.now());
       }
     },
-    onFetchRank: async () => {
-      if (!cloudAvailable()) {
-        return { entries: [], myUid: null, notice: "랭킹을 쓰려면 Firebase 설정이 필요합니다 (README의 '파이어베이스 연결' 참고)." };
-      }
-      if (!user) {
-        return { entries: [], myUid: null, notice: "랭킹에 참여하려면 구글 로그인이 필요합니다. 새로고침 후 로그인해 주세요." };
-      }
-      // 목록을 열기 전에 내 최신 기록부터 올려서, 내 순위가 바로 보이게 합니다.
-      await saves.flush(Date.now());
-      const entries = await fetchLeaderboard(20);
-      if (!entries) return { entries: [], myUid: user.uid, notice: "랭킹을 불러오지 못했습니다. 잠시 뒤 다시 열어보세요." };
-      return { entries, myUid: user.uid, notice: null };
-    },
   });
   // 멀티플레이 — 기본은 선택 사항입니다. 버튼을 눌러 접속하기 전까지는
   // 소켓을 열지 않고, 싱글플레이 동작에 아무 영향도 주지 않습니다.
@@ -333,7 +320,6 @@ async function main() {
     onStats: () => panels.toggle("stats"),
     onGuide: () => panels.toggle("guide"),
     onCancelGuide: () => simulation.setGuide(null),
-    onRank: () => panels.toggle("rank"),
     onMultiplayer: () => multiplayerUI.toggle(),
     onHotbarSlotClick: (slot) => simulation.activateHotbarSlot(slot),
   });
@@ -482,6 +468,8 @@ async function main() {
     renderer.syncRemotePlayers(multiplayer.players);
     multiplayerUI.update();
     tradeUI.update();
+    // 현상금 랭킹 패널 — 접속 중이 아니면 서버가 보내준 목록이 비어 있으므로 자연히 숨겨집니다.
+    hud.updateBounty(multiplayer.bountyEntries, multiplayer.id, multiplayer.connected);
 
     requestAnimationFrame(tick);
   }

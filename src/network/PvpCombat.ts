@@ -83,6 +83,19 @@ export function drawnWeaponId(state: GameState): string | null {
 }
 
 /**
+ * 지금 스킬 이펙트에 써야 할 id — 열매를 뽑았으면 열매 id, 무기를 뽑았으면 무기 id.
+ * drawnWeaponId와 굳이 분리해둔 이유: drawnWeaponId는 "무기를 손에 쥐고 있는지"
+ * (원격 무기 모델 표시용)만 나타내야 해서 열매를 뽑았을 때는 null이어야 하지만,
+ * 스킬 이펙트는 열매 스킬을 썼을 때도 당연히 화면에 보여야 하기 때문입니다.
+ * (열매 id와 무기 id는 서로 겹치지 않으므로 같은 skill_fx.weaponId 필드에 그대로 실어 보냅니다)
+ */
+function activeSkillFxId(state: GameState): string | null {
+  const p = state.player;
+  if (p.fruitDrawn) return p.equippedFruit;
+  return drawnWeapon(p)?.id ?? null;
+}
+
+/**
  * 스킬을 쓸 때마다(전투 후보 유무·PvP 켬/끔과 무관하게) 같은 방의 다른 사람
  * 화면에도 스킬 이펙트가 보이도록 순수 연출용 알림을 보냅니다.
  *
@@ -96,7 +109,7 @@ export function broadcastSkillFx(state: GameState, mp: MultiplayerClient) {
   const p = state.player;
   for (const ev of p.events) {
     if (ev.type === "skill_fired") {
-      mp.sendSkillFx(ev.slot, drawnWeaponId(state), p.position, p.aimYaw);
+      mp.sendSkillFx(ev.slot, activeSkillFxId(state), p.position, p.aimYaw);
     }
   }
 }

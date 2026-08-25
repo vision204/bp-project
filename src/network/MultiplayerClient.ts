@@ -25,6 +25,7 @@ import {
   STATE_SYNC_HZ,
   TRADE_CLOSE_MESSAGES,
   type AnimState,
+  type BountyEntry,
   type ClientMessage,
   type CombatStatsSnapshot,
   type EnemySyncEntry,
@@ -150,6 +151,8 @@ export class MultiplayerClient {
   private _outgoingTradeInvite: OutgoingTradeInvite | null = null;
   /** 아직 렌더러가 소비하지 않은, 다른 사람의 스킬 이펙트 알림 — 매 프레임 drainSkillFx()로 비웁니다. */
   private _pendingSkillFx: RemoteSkillFx[] = [];
+  /** 같은 방 현상금 랭킹 — 서버가 보내주는 대로 그대로 들고 있다가 랭킹 패널이 읽습니다. */
+  private _bountyEntries: BountyEntry[] = [];
 
   status: MultiplayerStatus = "disconnected";
   serverUrl = "";
@@ -193,6 +196,11 @@ export class MultiplayerClient {
     return this._outgoingTradeInvite;
   }
 
+  /** 같은 방 현상금 랭킹(내림차순 정렬은 서버가 이미 해서 보냄) — 랭킹 패널이 그대로 그립니다. */
+  get bountyEntries(): BountyEntry[] {
+    return this._bountyEntries;
+  }
+
   connect(url: string, name: string) {
     this.disconnect();
     this.serverUrl = url;
@@ -223,6 +231,7 @@ export class MultiplayerClient {
       this._incomingTradeInvite = null;
       this._outgoingTradeInvite = null;
       this._pendingSkillFx = [];
+      this._bountyEntries = [];
       if (wasConnected) {
         this.state.player.events.push({ type: "pvp_disconnected", reason: "연결이 끊어졌습니다" });
       }
@@ -251,6 +260,7 @@ export class MultiplayerClient {
     this._incomingTradeInvite = null;
     this._outgoingTradeInvite = null;
     this._pendingSkillFx = [];
+    this._bountyEntries = [];
     // 기본값이 켜짐이므로 연결 해제 후에도 켜짐으로 되돌립니다 (꺼진 채로 남지 않도록).
     this.state.player.pvpEnabled = true;
   }
@@ -429,6 +439,10 @@ export class MultiplayerClient {
 
       case "gift_ack":
         this.state.player.events.push({ type: "gift_sent", delivered: msg.delivered === true });
+        break;
+
+      case "bounty_update":
+        this._bountyEntries = msg.entries;
         break;
     }
   }

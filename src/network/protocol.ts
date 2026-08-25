@@ -99,6 +99,18 @@ export interface EnemySyncEntry {
   alive: boolean;
 }
 
+/**
+ * 현상금 랭킹 한 줄. 같은 방 사람들끼리만 겨루는 점수라 서버가 방마다 따로
+ * 들고 있고(server/state.ts의 Connection.bounty), 클라이언트는 서버가 보내주는
+ * 이 목록을 그대로 화면에 그리기만 합니다 — 절대 클라이언트가 직접 계산하지 않습니다.
+ */
+export interface BountyEntry {
+  id: string;
+  name: string;
+  faction: Faction;
+  bounty: number;
+}
+
 /** 최대 9칸 — 거래창 한쪽에 올릴 수 있는 아이템 수. */
 export const MAX_TRADE_SLOTS = 9;
 
@@ -214,6 +226,9 @@ export type ServerMessage =
   | { type: "gift_received"; fromId: string; fromName: string; item: TradeItem }
   /** 내가 보낸 선물이 실제로 전달됐는지 — 실패하면 내 인벤토리에서 빼면 안 됩니다. */
   | { type: "gift_ack"; delivered: boolean; reason?: TradeCloseReason }
+  /** 같은 방의 현상금 랭킹 — 접속 직후, 그리고 누군가의 현상금이 바뀌거나(킬)
+   *  누가 나갈 때마다 방 전체에 다시 뿌려집니다. */
+  | { type: "bounty_update"; entries: BountyEntry[] }
   | { type: "error"; message: string }
   | { type: "pong" };
 

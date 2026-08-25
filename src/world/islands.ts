@@ -115,6 +115,13 @@ interface SpeciesSeed {
   color: number;
   scale?: number;
   count?: number;
+  /**
+   * 이 종족 하나만 따로 체력을 더 곱해주고 싶을 때 (기본 1 = 곱하지 않음).
+   * 섬 전체의 base hp를 올리면 같은 섬의 다른 종족까지 같이 세져버리므로,
+   * "이 한 종족만 유난히 세다"를 표현하려면 이 필드를 씁니다.
+   * (예: 대저택의 최종 보스 "저택의 주인")
+   */
+  hpMultiplier?: number;
 }
 
 export interface IslandDef {
@@ -178,7 +185,7 @@ function buildSpecies(
       scale: seed.scale ?? 1 + k * 0.09,
       tierLevel,
       count: seed.count ?? (k === 0 ? base.count : 8),
-      hp: Math.round(base.hp * Math.pow(HP_STEP, k)),
+      hp: Math.round(base.hp * Math.pow(HP_STEP, k) * (seed.hpMultiplier ?? 1)),
       // 1번째 종족은 기존에 검증된 값을 그대로 쓰고, 상위 종족만 곡선에서 계산합니다.
       exp: k === 0 ? base.exp : Math.round(expRequiredForLevel(tierLevel) / 8),
       money: Math.round(base.money * Math.pow(MONEY_STEP, k)),
@@ -552,7 +559,11 @@ export const ISLANDS: IslandDef[] = [
       { name: "저택 하인", color: 0x8d6e63 },
       { name: "저택 경비대장", color: 0x5d4037 },
       { name: "가면의 귀족", color: 0xb08cd0 },
-      { name: "저택의 주인", color: 0xf0c060 },
+      // 만렙(2056)에 스탯을 5개 균등 분배한(=DevLoadout.ts 기준 "다 해본 캐릭터") 플레이어가
+      // 무장색을 켠 채 요루 기본 공격만으로 정확히 4대를 때려야 죽도록 맞춘 배율입니다.
+      // (계산 근거: 그 조건에서 한 대 데미지 ≈ 675,222 → 3대(2,025,666)로는 못 죽고
+      //  4대(2,700,888) 안에는 반드시 죽어야 하므로, hp를 그 사이인 ~2,491,417로 맞춥니다)
+      { name: "저택의 주인", color: 0xf0c060, hpMultiplier: 13.5 },
     ],
   }),
 ];

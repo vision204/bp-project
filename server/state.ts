@@ -49,6 +49,7 @@ import {
   ROOM_CAPACITY,
   TRADE_CONFIRM_DELAY_MS,
   type AnimState,
+  type BountyEntry,
   type ClientMessage,
   type CombatStatsSnapshot,
   type EnemySyncEntry,
@@ -71,6 +72,28 @@ const MELEE_COOLDOWN_GRACE = 0.7; // 지연시간 보정 — 서버가 요구하
 const SKILL_COOLDOWN_GRACE = 0.7;
 const STALE_TIMEOUT_MS = 25_000;
 const MAX_MESSAGES_PER_SEC = 40;
+
+/**
+ * 현상금(랭킹 점수) — 실제 플레이어를 서버에서 죽일 때마다, 레벨 차이가
+ * 클수록(=상대가 훨씬 약하거나 훨씬 강할수록) 적게 쌓입니다. "비슷한 레벨끼리
+ * 붙어야 현상금이 많이 오른다"는 규칙이라, 압도적으로 낮은 레벨을 사냥해서
+ * 랭킹을 올리는 게 별 의미가 없게 됩니다. 정렬 순서가 중요합니다 — maxDiff가
+ * 작은 것부터 순서대로 검사해서 처음 맞는 구간의 점수를 씁니다.
+ */
+const BOUNTY_TIERS: { maxDiff: number; points: number }[] = [
+  { maxDiff: 100, points: 10 },
+  { maxDiff: 500, points: 5 },
+  { maxDiff: 1000, points: 3 },
+  { maxDiff: Infinity, points: 1 },
+];
+
+function bountyForKill(attackerLevel: number, targetLevel: number): number {
+  const diff = Math.abs(attackerLevel - targetLevel);
+  for (const tier of BOUNTY_TIERS) {
+    if (diff <= tier.maxDiff) return tier.points;
+  }
+  return 1;
+}
 
 function clampFinite(n: unknown, min: number, max: number, fallback: number): number {
   const v = typeof n === "number" && Number.isFinite(n) ? n : fallback;
@@ -200,6 +223,9 @@ export interface Connection {
   drawnWeaponId: string | null;
   pvpEnabled: boolean;
   alive: boolean;
+  /** 현상금 — 같은 방 사람들끼리만 겨루는 점수(방을 나가면 사라집니다). 서버가
+   *  실제 킬을 확인했을 때만 올라갑니다(클라이언트가 스스로 올릴 방법 없음). */
+  bounty: number;
   stats: CombatStatsSnapshot;
   lastMeleeAtMs: number;
   lastSkillAtMs: Record<number, number>;
@@ -274,6 +300,14 @@ export class World {
     }
   }
 
+  /** 같은 방 사람들만 모아 현상금 내림차순으로 정렬 — 랭킹 패널이 그대로 그립니다. */
+  private bountyEntries(roomId: string): BountyEntry[] {
+    return [...this.connections.values()]
+      .filter((c) => c.roomId === roomId)
+      .map((c): BountyEntry => ({ id: c.id, name: c.name, faction: c.faction, bounty: c.bounty }))
+      .sort((a, b) => b.bounty - a.bounty || a.name.localeCompare(b.name));
+  }
+
   /** 초당 메시지 수 제한 — 도배로 서버를 괴롭히는 걸 막는 최소한의 안전장치. */
   private rateLimited(conn: Connection, nowMs: number): boolean {
     conn.msgTimestamps.push(nowMs);
@@ -302,6 +336,7 @@ export class World {
       drawnWeaponId: null,
       pvpEnabled: true,
       alive: true,
+      bounty: 0,
       stats: clampStats({
         meleeDamage: 8,
         meleeRange: 2.2,
@@ -336,6 +371,9 @@ export class World {
       roomSize: this.roomSize(roomId),
     });
     this.broadcastRoom(roomId, { type: "player_state", player: snapshotOf(conn) }, conn.id);
+    // 방에 들어오자마자 지금까지의 현상금 순위를 보여줍니다 (다들 0이라도, "같은 방에
+    // 누가 있는지"는 바로 보여야 랭킹 패널이 빈 화면으로 보이지 않습니다).
+    this.send(conn, { type: "bounty_update", entries: this.bountyEntries(roomId) });
     return conn;
   }
 
@@ -369,6 +407,8 @@ export class World {
       }
     }
     this.broadcastRoom(conn.roomId, { type: "player_left", id });
+    // 나간 사람은 랭킹 패널에서도 빠져야 하므로 남은 사람들에게 갱신된 목록을 다시 뿌립니다.
+    this.broadcastRoom(conn.roomId, { type: "bounty_update", entries: this.bountyEntries(conn.roomId) });
   }
 
   /** 거래창에 서로의 최신 제안·승낙 상태를 보여줍니다 — 양쪽 다에게 각자 "상대방" 기준으로 보냅니다. */
@@ -711,6 +751,7 @@ export class World {
   private applyDamage(attacker: Connection, target: Connection, rawDamage: number, kind: "melee" | "skill") {
     const damage = Math.round(clampFinite(rawDamage, 0, MAX_DAMAGE_PER_HIT, 0));
     if (damage <= 0) return;
+    const wasAlive = target.hp > 0;
     target.hp = Math.max(0, target.hp - damage);
     target.alive = target.hp > 0;
 
@@ -718,6 +759,13 @@ export class World {
     this.send(attacker, { type: "pvp_hit_ack", targetId: target.id, targetName: target.name, damage });
     // 같은 방의 다른 사람들도 체력 변화를 볼 수 있도록 갱신된 스냅샷을 뿌립니다.
     this.broadcastRoom(target.roomId, { type: "player_state", player: snapshotOf(target) });
+
+    // 이 한 방으로 실제로 죽었으면(생존 → 사망 전환) 현상금을 적립합니다 — 서버가
+    // 직접 확인한 킬만 인정하므로 클라이언트가 스스로 점수를 조작할 방법이 없습니다.
+    if (wasAlive && !target.alive) {
+      attacker.bounty += bountyForKill(attacker.level, target.level);
+      this.broadcastRoom(attacker.roomId, { type: "bounty_update", entries: this.bountyEntries(attacker.roomId) });
+    }
   }
 
   private resolveMeleeAttack(attacker: Connection, targetId: string, nowMs: number) {

@@ -1,6 +1,7 @@
 // 순수 게임 로직(스텟/레벨업/퀘스트/상점/항해/버프)을 브라우저 없이 Node에서 검증합니다.
 // 이 모듈들은 Three.js나 Rapier에 의존하지 않는 순수 TypeScript라 가능한 방식입니다.
 const { createInitialGameState, expRequiredForLevel } = await import("../src/core/GameState.ts");
+const { MAX_LEVEL } = await import("../src/core/ExpCurve.ts");
 const { grantExp } = await import("../src/simulation/Leveling.ts");
 const { allocateStatPoint, recomputeDerivedStats, MANA_PER_POINT, SWORD_DMG_MULT_PER_POINT, GUN_DMG_MULT_PER_POINT } =
   await import("../src/simulation/StatSystem.ts");
@@ -34,7 +35,7 @@ const { stepCombat, stepEnemyStatuses, skillDamage, weaponSkillDamage } =
   await import("../src/simulation/CombatSystem.ts");
 const { fruitExpRequiredForLevel, fruitLevelDamageMultiplier, MAX_FRUIT_LEVEL } =
   await import("../src/simulation/FruitLeveling.ts");
-const { SAVE_VERSION, MAX_LEVEL, toSaveData, applySaveData } = await import("../src/core/SaveData.ts");
+const { SAVE_VERSION, toSaveData, applySaveData } = await import("../src/core/SaveData.ts");
 const { DEFAULT_CONFIG, resolveConfig, isConfigComplete } = await import("../src/firebase/config.ts");
 const { TRAINER_ISLAND_ID, FIRST_JUMP_LEVEL, JUMP_LEVEL_STEP, MAX_JUMPS,
         jumpRequiredLevel, jumpPrice, jumpBlockReason, canLearnJump, learnJump } =
@@ -109,6 +110,29 @@ assert(player.meleeDamage === 10, `공격 스텟 1당 근접뎀 +2 (meleeDamage=
 allocateStatPoint(player, "sword");
 assert(Math.abs(player.swordDamageMultiplier - 1.06) < 1e-9, `검 스텟 1당 데미지 배율 +6% (swordDamageMultiplier=${player.swordDamageMultiplier})`);
 assert(allocateStatPoint(player, "gun") === false, "포인트 없을 때 배분 실패 처리");
+
+section(`만렙(${MAX_LEVEL}) — 그 이상은 레벨도 스탯 포인트도 멈춤`);
+{
+  const p = createInitialGameState().player;
+  p.level = MAX_LEVEL;
+  p.exp = 0;
+  p.expToNextLevel = expRequiredForLevel(MAX_LEVEL);
+  p.unspentStatPoints = 0;
+  const pointsBefore = p.unspentStatPoints;
+  grantExp(p, expRequiredForLevel(MAX_LEVEL) * 50, p.events); // 만렙 넘길 만큼 큰 경험치를 줘도
+  assert(p.level === MAX_LEVEL, `만렙에서 더 이상 레벨이 오르지 않음 (level=${p.level})`);
+  assert(p.unspentStatPoints === pointsBefore, `만렙에서 스탯 포인트도 더 이상 늘지 않음 (points=${p.unspentStatPoints})`);
+  assert(p.exp === 0, `만렙에서 초과 경험치는 버려짐 (exp=${p.exp})`);
+  assert(p.events.filter((e) => e.type === "player_leveled_up").length === 0, "만렙에서는 레벨업 이벤트 자체가 발생하지 않음");
+
+  // 만렙 바로 아래에서는 정확히 그 경계까지만 레벨업하고 멈춰야 합니다.
+  const q = createInitialGameState().player;
+  q.level = MAX_LEVEL - 1;
+  q.exp = 0;
+  q.expToNextLevel = expRequiredForLevel(MAX_LEVEL - 1);
+  grantExp(q, expRequiredForLevel(MAX_LEVEL - 1) * 100, q.events);
+  assert(q.level === MAX_LEVEL, `만렙 바로 아래에서 큰 경험치를 줘도 딱 상한까지만 오름 (level=${q.level})`);
+}
 
 section("레벨 곡선 (235레벨 도달 가능성)");
 // 예전 1.35배 지수 곡선은 50레벨만 가도 1억 경험치가 필요해 사실상 불가능했습니다.
@@ -2609,6 +2633,90 @@ section("멀티플레이 서버 — 거래·선물 중계 (신뢰 경계: 서버
   world.handleMessage(g1.conn, JSON.stringify({ type: "gift_send", targetId: "없는아이디", item: sampleItem("potion_small", 1) }));
   const failedAck = g1.sent.find((m) => m.type === "gift_ack");
   assert(failedAck?.delivered === false && failedAck?.reason === "not_connected", "없는 상대에게 선물을 보내면 실패로 알려줌 (인벤토리에서 빼면 안 되는 신호)");
+}
+
+section("밸런스 — 대저택 최종 보스(저택의 주인)는 만렙 요루 무장색 4대에 죽어야 함");
+{
+  // "만렙일 때 저택의 주인이 요루로 적어도 4번은 공격해야지 죽게 해줘" 요청의 실제 수치 검증.
+  // 기준은 이 게임이 스스로 정의하는 "다 해본 캐릭터"(DevLoadout — 5스텟 균등 분배)입니다.
+  const state = createInitialGameState("pirate");
+  applyDevLoadout(state);
+  const p = state.player;
+  p.activeHotbarSlot = p.hotbar.indexOf("sword_yoru");
+  p.fruitDrawn = false;
+  assert(drawnWeapon(p)?.id === "sword_yoru", "테스트 전제 — 요루를 손에 든 상태");
+
+  p.hakiActive = true; // 무장색 켜짐 = 이 조건에서 가장 강한 한 방(요청 문구의 "요루로" 기준)
+  const perHit = totalMeleeDamage(p);
+  assert(perHit > 0, `무장색 요루 기본 공격 1대 데미지: ${Math.round(perHit)}`);
+
+  const mansion = ISLANDS.find((i) => i.id === "mansion");
+  const boss = mansion.species.find((s) => s.name === "저택의 주인");
+  assert(boss, "대저택에 '저택의 주인' 종족이 존재함");
+
+  assert(boss.hp > perHit * 3, `3대로는 못 죽음 (보스 hp ${boss.hp.toLocaleString()} > 3대 ${Math.round(perHit * 3).toLocaleString()})`);
+  assert(boss.hp <= perHit * 4, `4대 안에는 반드시 죽음 (보스 hp ${boss.hp.toLocaleString()} <= 4대 ${Math.round(perHit * 4).toLocaleString()})`);
+
+  const hitsNeeded = Math.ceil(boss.hp / perHit);
+  assert(hitsNeeded === 4, `정확히 4대가 필요함 (실제 필요 타수: ${hitsNeeded})`);
+}
+
+section("멀티플레이 서버 — 현상금 랭킹 (같은 방 PvP 킬)");
+{
+  function fakeConn(world, name, faction) {
+    const sent = [];
+    const sock = { readyState: 1, OPEN: 1, send: (d) => sent.push(JSON.parse(d)), close() {} };
+    const conn = world.join(sock, name, faction);
+    return { conn, sent };
+  }
+
+  const world = new World();
+  const hunter = fakeConn(world, "현상금사냥꾼", "pirate");
+  const bystander = fakeConn(world, "구경꾼", "pirate");
+
+  assert(hunter.conn.bounty === 0 && bystander.conn.bounty === 0, "접속 직후 현상금은 0");
+  const joinBounty = bystander.sent.find((m) => m.type === "bounty_update");
+  assert(joinBounty && joinBounty.entries.length === 2, "누가 접속하면 같은 방 전체가 현상금 랭킹을 갱신받음");
+  assert(
+    joinBounty.entries.every((e) => e.bounty === 0) && joinBounty.entries.some((e) => e.id === hunter.conn.id),
+    "갱신된 목록에 같은 방 사람 전원이 (현상금 0으로) 들어있음",
+  );
+
+  // 레벨 차이별 현상금 티어: ≤100→10, ≤500→5, ≤1000→3, 그 이상→1.
+  hunter.conn.level = 1000;
+  const tiers = [
+    { diff: 50, expect: 10 },
+    { diff: 100, expect: 10 },
+    { diff: 101, expect: 5 },
+    { diff: 500, expect: 5 },
+    { diff: 501, expect: 3 },
+    { diff: 1000, expect: 3 },
+    { diff: 1001, expect: 1 },
+  ];
+  let expectedTotal = 0;
+  for (const { diff, expect } of tiers) {
+    const victim = fakeConn(world, `제물${diff}`, "marine");
+    victim.conn.level = hunter.conn.level - diff;
+    victim.conn.hp = 1; // 한 대에 죽도록 미리 깎아둠 (쿨다운 없이 한 방으로 킬 확정)
+    hunter.conn.lastMeleeAtMs = 0; // 쿨다운 검사를 우회 — 실제 시간 흐름과 무관하게 즉시 다음 공격 허용
+    hunter.sent.length = 0;
+    world.handleMessage(hunter.conn, JSON.stringify({ type: "melee_attack", targetId: victim.conn.id }));
+    expectedTotal += expect;
+    assert(victim.conn.hp === 0 && victim.conn.alive === false, `레벨차 ${diff} — 공격이 실제로 상대를 죽임`);
+    assert(hunter.conn.bounty === expectedTotal, `레벨차 ${diff} — 현상금 +${expect} (누적 ${hunter.conn.bounty})`);
+  }
+
+  const lastBountyMsg = hunter.sent.filter((m) => m.type === "bounty_update").pop();
+  assert(lastBountyMsg, "킬을 하면 현상금 갱신 메시지를 받음");
+  const myEntry = lastBountyMsg.entries.find((e) => e.id === hunter.conn.id);
+  assert(myEntry?.bounty === hunter.conn.bounty, "갱신 메시지 속 내 현상금이 실제 누적값과 일치");
+  assert(lastBountyMsg.entries[0].id === hunter.conn.id, "현상금이 가장 높은 사람이 맨 위 (내림차순 정렬)");
+
+  // 방을 나가면 랭킹에서도 빠집니다.
+  bystander.sent.length = 0;
+  world.leave(hunter.conn.id);
+  const afterLeave = bystander.sent.find((m) => m.type === "bounty_update");
+  assert(afterLeave && !afterLeave.entries.some((e) => e.id === hunter.conn.id), "나간 사람은 남은 사람들의 랭킹에서도 빠짐");
 }
 
 section("섬 판정");

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { ItemId } from "../core/GameState";
+import type { FruitAbilityId, ItemId } from "../core/GameState";
 import type { SkillDef } from "../simulation/skills";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,17 @@ const WEAPON_VFX_THEMES: Partial<Record<ItemId, WeaponVfxTheme>> = {
   sword_yoru: { core: 0x1b0a2e, glow: 0x9b30ff, spark: 0xe0b3ff },
   sword_santoryu: { core: 0xeaffe9, glow: 0x7cfc9a, spark: 0xffffff },
   sword_enma: { core: 0xff2d10, glow: 0xff8a3d, spark: 0xffd27a },
+};
+
+// 열매마다 한눈에 구분되는 색 테마 — 실제 열매 성질을 그대로 반영합니다
+// (마그마=용암, 얼음=서리, 번개=전격, 어둠=암흑, 고무=선명한 빨강, 모래=사막톤).
+const FRUIT_VFX_THEMES: Partial<Record<FruitAbilityId, WeaponVfxTheme>> = {
+  magma_fist: { core: 0x3d0f02, glow: 0xff5a1f, spark: 0xffcf5c },
+  ice_lance: { core: 0x0b3550, glow: 0x59c8ff, spark: 0xdff6ff },
+  thunder_strike: { core: 0x241d00, glow: 0xfff066, spark: 0xffffff },
+  dark_wave: { core: 0x120018, glow: 0x8b2fd9, spark: 0xd9a8ff },
+  rubber_barrage: { core: 0x4d1a12, glow: 0xff6b4a, spark: 0xffd9c2 },
+  sand_storm: { core: 0x4a3110, glow: 0xd9b25c, spark: 0xf5e3b3 },
 };
 
 const FROST_THEME: WeaponVfxTheme = { core: 0xbfe9ff, glow: 0xffffff, spark: 0xdff6ff };
@@ -154,6 +165,19 @@ function addUltimateFlash(group: THREE.Group, y: number) {
   group.add(mesh);
 }
 
+/**
+ * 자기 강화형(shape: "self") 스킬 전용 — 적을 때리는 판정이 없으니 도형 이펙트
+ * 대신, 몸 주위로 링이 위로 솟구치는 오라를 짧게 띄워 "발동했다"는 걸 보여줍니다.
+ */
+function addSelfBuffAura(group: THREE.Group, theme: WeaponVfxTheme, strong: boolean) {
+  const ringCount = strong ? 4 : 3;
+  for (let ring = 0; ring < ringCount; ring++) {
+    const r = 0.55 + ring * 0.32;
+    group.add(buildArcMesh(r * 0.82, r, Math.PI, 28, theme.glow, (strong ? 0.6 : 0.45) * (1 - ring * 0.12), 0.1 + ring * 0.5));
+  }
+  addRadialShards(group, strong ? 22 : 14, theme.spark, Math.PI, 1.1);
+}
+
 /** 둔화(slowFactor) 효과가 있는 스킬에 덧붙는 서리 파편. */
 function addFrostShards(group: THREE.Group, count: number, halfAngle: number, range: number) {
   for (let i = 0; i < count; i++) {
@@ -178,8 +202,9 @@ function addFrostShards(group: THREE.Group, count: number, halfAngle: number, ra
  * 모양을 고르고, 무기 색 테마 + (필살기라면) 추가 섬광 + (둔화라면) 서리
  * 파편을 덧붙입니다.
  */
-export function buildSkillEffectGroup(skill: SkillDef, weaponId: ItemId): BuiltSkillEffect {
-  const theme = WEAPON_VFX_THEMES[weaponId] ?? { core: 0xffffff, glow: 0xbbbbbb, spark: 0xffffff };
+export function buildSkillEffectGroup(skill: SkillDef, sourceId: ItemId | FruitAbilityId): BuiltSkillEffect {
+  const theme = WEAPON_VFX_THEMES[sourceId as ItemId] ??
+    FRUIT_VFX_THEMES[sourceId as FruitAbilityId] ?? { core: 0xffffff, glow: 0xbbbbbb, spark: 0xffffff };
   const ultimate = skill.slot === 3;
   const group = new THREE.Group();
   let durationMs = ultimate ? 850 : 600;
@@ -237,6 +262,10 @@ export function buildSkillEffectGroup(skill: SkillDef, weaponId: ItemId): BuiltS
     addRadialShards(group, ultimate ? 26 : 16, theme.spark, Math.PI, shape.radius);
     if (skill.slowFactor) addFrostShards(group, 12, Math.PI, shape.radius);
     growTo = 0.55;
+  } else if (shape.kind === "self") {
+    addSelfBuffAura(group, theme, ultimate);
+    growTo = 0.4;
+    durationMs = ultimate ? 900 : 650;
   }
 
   if (ultimate) addUltimateFlash(group, shape.kind === "radial" ? 0.6 : 1.0);

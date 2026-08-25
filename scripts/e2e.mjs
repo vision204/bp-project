@@ -2257,17 +2257,17 @@ assert(restored.boats.includes("clipper"), `보유 배 복원 (${restored.boats}
 assert(restored.maxHp === 100 + 5 * 12, `스텟에서 최대 체력 재계산 (${restored.maxHp})`);
 assert(restored.faction === "pirate", "진영 유지");
 
-// 로그인하지 않은 상태에서 랭킹을 열면 "로그인이 필요하다"고 안내해야 합니다 (에러로 죽지 않고)
-assert(await humanClick("#btn-rank"), "랭킹 버튼을 실제 마우스로 클릭 가능");
-await page.waitForTimeout(1200);
-const rankPanel = await page.evaluate(() => ({
-  open: !document.querySelector("#panel-rank").hidden,
-  notice: document.querySelector(".rank-notice")?.textContent?.replace(/\s+/g, " ").trim(),
+// 현상금 랭킹 패널은 "같은 방" 개념이 있는 멀티플레이 접속 중에만 보여야 합니다 —
+// 옛 Firebase 랭킹 버튼/패널은 통째로 없어졌고(btn-rank), 지금은 접속 안 한 상태에서는
+// 화면 우측 상단에 통째로 숨어 있어야 정상입니다.
+assert(!(await page.$("#btn-rank")), "옛 랭킹 버튼(btn-rank)은 더 이상 존재하지 않음");
+const bountyPanelIdle = await page.evaluate(() => ({
+  exists: !!document.querySelector("#hud-bounty"),
+  hidden: document.querySelector("#hud-bounty")?.hidden,
 }));
-console.log("  랭킹(비로그인):", JSON.stringify(rankPanel));
-assert(rankPanel.open, "랭킹 패널이 열림");
-assert(/로그인/.test(rankPanel.notice ?? ""), `로그인이 필요하다고 안내: "${rankPanel.notice}"`);
-await page.screenshot({ path: "/home/claude/bp-project/scripts/out-25-rank.png" });
+console.log("  현상금 패널(미접속):", JSON.stringify(bountyPanelIdle));
+assert(bountyPanelIdle.exists, "현상금 랭킹 패널 DOM은 존재함");
+assert(bountyPanelIdle.hidden, "멀티플레이 미접속 상태에서는 숨겨져 있음");
 
 await page.evaluate(() => localStorage.removeItem("bloxfruits-web/save-v1"));
 

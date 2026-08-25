@@ -219,6 +219,87 @@ html, body {
   font-size: 15px;
 }
 
+/* ── 현상금 랭킹 (화면 우측 상단, 퀘스트 박스 아래) ───────────────────
+   퀘스트 박스와 같은 top:20px/right:26px를 쓰면 둘 다 떠 있을 때
+   겹치므로, 퀘스트 박스가 웬만해선 다 들어갈 높이(140px) 아래에 둡니다. */
+.bounty-panel {
+  position: absolute;
+  top: 160px;
+  right: 26px;
+  background: rgba(20, 20, 24, 0.65);
+  border: 1px solid rgba(255, 213, 79, 0.4);
+  border-radius: 12px;
+  padding: 12px 16px;
+  width: 240px;
+  font-size: 13px;
+}
+
+.bounty-header {
+  font-weight: bold;
+  color: #ffd54f;
+  font-size: 15px;
+  margin-bottom: 2px;
+}
+
+.bounty-sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 8px;
+}
+
+.bounty-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bounty-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 8px;
+}
+
+.bounty-row.mine {
+  background: rgba(255, 213, 79, 0.18);
+  border: 1px solid rgba(255, 213, 79, 0.45);
+}
+
+.bounty-place {
+  width: 22px;
+  flex: none;
+  text-align: center;
+  font-weight: bold;
+}
+
+.bounty-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bounty-me {
+  color: #ffd54f;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.bounty-score {
+  flex: none;
+  font-weight: bold;
+  color: #ffd54f;
+}
+
+.bounty-mine-line {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
 .interaction-prompt {
   position: absolute;
   left: 50%;
@@ -564,7 +645,7 @@ canvas.hide-cursor {
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 8px rgba(105, 240, 174, 0.35);
 }
 
-/* ── 좌측 상단 보조 아이콘 (가이드 · 랭킹 · 멀티플레이) ─────────────── */
+/* ── 좌측 상단 보조 아이콘 (가이드 · 멀티플레이) ─────────────────────── */
 .tl-icons {
   position: absolute;
   left: 22px;

@@ -32,13 +32,6 @@ import { TELEPORT_PRICE, TELEPORT_REQUIRED_LEVEL, teleportBlockReason } from "..
 
 type StatKey = keyof StatBlock;
 
-/** 다른 사람이 정한 이름이 그대로 HTML로 들어가지 않도록 이스케이프합니다. */
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (ch) =>
-    ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;",
-  );
-}
-
 const STAT_LABELS: Record<StatKey, string> = {
   attack: "공격", // 마나 + 공격력을 합친 스텟 — 최대마나와 근접 데미지 둘 다 올립니다
   defense: "방어", // 예전 "체력" 스텟과 같은 역할(최대체력)
@@ -61,8 +54,6 @@ export interface PanelCallbacks {
   onRollGacha: () => void;
   /** 섬 가이드 — 목적지 지정 (null이면 안내 해제) */
   onSetGuide: (islandId: string | null) => void;
-  /** 랭킹 불러오기 — Firebase 미설정/로그아웃이면 null */
-  onFetchRank: () => Promise<RankView | null>;
   /** 설인에게 점프 단계 배우기 */
   onLearnJump: () => void;
   /** 설인에게 R키 순간이동 배우기 */
@@ -71,15 +62,7 @@ export interface PanelCallbacks {
   onTravelSea: () => void;
 }
 
-/** 랭킹 패널에 필요한 것들 (Firebase 타입을 UI로 끌고 오지 않기 위한 최소 형태) */
-export interface RankView {
-  entries: { uid: string; name: string; faction: string; level: number; money: number; fruitLevel: number }[];
-  myUid: string | null;
-  /** 로그인하지 않았거나 설정이 없을 때 보여줄 안내 */
-  notice: string | null;
-}
-
-export type PanelId = "stats" | "inventory" | "shop" | "haki" | "quest" | "fruit_dealer" | "dev" | "gacha" | "guide" | "rank" | "trainer" | "sea";
+export type PanelId = "stats" | "inventory" | "shop" | "haki" | "quest" | "fruit_dealer" | "dev" | "gacha" | "guide" | "trainer" | "sea";
 
 /**
  * 캐릭터(스텟) · 인벤토리 · 상점 · 항해, 네 개의 모달형 패널을 관리합니다.
@@ -194,15 +177,6 @@ export class PanelManager {
         <div class="panel-body" id="sea-body"></div>
       </div>
 
-      <div class="panel rank-panel" id="panel-rank" hidden>
-        <div class="panel-header">
-          <span>🏆 랭킹</span>
-          <button class="panel-close" data-close="rank">✕</button>
-        </div>
-        <div class="panel-sub-line">레벨이 높은 순서입니다. 레벨이 오를 때마다 자동으로 등록됩니다.</div>
-        <div class="panel-body" id="rank-body">불러오는 중…</div>
-      </div>
-
       <div class="panel guide-panel" id="panel-guide" hidden>
         <div class="panel-header">
           <span>🧭 섬 가이드</span>
@@ -243,7 +217,6 @@ export class PanelManager {
       dev: this.root.querySelector("#panel-dev")!,
       gacha: this.root.querySelector("#panel-gacha")!,
       guide: this.root.querySelector("#panel-guide")!,
-      rank: this.root.querySelector("#panel-rank")!,
       trainer: this.root.querySelector("#panel-trainer")!,
       sea: this.root.querySelector("#panel-sea")!,
     };
@@ -263,8 +236,6 @@ export class PanelManager {
   toggle(panel: PanelId) {
     this.open = this.open === panel ? null : panel;
     this.applyVisibility();
-    // 랭킹은 네트워크에서 받아오므로 열리는 순간 한 번 갱신합니다.
-    if (this.open === "rank") void this.refreshRank();
   }
 
   openPanel(panel: PanelId, islandId?: string | null) {
@@ -276,7 +247,6 @@ export class PanelManager {
     }
     this.open = panel;
     this.applyVisibility();
-    if (panel === "rank") void this.refreshRank();
   }
 
   closeAll() {
@@ -346,9 +316,6 @@ export class PanelManager {
         break;
       case "guide":
         this.renderGuide(state);
-        break;
-      case "rank":
-        // 랭킹은 네트워크에서 받아오므로 열 때 한 번만 갱신합니다 (openPanel에서 처리).
         break;
       case "trainer":
         this.renderTrainer(state);
@@ -831,59 +798,6 @@ export class PanelManager {
       // 도착하면 바로 새 바다를 볼 수 있게 창을 닫습니다.
       this.closeAll();
     });
-  }
-
-  /**
-   * 랭킹 — Firestore에서 상위 기록을 받아 보여줍니다.
-   * 네트워크 작업이라 패널을 열 때 한 번만 부르고, 결과가 오면 그때 그립니다.
-   */
-  private async refreshRank() {
-    const body = this.panels.rank.querySelector("#rank-body")!;
-    body.innerHTML = `<div class="rank-loading">불러오는 중…</div>`;
-    const view = await this.callbacks.onFetchRank();
-
-    // 기다리는 사이에 패널을 닫았으면 그리지 않습니다.
-    if (this.open !== "rank") return;
-
-    if (!view || view.notice) {
-      body.innerHTML = `
-        <div class="rank-notice">
-          ${view?.notice ?? "랭킹을 불러오지 못했습니다. 잠시 뒤 다시 열어보세요."}
-        </div>`;
-      return;
-    }
-
-    if (view.entries.length === 0) {
-      body.innerHTML = `<div class="rank-notice">아직 등록된 기록이 없습니다. 레벨을 올리면 1등이 됩니다! 🏆</div>`;
-      return;
-    }
-
-    const rows = view.entries
-      .map((entry, i) => {
-        const mine = entry.uid === view.myUid;
-        const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}`;
-        const factionIcon = entry.faction === "marine" ? "⚓" : "🏴‍☠️";
-        return `
-          <div class="rank-row ${mine ? "mine" : ""}">
-            <div class="rank-place">${medal}</div>
-            <div class="rank-name">
-              ${factionIcon} ${escapeHtml(entry.name)}${mine ? ` <span class="rank-me">나</span>` : ""}
-            </div>
-            <div class="rank-stats">Lv.${entry.level} · 열매 Lv.${entry.fruitLevel} · 🪙${entry.money.toLocaleString()}</div>
-          </div>
-        `;
-      })
-      .join("");
-
-    const myIndex = view.entries.findIndex((e) => e.uid === view.myUid);
-    const myLine =
-      view.myUid === null
-        ? ""
-        : myIndex >= 0
-          ? `<div class="rank-mine-line">내 순위: <b>${myIndex + 1}위</b></div>`
-          : `<div class="rank-mine-line">아직 상위 ${view.entries.length}위 안에 들지 못했습니다.</div>`;
-
-    body.innerHTML = myLine + rows;
   }
 
   /**
