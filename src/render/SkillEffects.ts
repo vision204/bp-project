@@ -273,6 +273,362 @@ export function buildSkillEffectGroup(skill: SkillDef, sourceId: ItemId | FruitA
   return { group, durationMs, growTo };
 }
 
+// ---------------------------------------------------------------------------
+// 열매 스킬(Z/X/C/V) 전용 이펙트.
+//
+// 위의 buildSkillEffectGroup은 "판정 도형(부채꼴/직선/원형)에 색만 입힌" 범용
+// 이펙트라 검 스킬과 열매 스킬이 실루엣까지 똑같아 보였습니다. 열매는 이름과
+// 속성(빙결/전격/중력/탄성/모래)에 맞는 전용 모양·움직임을 따로 그립니다 —
+// 판정 범위(shape)는 여전히 그대로 반영해 "맞는 범위 = 보이는 범위"는 지킵니다.
+// ---------------------------------------------------------------------------
+
+/** 지그재그로 꺾인 번개 줄기의 꼭짓점들을 만듭니다 (로컬 +Z가 사거리 방향). */
+function buildZigzagPoints(range: number, width: number, segments: number): { x: number; z: number }[] {
+  const pts: { x: number; z: number }[] = [{ x: 0, z: 0 }];
+  for (let i = 1; i < segments; i++) {
+    pts.push({ x: (Math.random() - 0.5) * width * 1.7, z: (range * i) / segments });
+  }
+  pts.push({ x: 0, z: range });
+  return pts;
+}
+
+/** 꼭짓점들을 잇는 얇은 상자들로 번개 줄기 하나를 그립니다. */
+function addBoltSegments(group: THREE.Group, pts: { x: number; z: number }[], thickness: number, color: number, opacity: number, y: number) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const len = Math.max(0.05, Math.hypot(dx, dz));
+    const mat = makeBasicMat(color, opacity);
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(thickness, thickness, len), mat);
+    seg.position.set((a.x + b.x) / 2, y, (a.z + b.z) / 2);
+    seg.rotation.y = Math.atan2(dx, dz);
+    seg.userData.baseOpacity = opacity;
+    seg.userData.role = "sweep";
+    group.add(seg);
+  }
+}
+
+/** 번개 줄기에서 갈라져 지지직 튀는 잔가지 스파크 (깜빡임). */
+function addBoltBranches(group: THREE.Group, pts: { x: number; z: number }[], theme: WeaponVfxTheme, count: number, y: number) {
+  for (let i = 0; i < count; i++) {
+    const base = pts[1 + Math.floor(Math.random() * Math.max(1, pts.length - 2))] ?? pts[0];
+    const ang = Math.random() * Math.PI * 2;
+    const len = 0.35 + Math.random() * 0.65;
+    const mat = makeBasicMat(theme.spark, 0.85);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, len), mat);
+    mesh.position.set(base.x + Math.sin(ang) * len * 0.3, y + (Math.random() - 0.5) * 0.5, base.z + Math.cos(ang) * len * 0.3);
+    mesh.rotation.y = ang;
+    mesh.userData.baseOpacity = 0.85;
+    mesh.userData.role = "flicker";
+    mesh.userData.flickerSpeed = 20 + Math.random() * 12;
+    mesh.userData.flickerSeed = Math.random() * 10;
+    group.add(mesh);
+  }
+}
+
+/** 번개 열매 — 직선형 스킬(선더 스트라이크/천벌)에 쓰는 지그재그 번개 줄기. */
+function buildLightningBolt(group: THREE.Group, range: number, width: number, theme: WeaponVfxTheme, ultimate: boolean, y = 1.0) {
+  const pts = buildZigzagPoints(range, Math.max(0.7, width), ultimate ? 9 : 6);
+  addBoltSegments(group, pts, Math.max(0.32, width * 0.85), theme.glow, ultimate ? 0.45 : 0.35, y);
+  addBoltSegments(group, pts, Math.max(0.1, width * 0.28), theme.spark, ultimate ? 0.95 : 0.85, y);
+  addBoltBranches(group, pts, theme, ultimate ? 10 : 5, y);
+}
+
+/** 번개 열매 — 하늘에서 한 지점(x,z)으로 내리꽂히는 수직 번개 줄기 (낙뢰). */
+function buildLightningStrike(group: THREE.Group, x: number, z: number, theme: WeaponVfxTheme, ultimate: boolean, height = 9) {
+  const segments = ultimate ? 8 : 5;
+  const pts: { x: number; y: number }[] = [{ x: 0, y: height }];
+  for (let i = 1; i < segments; i++) pts.push({ x: (Math.random() - 0.5) * 0.9, y: height - (height * i) / segments });
+  pts.push({ x: 0, y: 0 });
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    const len = Math.max(0.1, Math.abs(b.y - a.y));
+    const midY = (a.y + b.y) / 2;
+    const midX = x + (a.x + b.x) / 2;
+    const glow = new THREE.Mesh(new THREE.BoxGeometry(0.5, len, 0.5), makeBasicMat(theme.glow, ultimate ? 0.5 : 0.4));
+    glow.position.set(midX, midY, z);
+    glow.userData.baseOpacity = ultimate ? 0.5 : 0.4;
+    glow.userData.role = "sweep";
+    group.add(glow);
+    const core = new THREE.Mesh(new THREE.BoxGeometry(0.16, len, 0.16), makeBasicMat(theme.spark, 0.95));
+    core.position.copy(glow.position);
+    core.userData.baseOpacity = 0.95;
+    core.userData.role = "flicker";
+    core.userData.flickerSpeed = 24;
+    core.userData.flickerSeed = i * 1.7;
+    group.add(core);
+  }
+  const ring = buildArcMesh(0, 1.6, Math.PI, 20, theme.glow, ultimate ? 0.65 : 0.55, 0.05);
+  ring.position.set(x, 0, z);
+  group.add(ring);
+}
+
+/** 번개 열매 — 뇌광 질주(토글 변신) 동안 몸을 휘감는 전격 오라. */
+function addLightningAura(group: THREE.Group, theme: WeaponVfxTheme, strong: boolean) {
+  const count = strong ? 16 : 10;
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = 0.5 + Math.random() * 0.6;
+    const h = 0.3 + Math.random() * 1.3;
+    const len = 0.3 + Math.random() * 0.5;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, len), makeBasicMat(Math.random() < 0.4 ? theme.core : theme.spark, 0.85));
+    mesh.position.set(Math.sin(a) * r, h, Math.cos(a) * r);
+    mesh.rotation.y = a + (Math.random() - 0.5);
+    mesh.rotation.x = (Math.random() - 0.5) * 0.8;
+    mesh.userData.baseOpacity = 0.85;
+    mesh.userData.role = "flicker";
+    mesh.userData.flickerSpeed = 16 + Math.random() * 14;
+    mesh.userData.flickerSeed = Math.random() * 10;
+    group.add(mesh);
+  }
+  const ring = buildArcMesh(0.9, 1.15, Math.PI, 24, theme.glow, strong ? 0.55 : 0.4, 0.05);
+  group.add(ring);
+}
+
+/** 얼음 열매 — 바닥에서 솟는 결정 가시. 빙결기(freeze)일수록 더 굵고 진하게. */
+function addIceSpikes(group: THREE.Group, count: number, theme: WeaponVfxTheme, halfAngle: number, range: number, freeze: boolean) {
+  for (let i = 0; i < count; i++) {
+    const a = -halfAngle + Math.random() * (2 * halfAngle);
+    const r = range * (0.15 + Math.random() * 0.85);
+    const h = 0.5 + Math.random() * (freeze ? 1.7 : 0.9);
+    const mesh = new THREE.Mesh(new THREE.ConeGeometry(0.09 + Math.random() * 0.08, h, 4), makeBasicMat(i % 2 === 0 ? theme.core : theme.glow, freeze ? 0.7 : 0.55));
+    mesh.position.set(Math.sin(a) * r, h / 2, Math.cos(a) * r);
+    mesh.rotation.y = Math.random() * Math.PI;
+    mesh.userData.baseOpacity = freeze ? 0.7 : 0.55;
+    mesh.userData.role = "sweep";
+    group.add(mesh);
+  }
+}
+
+/** 얼음 열매 — 서리 발판(토글) 전용: 발밑에 퍼지는 얇은 얼음판. */
+function addFrostFloor(group: THREE.Group, theme: WeaponVfxTheme, radius: number) {
+  const disc = buildArcMesh(0, radius, Math.PI, 40, theme.core, 0.32, 0.03);
+  group.add(disc);
+  const rim = buildArcMesh(radius * 0.9, radius * 1.05, Math.PI, 40, theme.glow, 0.55, 0.04);
+  group.add(rim);
+  addFrostShards(group, 14, Math.PI, radius);
+}
+
+/** 어둠 열매 — 중력정처럼 빨아들이는 작은 공허 코어 + 바닥 테두리. */
+function addVoidCore(group: THREE.Group, theme: WeaponVfxTheme, scale: number, ultimate: boolean) {
+  const core = new THREE.Mesh(new THREE.SphereGeometry(Math.min(0.95, scale * 0.2), 14, 14), makeBasicMat(0x050008, ultimate ? 0.8 : 0.65));
+  core.position.y = 0.95;
+  core.userData.baseOpacity = ultimate ? 0.8 : 0.65;
+  core.userData.role = "sweep";
+  group.add(core);
+  const rim = buildArcMesh(scale * 0.05, scale * 0.26, Math.PI, 24, theme.glow, ultimate ? 0.6 : 0.45, 0.05);
+  group.add(rim);
+}
+
+/** 어둠 열매 — 바깥에서 중심으로 빨려드는 파편 (다른 열매는 전부 바깥으로 튐, 어둠만 안쪽으로). */
+function addInwardVoidShards(group: THREE.Group, count: number, theme: WeaponVfxTheme, halfAngle: number, range: number) {
+  for (let i = 0; i < count; i++) {
+    const a = -halfAngle + Math.random() * (2 * halfAngle);
+    const r = range * (0.4 + Math.random() * 0.6);
+    const sx = Math.sin(a);
+    const cz = Math.cos(a);
+    const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.06 + Math.random() * 0.08), makeBasicMat(theme.spark, 0.75));
+    mesh.position.set(sx * r, 0.3 + Math.random() * 1.0, cz * r);
+    mesh.userData.baseOpacity = 0.75;
+    mesh.userData.role = "shard";
+    mesh.userData.vx = -sx * (0.6 + Math.random() * 0.5);
+    mesh.userData.vz = -cz * (0.6 + Math.random() * 0.5);
+    mesh.userData.vy = -0.15 - Math.random() * 0.2;
+    mesh.userData.speed = 1.2 + Math.random() * 1.5;
+    group.add(mesh);
+  }
+}
+
+/** 고무 열매 — 여러 지점에서 동시에 터지는 작은 충격 링(주먹이 여러 번 꽂힌 느낌). */
+function addImpactRings(group: THREE.Group, theme: WeaponVfxTheme, count: number, maxRadius: number, halfAngle: number, ultimate: boolean) {
+  for (let i = 0; i < count; i++) {
+    const full = halfAngle >= Math.PI - 0.01;
+    const a = full ? Math.random() * Math.PI * 2 : -halfAngle + Math.random() * (2 * halfAngle);
+    const r = maxRadius * (0.2 + Math.random() * 0.7);
+    const ringR = 0.32 + Math.random() * 0.32;
+    const ring = buildArcMesh(ringR * 0.65, ringR, Math.PI, 14, i % 2 === 0 ? theme.core : theme.glow, ultimate ? 0.7 : 0.55, 0.35 + Math.random() * 0.7);
+    ring.position.set(Math.sin(a) * r, 0, Math.cos(a) * r);
+    group.add(ring);
+  }
+}
+
+/** 고무 열매 — 앞으로 쭉 뻗어나가는 주먹 스트리크 (둥근 실루엣이라 검/얼음의 각진 파편과 다르게 보입니다). */
+function addPunchStreaks(group: THREE.Group, theme: WeaponVfxTheme, count: number, range: number, width: number) {
+  for (let i = 0; i < count; i++) {
+    const len = 0.5 + Math.random() * 0.6;
+    const z = range * Math.random();
+    const x = (Math.random() - 0.5) * width * 1.3;
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.1, len, 6), makeBasicMat(theme.spark, 0.85));
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.set(x, 0.5 + Math.random() * 0.9, z);
+    mesh.userData.baseOpacity = 0.85;
+    mesh.userData.role = "shard";
+    mesh.userData.vx = (Math.random() - 0.5) * 0.3;
+    mesh.userData.vy = 0.1;
+    mesh.userData.vz = 1.2 + Math.random();
+    mesh.userData.speed = 2 + Math.random() * 2;
+    group.add(mesh);
+  }
+}
+
+/** 모래 열매 — 원형 범위 스킬 전용: 중심을 빙글빙글 도는 회오리(그리트가 궤도를 그림). */
+function addSandVortex(group: THREE.Group, theme: WeaponVfxTheme, count: number, maxRadius: number, ultimate: boolean) {
+  for (let i = 0; i < count; i++) {
+    const size = 0.05 + Math.random() * 0.08;
+    const mesh = new THREE.Mesh(new THREE.ConeGeometry(size, size * 2.2, 4), makeBasicMat(i % 2 === 0 ? theme.core : theme.spark, 0.75));
+    const radius0 = maxRadius * (0.1 + Math.random() * 0.35);
+    const angle0 = Math.random() * Math.PI * 2;
+    const y0 = 0.2 + Math.random() * 2.0;
+    mesh.position.set(Math.sin(angle0) * radius0, y0, Math.cos(angle0) * radius0);
+    mesh.userData.baseOpacity = 0.75;
+    mesh.userData.role = "orbit";
+    mesh.userData.orbitAngle = angle0;
+    mesh.userData.orbitRadius = radius0;
+    mesh.userData.orbitSpeed = (ultimate ? 5 : 4) + Math.random() * 3;
+    mesh.userData.orbitGrow = 1.6;
+    mesh.userData.orbitY = y0;
+    mesh.userData.orbitRise = Math.random() * 0.8;
+    group.add(mesh);
+  }
+  const floor = buildArcMesh(0, maxRadius * 0.9, Math.PI, 32, theme.core, 0.3, 0.03);
+  group.add(floor);
+}
+
+/** 모래 열매 — 직선/부채꼴형 스킬 전용: 앞으로 흩날리는 모래 그리트 (원뿔 실루엣이라 파편과 결이 다릅니다). */
+function addSandGrit(group: THREE.Group, count: number, theme: WeaponVfxTheme, halfAngle: number, range: number) {
+  for (let i = 0; i < count; i++) {
+    const a = -halfAngle + Math.random() * (2 * halfAngle);
+    const r = range * (0.2 + Math.random() * 0.8);
+    const sx = Math.sin(a);
+    const cz = Math.cos(a);
+    const size = 0.04 + Math.random() * 0.07;
+    const mesh = new THREE.Mesh(new THREE.ConeGeometry(size, size * 2, 4), makeBasicMat(i % 2 === 0 ? theme.core : theme.spark, 0.75));
+    mesh.position.set(sx * r, 0.15 + Math.random() * 0.6, cz * r);
+    mesh.userData.baseOpacity = 0.75;
+    mesh.userData.role = "shard";
+    // 살짝 휘어드는 궤적을 흉내내려고 진행 방향에 약간의 옆바람 성분을 섞습니다.
+    const curl = (Math.random() - 0.5) * 0.6;
+    mesh.userData.vx = sx * (0.8 + Math.random()) + cz * curl;
+    mesh.userData.vz = cz * (0.8 + Math.random()) - sx * curl;
+    mesh.userData.vy = 0.2 + Math.random() * 0.3;
+    mesh.userData.speed = 1.4 + Math.random() * 1.8;
+    group.add(mesh);
+  }
+}
+
+/**
+ * 열매 스킬(Z/X/C/V) 한 번 발동 = 이 함수를 한 번 호출해서 이름에 맞는 전용
+ * 이펙트를 만듭니다. 무기 스킬용 buildSkillEffectGroup과 달리 열매마다
+ * (그리고 얼리기/토글/자동조준 같은 특수 속성마다) 아예 다른 모양·움직임의
+ * 파티클을 씁니다.
+ */
+export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilityId): BuiltSkillEffect {
+  const theme = FRUIT_VFX_THEMES[fruitId] ?? { core: 0xffffff, glow: 0xbbbbbb, spark: 0xffffff };
+  const ultimate = skill.slot === 3;
+  const group = new THREE.Group();
+  const shape = skill.shape;
+  let durationMs = ultimate ? 900 : 600;
+  let growTo = 0.2;
+
+  const halfAngle = shape.kind === "cone" ? toRad(shape.halfAngleDeg) : shape.kind === "radial" ? Math.PI : 0.3;
+  const range = shape.kind === "cone" || shape.kind === "line" ? shape.range : shape.kind === "radial" ? shape.radius : 4;
+
+  switch (fruitId) {
+    case "magma_fist": {
+      // 용암 — 땅이 갈라지며 불기둥이 솟구치는 느낌. 화상기는 잉걸불 오버레이가 따로 덧붙습니다.
+      const ground = buildArcMesh(0, range * (shape.kind === "line" ? 0.5 : 1), halfAngle, 24, theme.core, ultimate ? 0.5 : 0.4, 0.04);
+      if (shape.kind === "line") ground.position.z = range / 2;
+      group.add(ground);
+      const rim = buildArcMesh(range * 0.85, range * 1.05, halfAngle, 24, theme.glow, ultimate ? 0.6 : 0.48, 0.06);
+      if (shape.kind === "line") rim.position.z = range / 2;
+      group.add(rim);
+      addRadialShards(group, ultimate ? 22 : 13, theme.spark, halfAngle >= Math.PI ? Math.PI : halfAngle, range);
+      growTo = 0.25;
+      break;
+    }
+    case "ice_lance": {
+      const freeze = !!skill.freezeDurationSec;
+      if (skill.toggle) {
+        addFrostFloor(group, theme, shape.kind === "radial" ? shape.radius : 5);
+        growTo = 0.15;
+        durationMs = 550;
+      } else {
+        addIceSpikes(group, ultimate ? 16 : freeze ? 12 : 8, theme, halfAngle, range, freeze);
+        addFrostShards(group, freeze ? 14 : 9, halfAngle, range);
+        growTo = freeze ? 0.2 : 0.1;
+        durationMs = freeze ? (ultimate ? 1000 : 750) : ultimate ? 850 : 550;
+      }
+      break;
+    }
+    case "thunder_strike": {
+      if (skill.toggle) {
+        addLightningAura(group, theme, ultimate);
+        growTo = 0.1;
+        durationMs = 550;
+      } else if (skill.autoTargetNearest) {
+        // 낙뢰: 판정 자체가 바라보는 방향과 무관하게 "가장 가까운 대상"이라 정확한
+        // 좌표까지는 렌더러가 알 수 없으니, 사방 임의의 지점에 벼락이 떨어지는
+        // 것으로 그립니다(실제 판정은 CombatSystem이 가장 가까운 대상으로 처리).
+        const a = Math.random() * Math.PI * 2;
+        const r = range * (0.25 + Math.random() * 0.45);
+        buildLightningStrike(group, Math.sin(a) * r, Math.cos(a) * r, theme, ultimate);
+        growTo = 0;
+        durationMs = ultimate ? 550 : 420;
+      } else if (shape.kind === "line") {
+        buildLightningBolt(group, shape.range, shape.width, theme, ultimate);
+        growTo = 0.03;
+        durationMs = ultimate ? 550 : 380;
+      }
+      break;
+    }
+    case "dark_wave": {
+      addVoidCore(group, theme, range, ultimate);
+      addInwardVoidShards(group, ultimate ? 20 : 12, theme, halfAngle, range);
+      growTo = 0.15;
+      durationMs = ultimate ? 950 : 700;
+      break;
+    }
+    case "rubber_barrage": {
+      if (shape.kind === "self") {
+        addImpactRings(group, theme, ultimate ? 14 : 8, 1.4, Math.PI, ultimate);
+        addRadialShards(group, ultimate ? 18 : 10, theme.spark, Math.PI, 1.3);
+        growTo = 0.35;
+        durationMs = ultimate ? 900 : 600;
+      } else if (shape.kind === "line") {
+        addPunchStreaks(group, theme, ultimate ? 16 : 10, shape.range, shape.width);
+        addImpactRings(group, theme, 4, shape.range, 0.3, ultimate);
+        growTo = 0.1;
+        durationMs = ultimate ? 550 : 400;
+      } else {
+        addImpactRings(group, theme, ultimate ? 20 : 12, range, halfAngle, ultimate);
+        addPunchStreaks(group, theme, ultimate ? 14 : 8, range, range * 0.7);
+        growTo = 0.15;
+        durationMs = ultimate ? 700 : 500;
+      }
+      break;
+    }
+    case "sand_storm": {
+      if (shape.kind === "radial") {
+        addSandVortex(group, theme, ultimate ? 26 : 16, shape.radius, ultimate);
+        growTo = 0.5;
+        durationMs = ultimate ? 1000 : 750;
+      } else {
+        addSandGrit(group, ultimate ? 22 : 14, theme, halfAngle, range);
+        growTo = 0.15;
+        durationMs = ultimate ? 700 : 500;
+      }
+      break;
+    }
+  }
+
+  if (ultimate) addUltimateFlash(group, shape.kind === "radial" ? 0.6 : 1.0);
+
+  return { group, durationMs, growTo };
+}
+
 /**
  * 화상(burnDps)이 있는 스킬 전용 — 메인 이펙트보다 훨씬 오래(화상 지속시간만큼,
  * 최대 3.2초로 제한) 남아 타오르는 잉걸불 파티클. 메인 스킬 이펙트와는 별도의

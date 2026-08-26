@@ -10,7 +10,7 @@ import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
 import type { RemoteEnemyGhost, RemotePlayerView, RemoteSkillFx } from "../network/MultiplayerClient";
 import { dist2D } from "../simulation/ShapeMath";
-import { buildEmberOverlayGroup, buildSkillEffectGroup } from "./SkillEffects";
+import { buildEmberOverlayGroup, buildFruitSkillEffectGroup, buildSkillEffectGroup } from "./SkillEffects";
 
 
 const CAMERA_DISTANCE = 6;
@@ -81,12 +81,16 @@ function buildBlockyCharacterParts(color: number): BlockyCharacter {
     armPivot.add(arm);
     group.add(armPivot);
 
+    // 이 게임은 카메라가 캐릭터 뒤에서 같은 방향을 보는 3인칭 시점이라
+    // (PlayerController의 A/D 이동 주석과 동일한 규칙), yaw=0일 때 로컬 -X가
+    // 화면상 "오른쪽"이 됩니다. side=1(로컬 +X)은 그래서 실제로는 캐릭터의
+    // 왼쪽입니다 — 오른손잡이로 보이도록 side===-1을 오른쪽에 배정합니다.
     if (side === -1) {
-      leftLegPivot = legPivot;
-      leftArmPivot = armPivot;
-    } else {
       rightLegPivot = legPivot;
       rightArmPivot = armPivot;
+    } else {
+      leftLegPivot = legPivot;
+      leftArmPivot = armPivot;
     }
   }
 
@@ -171,16 +175,16 @@ function buildSantoryu(): THREE.Group {
     return sword;
   }
 
-  // 오른손 — 살짝 바깥으로 눕힘
+  // 오른손 — 살짝 바깥으로 눕힘 (이 게임은 로컬 -X가 화면상 오른쪽입니다)
   const right = katana(gripMats[0]);
-  right.position.set(0.62, 0.75, 0.08);
-  right.rotation.set(0.16, 0, -0.42);
+  right.position.set(-0.62, 0.75, 0.08);
+  right.rotation.set(0.16, 0, 0.42);
   group.add(right);
 
   // 왼손 — 반대쪽 대칭
   const left = katana(gripMats[1]);
-  left.position.set(-0.62, 0.75, 0.08);
-  left.rotation.set(0.16, 0, 0.42);
+  left.position.set(0.62, 0.75, 0.08);
+  left.rotation.set(0.16, 0, -0.42);
   group.add(left);
 
   // 입에 문 칼 — 얼굴 앞에서 가로로
@@ -540,10 +544,11 @@ export class SceneRenderer {
     // 무기는 플레이어에 붙여두고, 숫자키로 뽑은 것만 보이게 합니다.
     // 요루: 오른손에 한 자루, 어깨 뒤로 살짝 눕혀 "들고 있는" 느낌
     // (원래 크기 그대로면 캐릭터 키의 두 배가 넘어 공중에 떠 보였습니다)
+    // (이 게임은 로컬 -X가 화면상 오른쪽입니다 — PlayerController의 A/D 주석과 동일 규칙)
     const yoru = buildYoru();
     yoru.scale.setScalar(0.6);
-    yoru.position.set(0.7, 0.78, 0.05);
-    yoru.rotation.set(0.22, 0, -0.5);
+    yoru.position.set(-0.7, 0.78, 0.05);
+    yoru.rotation.set(0.22, 0, 0.5);
     this.registerWeaponVisual("sword_yoru", yoru);
 
     // 삼도류: 이미 양손·입 위치가 모델 안에 잡혀 있어서 그대로 붙입니다.
@@ -554,15 +559,15 @@ export class SceneRenderer {
     // 엔마: 요루와 같은 자리(오른손)에 들지만, 훨씬 얇고 긴 붉은 칼날입니다.
     const enma = buildEnma();
     enma.scale.setScalar(0.6);
-    enma.position.set(0.7, 0.78, 0.05);
-    enma.rotation.set(0.22, 0, -0.5);
+    enma.position.set(-0.7, 0.78, 0.05);
+    enma.rotation.set(0.22, 0, 0.5);
     this.registerWeaponVisual("sword_enma", enma);
 
     // 새총 — 요루·엔마와 같은 오른손 자리에 쥡니다.
     const slingshot = buildSlingshot();
     slingshot.scale.setScalar(0.75);
-    slingshot.position.set(0.7, 0.78, 0.05);
-    slingshot.rotation.set(0.22, 0, -0.5);
+    slingshot.position.set(-0.7, 0.78, 0.05);
+    slingshot.rotation.set(0.22, 0, 0.5);
     this.registerWeaponVisual("gun_slingshot", slingshot);
 
     window.addEventListener("resize", () => {
@@ -632,10 +637,16 @@ export class SceneRenderer {
    * 자연히 아무 것도 스폰되지 않습니다.
    */
   private spawnSkillEffect(sourceId: string, slot: number, x: number, y: number, z: number, aimYaw: number, nowMs: number) {
-    const skill = skillsForWeapon(sourceId as ItemId)[slot] ?? skillsForFruit(sourceId as FruitAbilityId)[slot];
+    const weaponSkill = skillsForWeapon(sourceId as ItemId)[slot];
+    const skill = weaponSkill ?? skillsForFruit(sourceId as FruitAbilityId)[slot];
     if (!skill) return;
 
-    const main = buildSkillEffectGroup(skill, sourceId as ItemId | FruitAbilityId);
+    // 무기(검) 스킬은 기존 도형 기반 이펙트 그대로, 열매 스킬은 이름/속성에 맞춘
+    // 전용 이펙트(FRUIT_SKILL_EFFECT_BUILDERS)를 씁니다 — 검과 열매가 똑같이
+    // "판정 도형에 색만 입힌" 모양으로 보이지 않도록 갈라둡니다.
+    const main = weaponSkill
+      ? buildSkillEffectGroup(skill, sourceId as ItemId)
+      : buildFruitSkillEffectGroup(skill, sourceId as FruitAbilityId);
     main.group.position.set(x, y, z);
     main.group.rotation.y = aimYaw;
     this.scene.add(main.group);
@@ -987,6 +998,23 @@ export class SceneRenderer {
           obj.position.x += (obj.userData.vx as number) * animDt * speed;
           obj.position.y += ((obj.userData.vy as number) ?? 0) * animDt * speed;
           obj.position.z += (obj.userData.vz as number) * animDt * speed;
+        } else if (obj.userData.role === "orbit") {
+          // 모래 열매 등 소용돌이형 이펙트 — 중심 주위를 빙글빙글 돌면서
+          // 반지름이 서서히 벌어져(orbitGrow) 회오리 실루엣을 만듭니다.
+          const angleSpeed = (obj.userData.orbitSpeed as number) ?? 3;
+          obj.userData.orbitAngle = ((obj.userData.orbitAngle as number) ?? 0) + angleSpeed * animDt;
+          const grow = (obj.userData.orbitGrow as number) ?? 0;
+          const radius = ((obj.userData.orbitRadius as number) ?? 1) * (1 + t * grow);
+          const angle = obj.userData.orbitAngle as number;
+          obj.position.x = Math.sin(angle) * radius;
+          obj.position.z = Math.cos(angle) * radius;
+          obj.position.y = ((obj.userData.orbitY as number) ?? 0.5) + t * ((obj.userData.orbitRise as number) ?? 0);
+        } else if (obj.userData.role === "flicker") {
+          // 번개 열매 등 — 지지직 깜빡이는 섬광. 페이드 위에 곱해서 불규칙하게 껌뻑입니다.
+          const freq = (obj.userData.flickerSpeed as number) ?? 18;
+          const seed = (obj.userData.flickerSeed as number) ?? 0;
+          const flicker = 0.35 + 0.65 * Math.abs(Math.sin(nowMs * 0.001 * freq + seed));
+          mat.opacity = (obj.userData.baseOpacity as number) * fade * flicker;
         }
       });
     }
