@@ -480,7 +480,7 @@ function addPunchStreaks(group: THREE.Group, theme: WeaponVfxTheme, count: numbe
  * 참고해, 타격 순간의 핵심 모양은 흰색으로 두고 테두리(글로우)만 고무
  * 테마색으로 물들입니다.
  */
-function addPunchImpact(group: THREE.Group, theme: WeaponVfxTheme, x: number, y: number, z: number, scale: number) {
+function addPunchImpact(group: THREE.Group, theme: WeaponVfxTheme, x: number, y: number, z: number, scale: number, appearAtT = 0) {
   const thetaLen = Math.PI * (0.55 + Math.random() * 0.25);
   const thetaStart = Math.random() * Math.PI * 2;
   const rotX = Math.PI / 2 + (Math.random() - 0.5) * 0.7;
@@ -491,6 +491,7 @@ function addPunchImpact(group: THREE.Group, theme: WeaponVfxTheme, x: number, y:
   glow.rotation.set(rotX, 0, rotZ);
   glow.userData.baseOpacity = 0.55;
   glow.userData.role = "sweep";
+  glow.userData.appearAtT = appearAtT;
   group.add(glow);
 
   const core = new THREE.Mesh(new THREE.RingGeometry(0.36 * scale, 0.44 * scale, 24, 1, thetaStart, thetaLen), makeBasicMat(0xffffff, 0.92));
@@ -498,6 +499,7 @@ function addPunchImpact(group: THREE.Group, theme: WeaponVfxTheme, x: number, y:
   core.rotation.set(rotX, 0, rotZ);
   core.userData.baseOpacity = 0.92;
   core.userData.role = "sweep";
+  core.userData.appearAtT = appearAtT;
   group.add(core);
 
   // 타격 중심의 짧은 십자형 별 섬광 (블록스프루트 특유의 흰 별 반짝임)
@@ -509,6 +511,7 @@ function addPunchImpact(group: THREE.Group, theme: WeaponVfxTheme, x: number, y:
     spark.userData.role = "flicker";
     spark.userData.flickerSpeed = 26 + Math.random() * 8;
     spark.userData.flickerSeed = Math.random() * 6;
+    spark.userData.appearAtT = appearAtT;
     group.add(spark);
   }
 }
@@ -525,6 +528,38 @@ function addRocketStreaks(group: THREE.Group, theme: WeaponVfxTheme, count: numb
     mesh.userData.role = "sweep";
     group.add(mesh);
   }
+}
+
+/**
+ * 고무 열매 — 무장색으로 검어진 팔이 어깨에서부터 쭉 늘어나며 뻗어나갔다가
+ * 되감기는 모션. 사용자가 보내준 실제 영상에서 "타격이 나갈 때 화면에
+ * 보이던 검은 직사각형"이 사실 이 늘어난 팔이었다고 해서 추가했습니다 —
+ * SceneRenderer의 "extendZ" 롤(role)이 매 프레임 길이(scale.z)를 갱신합니다.
+ * @param angle 어깨를 기준으로 팔이 뻗는 방향 (라디안, 0이면 정면 +Z)
+ * @param length 팔이 최대로 늘어나는 길이(m)
+ */
+function addStretchArm(
+  group: THREE.Group,
+  length: number,
+  angle: number,
+  thickness: number,
+  peakT: number,
+  holdT: number,
+  retractT: number,
+) {
+  const pivot = new THREE.Group();
+  pivot.position.set(-0.35, 1.3, 0);
+  pivot.rotation.y = angle;
+  group.add(pivot);
+
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(thickness, thickness, 1), makeBasicMat(0x141414, 0.95));
+  mesh.userData.baseOpacity = 0.95;
+  mesh.userData.role = "extendZ";
+  mesh.userData.armLength = length;
+  mesh.userData.armPeakT = peakT;
+  mesh.userData.armHoldT = holdT;
+  mesh.userData.armRetractT = retractT;
+  pivot.add(mesh);
 }
 
 /** 모래 열매 — 원형 범위 스킬 전용: 중심을 빙글빙글 도는 회오리(그리트가 궤도를 그림). */
@@ -655,28 +690,34 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
         growTo = 0.35;
         durationMs = ultimate ? 900 : 600;
       } else if (shape.kind === "line" && skill.dashDistance) {
-        // 고무 로켓 — 팔을 걸고 튕겨나가는 돌진. 경로에 속도선을 남기고, 도착 지점에
-        // 크레센트 슬래시+별섬광, 바닥엔 착지 충격 링을 남깁니다.
+        // 고무 로켓 — 무장색 팔이 사거리만큼 쭉 뻗어나가 잡아채듯 튕겨나가는 돌진.
+        // 경로에 속도선을 남기고, 도착 지점에 크레센트 슬래시+별섬광, 바닥엔 착지 충격 링.
+        addStretchArm(group, shape.range, 0, ultimate ? 0.34 : 0.28, 0.3, 0.1, 0.35);
         addRocketStreaks(group, theme, ultimate ? 14 : 9, shape.range, shape.width);
-        addPunchImpact(group, theme, 0, 0.9, shape.range, ultimate ? 1.15 : 0.9);
+        addPunchImpact(group, theme, 0, 0.9, shape.range, ultimate ? 1.15 : 0.9, 0.3);
         const landingRing = buildArcMesh(0, 1.1, Math.PI, 20, theme.glow, ultimate ? 0.55 : 0.42, 0.04);
         landingRing.position.z = shape.range;
+        landingRing.userData.appearAtT = 0.3;
         group.add(landingRing);
         growTo = 0.08;
         durationMs = ultimate ? 550 : 400;
       } else if (shape.kind === "line") {
-        // 고무 피스톨 — 팔을 쭉 뻗는 강타 한 방.
+        // 고무 피스톨 — 무장색 팔이 쭉 뻗어나가는 강타 한 방.
+        addStretchArm(group, shape.range * 0.95, 0, ultimate ? 0.3 : 0.24, 0.3, 0.12, 0.35);
         addPunchStreaks(group, theme, ultimate ? 10 : 6, shape.range, shape.width);
-        addPunchImpact(group, theme, 0, 0.9, shape.range * 0.92, ultimate ? 1.1 : 0.85);
+        addPunchImpact(group, theme, 0, 0.9, shape.range * 0.92, ultimate ? 1.1 : 0.85, 0.3);
         growTo = 0.06;
         durationMs = ultimate ? 500 : 360;
       } else {
-        // 고무 개틀링 — 제자리에서 퍼붓는 연타. 부채꼴 안에 크레센트+별섬광이 여러 번 겹쳐 터집니다.
+        // 고무 개틀링 — 제자리에서 무장색 팔을 여러 번 빠르게 뻗어 퍼붓는 연타.
+        // 팔마다 시작 타이밍(peakT)을 어긋나게 줘서 "다다다닥" 연속으로 뻗는 느낌을 냅니다.
         const hits = ultimate ? 9 : 6;
         for (let i = 0; i < hits; i++) {
           const a = -halfAngle + Math.random() * (2 * halfAngle);
           const r = range * (0.35 + Math.random() * 0.6);
-          addPunchImpact(group, theme, Math.sin(a) * r, 0.6 + Math.random() * 0.8, Math.cos(a) * r, 0.55 + Math.random() * 0.25);
+          const peakT = 0.04 + (i / Math.max(1, hits - 1)) * 0.55;
+          addStretchArm(group, r, a, 0.16, peakT, 0.04, 0.18);
+          addPunchImpact(group, theme, Math.sin(a) * r, 0.6 + Math.random() * 0.8, Math.cos(a) * r, 0.55 + Math.random() * 0.25, peakT);
         }
         growTo = 0.1;
         durationMs = ultimate ? 650 : 480;

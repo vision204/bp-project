@@ -993,6 +993,10 @@ export class SceneRenderer {
         if (!(obj instanceof THREE.Mesh)) return;
         const mat = obj.material as THREE.MeshBasicMaterial;
         if (typeof obj.userData.baseOpacity === "number") mat.opacity = obj.userData.baseOpacity * fade;
+        // appearAtT가 있으면 그 시점 전까지는 안 보이게 — 늘어나는 팔이 다 뻗은
+        // 다음에야 타격 섬광이 뜨도록(팔보다 먼저 번쩍이지 않도록) 맞출 때 씁니다.
+        const appearAtT = obj.userData.appearAtT as number | undefined;
+        if (typeof appearAtT === "number" && t < appearAtT) mat.opacity = 0;
         if (obj.userData.role === "shard") {
           const speed = (obj.userData.speed as number) ?? 1;
           obj.position.x += (obj.userData.vx as number) * animDt * speed;
@@ -1009,12 +1013,27 @@ export class SceneRenderer {
           obj.position.x = Math.sin(angle) * radius;
           obj.position.z = Math.cos(angle) * radius;
           obj.position.y = ((obj.userData.orbitY as number) ?? 0.5) + t * ((obj.userData.orbitRise as number) ?? 0);
-        } else if (obj.userData.role === "flicker") {
+        } else if (obj.userData.role === "flicker" && !(typeof appearAtT === "number" && t < appearAtT)) {
           // 번개 열매 등 — 지지직 깜빡이는 섬광. 페이드 위에 곱해서 불규칙하게 껌뻑입니다.
           const freq = (obj.userData.flickerSpeed as number) ?? 18;
           const seed = (obj.userData.flickerSeed as number) ?? 0;
           const flicker = 0.35 + 0.65 * Math.abs(Math.sin(nowMs * 0.001 * freq + seed));
           mat.opacity = (obj.userData.baseOpacity as number) * fade * flicker;
+        } else if (obj.userData.role === "extendZ") {
+          // 고무 열매 — 무장색으로 검어진 팔이 늘어나며 뻗어나갔다가 되감기는 모션.
+          // 어깨(로컬 원점)에 고정된 채 z(길이) 방향으로만 늘었다 줄었다 합니다.
+          const armLength = (obj.userData.armLength as number) ?? 1;
+          const peakT = (obj.userData.armPeakT as number) ?? 0.3;
+          const holdT = (obj.userData.armHoldT as number) ?? 0.15;
+          const retractT = (obj.userData.armRetractT as number) ?? 0.25;
+          let frac: number;
+          if (t < peakT) frac = peakT > 0 ? t / peakT : 1;
+          else if (t < peakT + holdT) frac = 1;
+          else if (t < peakT + holdT + retractT) frac = retractT > 0 ? 1 - (t - peakT - holdT) / retractT : 0;
+          else frac = 0;
+          const len = Math.max(0.0005, armLength * frac);
+          obj.scale.z = len;
+          obj.position.z = len / 2;
         }
       });
     }
