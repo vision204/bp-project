@@ -474,6 +474,59 @@ function addPunchStreaks(group: THREE.Group, theme: WeaponVfxTheme, count: numbe
   }
 }
 
+/**
+ * 고무 열매 — 흰 크레센트(초승달) 슬래시 + 별 모양 섬광. 사용자가 보내준
+ * 실제 블록스프루트 영상 속 펀치 임팩트가 컬러감 없이 흰색 위주였던 걸
+ * 참고해, 타격 순간의 핵심 모양은 흰색으로 두고 테두리(글로우)만 고무
+ * 테마색으로 물들입니다.
+ */
+function addPunchImpact(group: THREE.Group, theme: WeaponVfxTheme, x: number, y: number, z: number, scale: number) {
+  const thetaLen = Math.PI * (0.55 + Math.random() * 0.25);
+  const thetaStart = Math.random() * Math.PI * 2;
+  const rotX = Math.PI / 2 + (Math.random() - 0.5) * 0.7;
+  const rotZ = Math.random() * Math.PI;
+
+  const glow = new THREE.Mesh(new THREE.RingGeometry(0.3 * scale, 0.5 * scale, 24, 1, thetaStart, thetaLen), makeBasicMat(theme.glow, 0.55));
+  glow.position.set(x, y, z);
+  glow.rotation.set(rotX, 0, rotZ);
+  glow.userData.baseOpacity = 0.55;
+  glow.userData.role = "sweep";
+  group.add(glow);
+
+  const core = new THREE.Mesh(new THREE.RingGeometry(0.36 * scale, 0.44 * scale, 24, 1, thetaStart, thetaLen), makeBasicMat(0xffffff, 0.92));
+  core.position.set(x, y, z);
+  core.rotation.set(rotX, 0, rotZ);
+  core.userData.baseOpacity = 0.92;
+  core.userData.role = "sweep";
+  group.add(core);
+
+  // 타격 중심의 짧은 십자형 별 섬광 (블록스프루트 특유의 흰 별 반짝임)
+  for (const rot of [0, Math.PI / 2]) {
+    const spark = new THREE.Mesh(new THREE.BoxGeometry(scale * 0.9, scale * 0.07, scale * 0.07), makeBasicMat(0xffffff, 0.9));
+    spark.position.set(x, y, z);
+    spark.rotation.y = rot;
+    spark.userData.baseOpacity = 0.9;
+    spark.userData.role = "flicker";
+    spark.userData.flickerSpeed = 26 + Math.random() * 8;
+    spark.userData.flickerSeed = Math.random() * 6;
+    group.add(spark);
+  }
+}
+
+/** 고무 열매 — 로켓처럼 튕겨나갈 때 경로에 남기는 속도선 잔상 (고무 테마색). */
+function addRocketStreaks(group: THREE.Group, theme: WeaponVfxTheme, count: number, range: number, width: number) {
+  for (let i = 0; i < count; i++) {
+    const len = 0.6 + Math.random() * 0.9;
+    const z = range * Math.random();
+    const x = (Math.random() - 0.5) * width * 1.4;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, len), makeBasicMat(i % 2 === 0 ? theme.spark : theme.glow, 0.6));
+    mesh.position.set(x, 0.4 + Math.random() * 1.0, z);
+    mesh.userData.baseOpacity = 0.6;
+    mesh.userData.role = "sweep";
+    group.add(mesh);
+  }
+}
+
 /** 모래 열매 — 원형 범위 스킬 전용: 중심을 빙글빙글 도는 회오리(그리트가 궤도를 그림). */
 function addSandVortex(group: THREE.Group, theme: WeaponVfxTheme, count: number, maxRadius: number, ultimate: boolean) {
   for (let i = 0; i < count; i++) {
@@ -592,21 +645,41 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
       break;
     }
     case "rubber_barrage": {
+      // 사용자가 보내준 실제 영상 참고 결과: 슬롯 배치(로켓=X 돌진, 개틀링=C 제자리
+      // 연타)는 지금 그대로 유지, 이펙트는 흰 크레센트+별섬광 스타일을 가져오되
+      // 글로우만 고무색으로 물들이고, 돌진 잔상은 하늘색이 아니라 고무 테마색으로.
       if (shape.kind === "self") {
+        // 기어 세컨드 — 영상엔 명확한 장면이 없어 기존에 제안한 붉은 오라를 유지합니다.
         addImpactRings(group, theme, ultimate ? 14 : 8, 1.4, Math.PI, ultimate);
         addRadialShards(group, ultimate ? 18 : 10, theme.spark, Math.PI, 1.3);
         growTo = 0.35;
         durationMs = ultimate ? 900 : 600;
-      } else if (shape.kind === "line") {
-        addPunchStreaks(group, theme, ultimate ? 16 : 10, shape.range, shape.width);
-        addImpactRings(group, theme, 4, shape.range, 0.3, ultimate);
-        growTo = 0.1;
+      } else if (shape.kind === "line" && skill.dashDistance) {
+        // 고무 로켓 — 팔을 걸고 튕겨나가는 돌진. 경로에 속도선을 남기고, 도착 지점에
+        // 크레센트 슬래시+별섬광, 바닥엔 착지 충격 링을 남깁니다.
+        addRocketStreaks(group, theme, ultimate ? 14 : 9, shape.range, shape.width);
+        addPunchImpact(group, theme, 0, 0.9, shape.range, ultimate ? 1.15 : 0.9);
+        const landingRing = buildArcMesh(0, 1.1, Math.PI, 20, theme.glow, ultimate ? 0.55 : 0.42, 0.04);
+        landingRing.position.z = shape.range;
+        group.add(landingRing);
+        growTo = 0.08;
         durationMs = ultimate ? 550 : 400;
+      } else if (shape.kind === "line") {
+        // 고무 피스톨 — 팔을 쭉 뻗는 강타 한 방.
+        addPunchStreaks(group, theme, ultimate ? 10 : 6, shape.range, shape.width);
+        addPunchImpact(group, theme, 0, 0.9, shape.range * 0.92, ultimate ? 1.1 : 0.85);
+        growTo = 0.06;
+        durationMs = ultimate ? 500 : 360;
       } else {
-        addImpactRings(group, theme, ultimate ? 20 : 12, range, halfAngle, ultimate);
-        addPunchStreaks(group, theme, ultimate ? 14 : 8, range, range * 0.7);
-        growTo = 0.15;
-        durationMs = ultimate ? 700 : 500;
+        // 고무 개틀링 — 제자리에서 퍼붓는 연타. 부채꼴 안에 크레센트+별섬광이 여러 번 겹쳐 터집니다.
+        const hits = ultimate ? 9 : 6;
+        for (let i = 0; i < hits; i++) {
+          const a = -halfAngle + Math.random() * (2 * halfAngle);
+          const r = range * (0.35 + Math.random() * 0.6);
+          addPunchImpact(group, theme, Math.sin(a) * r, 0.6 + Math.random() * 0.8, Math.cos(a) * r, 0.55 + Math.random() * 0.25);
+        }
+        growTo = 0.1;
+        durationMs = ultimate ? 650 : 480;
       }
       break;
     }
