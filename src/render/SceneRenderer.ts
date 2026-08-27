@@ -10,7 +10,7 @@ import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
 import type { RemoteEnemyGhost, RemotePlayerView, RemoteSkillFx } from "../network/MultiplayerClient";
 import { dist2D } from "../simulation/ShapeMath";
-import { buildEmberOverlayGroup, buildFruitSkillEffectGroup, buildSkillEffectGroup } from "./SkillEffects";
+import { buildEmberOverlayGroup, buildFruitSkillEffectGroup, buildSkillEffectGroup, type ArmStretchPunch } from "./SkillEffects";
 
 
 const CAMERA_DISTANCE = 6;
@@ -27,6 +27,16 @@ const ATTACK_SWING_ARM_AMPLITUDE = 1.3;
 /** 무기 자체가 추가로 더 휘두르는 최대 각도(라디안) */
 const ATTACK_SWING_WEAPON_AMPLITUDE = 1.9;
 
+// 고무 열매 — 캐릭터의 진짜 오른팔이 뻗어나가는 펀치. 팔 메시(BoxGeometry)의
+// 원래 세로 길이/오프셋과 정확히 맞아야 어깨에 붙은 채로 늘어나 보입니다
+// (buildBlockyCharacterParts의 arm BoxGeometry(0.28, 0.85, 0.3) 참고).
+const RUBBER_ARM_BASE_LENGTH = 0.85;
+const RUBBER_ARM_BASE_OFFSET_Y = -RUBBER_ARM_BASE_LENGTH / 2;
+/** 다 뻗었을 때 팔 피벗의 회전(라디안) — 0이면 어깨에서 아래로 늘어진 기본자세, -PI/2면 정면(+Z)으로 수평 스트레이트. */
+const RUBBER_ARM_FORWARD_PITCH = -Math.PI / 2;
+/** 다 뻗었을 때 팔이 얼마나 가늘어지는지(고무줄처럼 늘어난 느낌) */
+const RUBBER_ARM_THIN_FACTOR = 0.5;
+
 interface BlockyCharacter {
   group: THREE.Group;
   bodyMat: THREE.MeshStandardMaterial;
@@ -36,6 +46,8 @@ interface BlockyCharacter {
   rightLegPivot: THREE.Group;
   leftArmPivot: THREE.Group;
   rightArmPivot: THREE.Group;
+  /** 오른팔의 실제 박스 메시 — 고무 열매 펀치 때 이 메시 자체를 늘였다 줄입니다. */
+  rightArmMesh: THREE.Mesh;
 }
 
 /** 아트가 준비되기 전까지, 로블록스 특유의 "블록형" 실루엣을 흉내낸 플레이스홀더 캐릭터. */
@@ -64,6 +76,7 @@ function buildBlockyCharacterParts(color: number): BlockyCharacter {
   let rightLegPivot!: THREE.Group;
   let leftArmPivot!: THREE.Group;
   let rightArmPivot!: THREE.Group;
+  let rightArmMesh!: THREE.Mesh;
   for (const side of [-1, 1]) {
     const legPivot = new THREE.Group();
     legPivot.position.set(side * 0.22, hipY, 0);
@@ -88,13 +101,14 @@ function buildBlockyCharacterParts(color: number): BlockyCharacter {
     if (side === -1) {
       rightLegPivot = legPivot;
       rightArmPivot = armPivot;
+      rightArmMesh = arm;
     } else {
       leftLegPivot = legPivot;
       leftArmPivot = armPivot;
     }
   }
 
-  return { group, bodyMat: mat, legMat, leftLegPivot, rightLegPivot, leftArmPivot, rightArmPivot };
+  return { group, bodyMat: mat, legMat, leftLegPivot, rightLegPivot, leftArmPivot, rightArmPivot, rightArmMesh };
 }
 
 /** 머티리얼 참조가 필요 없는 곳(적·NPC)에서 쓰는 간편 버전 */
@@ -523,6 +537,12 @@ export class SceneRenderer {
   // ── 요루/삼도류/엔마 스킬 이펙트 (내 것 + 다른 플레이어 것 공용) ─────────────
   private skillEffects: { group: THREE.Group; startedAtMs: number; durationMs: number; growTo: number }[] = [];
 
+  // ── 고무 열매 — 내(로컬 플레이어)가 뻗을 때만 진짜 오른팔을 늘였다 되감습니다
+  // (다른 플레이어는 팔 관절이 노출돼 있지 않아 지금은 로컬 전용입니다).
+  private rubberArmStartedAtMs = -Infinity;
+  private rubberArmTotalDurationMs = 0;
+  private rubberArmPunches: ArmStretchPunch[] = [];
+
   constructor(container: HTMLElement, private readonly quality: QualitySettings) {
     // 섬들이 수백 미터 떨어져 있으므로 far plane을 넉넉하게 잡습니다.
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, maxWorldRadius() * 5);
@@ -636,7 +656,16 @@ export class SceneRenderer {
    * 어느 쪽에도 등록되지 않은 id(예: 새총)는 둘 다 빈 배열을 돌려주므로
    * 자연히 아무 것도 스폰되지 않습니다.
    */
-  private spawnSkillEffect(sourceId: string, slot: number, x: number, y: number, z: number, aimYaw: number, nowMs: number) {
+  private spawnSkillEffect(
+    sourceId: string,
+    slot: number,
+    x: number,
+    y: number,
+    z: number,
+    aimYaw: number,
+    nowMs: number,
+    isLocalPlayer = false,
+  ) {
     const weaponSkill = skillsForWeapon(sourceId as ItemId)[slot];
     const skill = weaponSkill ?? skillsForFruit(sourceId as FruitAbilityId)[slot];
     if (!skill) return;
@@ -651,6 +680,15 @@ export class SceneRenderer {
     main.group.rotation.y = aimYaw;
     this.scene.add(main.group);
     this.skillEffects.push({ group: main.group, startedAtMs: nowMs, durationMs: main.durationMs, growTo: main.growTo });
+
+    // 고무 열매고, 내(로컬 플레이어)가 쓴 거면 진짜 오른팔을 이 타이밍표대로
+    // 늘였다 되감습니다 — 다른 플레이어/원격 중계분은 팔 관절 모델이 따로
+    // 없어서(ensureRemotePlayerVisual은 단순 그룹) 지금은 로컬 전용입니다.
+    if (isLocalPlayer && main.armStretch && main.armStretch.length > 0) {
+      this.rubberArmStartedAtMs = nowMs;
+      this.rubberArmTotalDurationMs = main.durationMs;
+      this.rubberArmPunches = main.armStretch;
+    }
 
     const ember = buildEmberOverlayGroup(skill);
     if (ember) {
@@ -910,6 +948,47 @@ export class SceneRenderer {
     const attackSwingArc = attackSwingT >= 0 && attackSwingT < 1 ? Math.sin(attackSwingT * Math.PI) : 0;
     this.playerParts.rightArmPivot.rotation.x -= attackSwingArc * ATTACK_SWING_ARM_AMPLITUDE;
 
+    // 고무 열매 펀치 — 이번 프레임에 예약된 스트레치 구간이 있으면 진짜 오른팔
+    // 메시(rightArmMesh)를 그 길이만큼 늘이고, 팔 피벗을 정면으로 접어 편치
+    // 자세를 만듭니다. 걷기/공격 스윙으로 이미 정해진 현재 회전값에서
+    // 정면 자세로 보간해, 걸으면서/베면서 뻗어도 툭 끊기지 않습니다.
+    {
+      const rubberT = (nowMs - this.rubberArmStartedAtMs) / Math.max(1, this.rubberArmTotalDurationMs);
+      let rubberFrac = 0;
+      let rubberLength = 0;
+      if (rubberT >= 0 && rubberT < 1) {
+        for (const punch of this.rubberArmPunches) {
+          if (rubberT < punch.startT || rubberT > punch.endT) continue;
+          const span = Math.max(0.0001, punch.endT - punch.startT);
+          const localT = (rubberT - punch.startT) / span;
+          if (localT < punch.peakFrac) {
+            rubberFrac = punch.peakFrac > 0 ? localT / punch.peakFrac : 1;
+          } else if (localT < punch.peakFrac + punch.holdFrac) {
+            rubberFrac = 1;
+          } else {
+            const retractFrac = Math.max(0.0001, 1 - punch.peakFrac - punch.holdFrac);
+            rubberFrac = Math.max(0, 1 - (localT - punch.peakFrac - punch.holdFrac) / retractFrac);
+          }
+          rubberLength = punch.length;
+          break;
+        }
+      }
+      const armMesh = this.playerParts.rightArmMesh;
+      if (rubberFrac > 0.0005) {
+        const stretch = 1 + rubberFrac * (rubberLength / RUBBER_ARM_BASE_LENGTH - 1);
+        armMesh.scale.y = stretch;
+        armMesh.position.y = RUBBER_ARM_BASE_OFFSET_Y * stretch;
+        const thin = 1 - rubberFrac * (1 - RUBBER_ARM_THIN_FACTOR);
+        armMesh.scale.x = thin;
+        armMesh.scale.z = thin;
+        const baseRotX = this.playerParts.rightArmPivot.rotation.x;
+        this.playerParts.rightArmPivot.rotation.x = baseRotX + rubberFrac * (RUBBER_ARM_FORWARD_PITCH - baseRotX);
+      } else if (armMesh.scale.y !== 1) {
+        armMesh.scale.set(1, 1, 1);
+        armMesh.position.y = RUBBER_ARM_BASE_OFFSET_Y;
+      }
+    }
+
     // Q 대쉬 — 이번 프레임에 대쉬가 나갔으면 그 방향으로 바람 이펙트를 새로 띄우고,
     // 떠 있는 이펙트들은 1초에 걸쳐 옅어지다 사라지게 합니다.
     for (const ev of state.player.events) {
@@ -963,6 +1042,7 @@ export class SceneRenderer {
             state.player.position.z,
             state.player.aimYaw,
             nowMs,
+            true,
           );
         }
       }

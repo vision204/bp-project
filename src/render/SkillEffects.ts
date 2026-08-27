@@ -51,6 +51,31 @@ export interface BuiltSkillEffect {
   durationMs: number;
   /** 시간이 지나며 그룹 전체가 이만큼(비율) 더 커집니다 (0이면 크기 고정). */
   growTo: number;
+  /**
+   * 고무 열매 전용 — 이 값이 있으면 SceneRenderer가 (떠다니는 이펙트 메시 말고)
+   * 캐릭터의 진짜 오른팔을 이 타이밍표대로 앞으로 늘렸다 되감습니다. 다른
+   * 열매/무기 스킬에는 없습니다(팔은 그대로 둠).
+   */
+  armStretch?: ArmStretchPunch[];
+}
+
+/**
+ * 고무 열매 실제 팔 스트레치 한 번의 타이밍 — 전체 durationMs에 대한 비율(0~1)로
+ * [startT, endT] 구간을 잡고, 그 구간 안에서 다시 늘어나기(peakFrac)/버티기
+ * (holdFrac)/되감기(나머지)로 나눕니다. 개틀링처럼 여러 번 찌를 땐 구간을
+ * 이어 붙여서 팔 하나가 순서대로 여러 번 뻗도록 씁니다.
+ */
+export interface ArmStretchPunch {
+  /** 이 펀치가 시작되는 시점(0~1). */
+  startT: number;
+  /** 이 펀치가 끝나는 시점(0~1) — 이후엔 팔이 원래 길이로 쉽니다. */
+  endT: number;
+  /** [startT,endT] 구간 중 다 늘어나기까지 걸리는 비율. */
+  peakFrac: number;
+  /** 다 늘어난 채로 버티는 비율. 나머지는 되감기(retract)입니다. */
+  holdFrac: number;
+  /** 최대로 늘어나는 길이(m). */
+  length: number;
 }
 
 function toRad(deg: number) {
@@ -623,6 +648,8 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
 
   const halfAngle = shape.kind === "cone" ? toRad(shape.halfAngleDeg) : shape.kind === "radial" ? Math.PI : 0.3;
   const range = shape.kind === "cone" || shape.kind === "line" ? shape.range : shape.kind === "radial" ? shape.radius : 4;
+  // 고무 열매일 때만 채워집니다 — 캐릭터의 진짜 오른팔이 따라갈 타이밍표.
+  let armStretch: ArmStretchPunch[] | undefined;
 
   switch (fruitId) {
     case "magma_fist": {
@@ -701,6 +728,7 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
         group.add(landingRing);
         growTo = 0.08;
         durationMs = ultimate ? 550 : 400;
+        armStretch = [{ startT: 0, endT: 0.75, peakFrac: 0.4, holdFrac: 0.13, length: shape.range }];
       } else if (shape.kind === "line") {
         // 고무 피스톨 — 무장색 팔이 쭉 뻗어나가는 강타 한 방.
         addStretchArm(group, shape.range * 0.95, 0, ultimate ? 0.3 : 0.24, 0.3, 0.12, 0.35);
@@ -708,16 +736,24 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
         addPunchImpact(group, theme, 0, 0.9, shape.range * 0.92, ultimate ? 1.1 : 0.85, 0.3);
         growTo = 0.06;
         durationMs = ultimate ? 500 : 360;
+        armStretch = [{ startT: 0, endT: 0.77, peakFrac: 0.39, holdFrac: 0.156, length: shape.range * 0.95 }];
       } else {
         // 고무 개틀링 — 제자리에서 무장색 팔을 여러 번 빠르게 뻗어 퍼붓는 연타.
         // 팔마다 시작 타이밍(peakT)을 어긋나게 줘서 "다다다닥" 연속으로 뻗는 느낌을 냅니다.
         const hits = ultimate ? 9 : 6;
+        // 진짜 팔은 하나뿐이라 동시에 여러 방향으로 뻗을 수 없으니, 개틀링 동안
+        // 이어 붙인 시간 구간(slot)마다 순서대로 한 번씩 정면으로 빠르게
+        // 뻗었다 되감기게 스케줄을 짭니다(떠다니는 잔상 이펙트는 기존처럼
+        // 여러 각도로 흩어져도 진짜 팔은 정면 잽을 연타하는 것처럼 보입니다).
+        const slot = 1 / hits;
+        armStretch = [];
         for (let i = 0; i < hits; i++) {
           const a = -halfAngle + Math.random() * (2 * halfAngle);
           const r = range * (0.35 + Math.random() * 0.6);
           const peakT = 0.04 + (i / Math.max(1, hits - 1)) * 0.55;
           addStretchArm(group, r, a, 0.16, peakT, 0.04, 0.18);
           addPunchImpact(group, theme, Math.sin(a) * r, 0.6 + Math.random() * 0.8, Math.cos(a) * r, 0.55 + Math.random() * 0.25, peakT);
+          armStretch.push({ startT: i * slot, endT: (i + 1) * slot, peakFrac: 0.35, holdFrac: 0.1, length: r });
         }
         growTo = 0.1;
         durationMs = ultimate ? 650 : 480;
@@ -740,7 +776,7 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
 
   if (ultimate) addUltimateFlash(group, shape.kind === "radial" ? 0.6 : 1.0);
 
-  return { group, durationMs, growTo };
+  return { group, durationMs, growTo, armStretch };
 }
 
 /**
