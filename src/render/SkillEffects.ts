@@ -719,7 +719,7 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
       } else if (shape.kind === "line" && skill.dashDistance) {
         // 고무 로켓 — 무장색 팔이 사거리만큼 쭉 뻗어나가 잡아채듯 튕겨나가는 돌진.
         // 경로에 속도선을 남기고, 도착 지점에 크레센트 슬래시+별섬광, 바닥엔 착지 충격 링.
-        addStretchArm(group, shape.range, 0, ultimate ? 0.34 : 0.28, 0.3, 0.1, 0.35);
+        addStretchArm(group, shape.range, 0, ultimate ? 0.5 : 0.42, 0.3, 0.1, 0.35);
         addRocketStreaks(group, theme, ultimate ? 14 : 9, shape.range, shape.width);
         addPunchImpact(group, theme, 0, 0.9, shape.range, ultimate ? 1.15 : 0.9, 0.3);
         const landingRing = buildArcMesh(0, 1.1, Math.PI, 20, theme.glow, ultimate ? 0.55 : 0.42, 0.04);
@@ -731,7 +731,7 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
         armStretch = [{ startT: 0, endT: 0.75, peakFrac: 0.4, holdFrac: 0.13, length: shape.range }];
       } else if (shape.kind === "line") {
         // 고무 피스톨 — 무장색 팔이 쭉 뻗어나가는 강타 한 방.
-        addStretchArm(group, shape.range * 0.95, 0, ultimate ? 0.3 : 0.24, 0.3, 0.12, 0.35);
+        addStretchArm(group, shape.range * 0.95, 0, ultimate ? 0.46 : 0.38, 0.3, 0.12, 0.35);
         addPunchStreaks(group, theme, ultimate ? 10 : 6, shape.range, shape.width);
         addPunchImpact(group, theme, 0, 0.9, shape.range * 0.92, ultimate ? 1.1 : 0.85, 0.3);
         growTo = 0.06;
@@ -751,7 +751,7 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
           const a = -halfAngle + Math.random() * (2 * halfAngle);
           const r = range * (0.35 + Math.random() * 0.6);
           const peakT = 0.04 + (i / Math.max(1, hits - 1)) * 0.55;
-          addStretchArm(group, r, a, 0.16, peakT, 0.04, 0.18);
+          addStretchArm(group, r, a, 0.26, peakT, 0.04, 0.18);
           addPunchImpact(group, theme, Math.sin(a) * r, 0.6 + Math.random() * 0.8, Math.cos(a) * r, 0.55 + Math.random() * 0.25, peakT);
           armStretch.push({ startT: i * slot, endT: (i + 1) * slot, peakFrac: 0.35, holdFrac: 0.1, length: r });
         }

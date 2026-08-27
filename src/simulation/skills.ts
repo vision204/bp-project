@@ -76,6 +76,21 @@ export interface SkillDef {
    */
   autoTargetNearest?: boolean;
 
+  /**
+   * true면 이 스킬 키(Z 등)는 "누르는 순간 즉발"이 아니라 "누르고 있는 동안
+   * 차지, 떼면 발동"으로 동작합니다(고무 피스톨). 누르고 있던 시간(최대
+   * maxChargeSec)에 비례해 사거리가 chargeMinRangeMultiplier→
+   * chargeMaxRangeMultiplier 사이로 늘어납니다. 마나·쿨다운은 차지를
+   * 시작할 때가 아니라 실제로 발동되는(손을 떼는) 순간에 소모됩니다.
+   */
+  chargeable?: boolean;
+  /** 이 시간(초) 이상 누르고 있으면 완전히 다 찬 것으로 치고 자동 발동됩니다. */
+  maxChargeSec?: number;
+  /** 차지 0%일 때(그냥 탭) 사거리 배율 — 보통 1(기본 사거리 그대로). */
+  chargeMinRangeMultiplier?: number;
+  /** 차지 100%(최대로 눌렀을 때) 사거리 배율. */
+  chargeMaxRangeMultiplier?: number;
+
   description: string;
 }
 
@@ -318,7 +333,14 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 8,
       damage: 18,
       shape: { kind: "line", range: 7, width: 1.6 },
-      description: "팔을 고무처럼 늘려 직선으로 뻗는 강타.",
+      // Z를 꾹 눌러 팔을 뒤로 당겼다가(차지) 놓으면 튕겨나가듯 발동 — 오래
+      // 누를수록 최대 1.4초까지 차서 사거리가 기본의 최대 2.2배(약 15.4m)로
+      // 늘어납니다.
+      chargeable: true,
+      maxChargeSec: 1.4,
+      chargeMinRangeMultiplier: 1,
+      chargeMaxRangeMultiplier: 2.2,
+      description: "Z를 꾹 눌러 팔을 당겼다가 놓으면, 누른 시간만큼 더 멀리 뻗는 강타.",
     },
     {
       id: "rubber_x",
@@ -340,10 +362,10 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 9,
       manaCost: 26,
       damage: 42,
-      shape: { kind: "cone", range: 6, halfAngleDeg: 55 },
+      shape: { kind: "cone", range: 8, halfAngleDeg: 70 },
       slowFactor: 0.4,
       slowDurationSec: 1.5,
-      description: "수십 발의 주먹을 퍼부어 상대를 그 자리에 붙잡아 둡니다.",
+      description: "수십 발의 주먹을 넓게 퍼부어 상대를 그 자리에 붙잡아 둡니다.",
     },
     {
       id: "rubber_v",
@@ -431,4 +453,27 @@ export function allSkills(): SkillDef[] {
 
 export function isSlotUnlocked(slot: number, fruitLevel: number) {
   return fruitLevel >= SLOT_UNLOCK_LEVELS[slot];
+}
+
+/**
+ * 차지 스킬(고무 피스톨 등)이 눌린 비율(chargeFrac, 0~1)만큼 늘어난 사거리를 가진
+ * 스킬 사본을 돌려줍니다. CombatSystem(실제 판정)과 SceneRenderer(이펙트 모양)가
+ * 똑같은 이 함수를 써서, "보이는 범위 = 맞는 범위"가 항상 일치하게 합니다.
+ * chargeable이 아니거나 배율이 1이면 원본을 그대로 돌려줍니다(불필요한 복사 방지).
+ */
+export function withChargedRange(skill: SkillDef, chargeFrac: number): SkillDef {
+  if (!skill.chargeable) return skill;
+  const min = skill.chargeMinRangeMultiplier ?? 1;
+  const max = skill.chargeMaxRangeMultiplier ?? 1;
+  const clamped = Math.max(0, Math.min(1, chargeFrac));
+  const mult = min + (max - min) * clamped;
+  if (mult === 1) return skill;
+  const shape = skill.shape;
+  if (shape.kind === "line" || shape.kind === "cone") {
+    return { ...skill, shape: { ...shape, range: shape.range * mult } };
+  }
+  if (shape.kind === "radial") {
+    return { ...skill, shape: { ...shape, radius: shape.radius * mult } };
+  }
+  return skill;
 }

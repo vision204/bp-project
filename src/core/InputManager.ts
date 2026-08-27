@@ -25,6 +25,8 @@ export interface InputSnapshot {
   attackPressed: boolean; // 좌클릭
   /** Z/X/C/V 4개 스킬 슬롯이 이번 프레임에 눌렸는지 */
   skillPressed: boolean[];
+  /** Z/X/C/V 4개 스킬 슬롯이 지금 누르고 있는 중인지 — 차지 스킬(고무 피스톨)이 계속 차는 중인지 볼 때 씁니다. */
+  skillHeld: boolean[];
   interactPressed: boolean; // 'E' — NPC 상호작용
   toggleInventoryPressed: boolean; // 'I'
   toggleStatsPressed: boolean; // 'K' — 캐릭터창 (C는 3번째 스킬로 옮겨감)
@@ -181,6 +183,7 @@ export class InputManager {
         this.justPressed.has("KeyC"),
         this.justPressed.has("KeyV"),
       ],
+      skillHeld: [this.keys.has("KeyZ"), this.keys.has("KeyX"), this.keys.has("KeyC"), this.keys.has("KeyV")],
       interactPressed: this.justPressed.has("KeyE"),
       toggleInventoryPressed: this.justPressed.has("KeyI"),
       toggleStatsPressed: this.justPressed.has("KeyK"),

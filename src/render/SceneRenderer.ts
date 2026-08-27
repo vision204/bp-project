@@ -5,7 +5,7 @@ import { maxWorldRadius } from "../world/islands";
 import { boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import { skillsForWeapon } from "../simulation/weaponSkills";
-import { skillsForFruit } from "../simulation/skills";
+import { skillsForFruit, withChargedRange } from "../simulation/skills";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
 import type { RemoteEnemyGhost, RemotePlayerView, RemoteSkillFx } from "../network/MultiplayerClient";
@@ -34,8 +34,10 @@ const RUBBER_ARM_BASE_LENGTH = 0.85;
 const RUBBER_ARM_BASE_OFFSET_Y = -RUBBER_ARM_BASE_LENGTH / 2;
 /** 다 뻗었을 때 팔 피벗의 회전(라디안) — 0이면 어깨에서 아래로 늘어진 기본자세, -PI/2면 정면(+Z)으로 수평 스트레이트. */
 const RUBBER_ARM_FORWARD_PITCH = -Math.PI / 2;
-/** 다 뻗었을 때 팔이 얼마나 가늘어지는지(고무줄처럼 늘어난 느낌) */
-const RUBBER_ARM_THIN_FACTOR = 0.5;
+/** Z를 누르고 있는 동안(차지) 팔을 뒤로 당기는 회전(라디안) — 어깨 위/뒤쪽으로 접힙니다. */
+const RUBBER_ARM_WINDUP_PITCH = 1.15;
+/** 다 뻗었을 때 팔이 얼마나 두꺼워지는지 — 힘을 잔뜩 준 두꺼운 주먹 느낌(1보다 크면 두꺼워짐). */
+const RUBBER_ARM_THICKNESS_FACTOR = 1.65;
 
 interface BlockyCharacter {
   group: THREE.Group;
@@ -542,6 +544,8 @@ export class SceneRenderer {
   private rubberArmStartedAtMs = -Infinity;
   private rubberArmTotalDurationMs = 0;
   private rubberArmPunches: ArmStretchPunch[] = [];
+  /** 손을 뗀(발동) 순간의 팔 회전값 — 차지로 뒤로 당겨져 있던 자세에서 그대로 이어서 앞으로 뻗어야 자연스럽습니다. */
+  private rubberArmReleaseRotX = 0;
 
   constructor(container: HTMLElement, private readonly quality: QualitySettings) {
     // 섬들이 수백 미터 떨어져 있으므로 far plane을 넉넉하게 잡습니다.
@@ -665,10 +669,19 @@ export class SceneRenderer {
     aimYaw: number,
     nowMs: number,
     isLocalPlayer = false,
+    chargeFrac?: number,
   ) {
     const weaponSkill = skillsForWeapon(sourceId as ItemId)[slot];
-    const skill = weaponSkill ?? skillsForFruit(sourceId as FruitAbilityId)[slot];
+    let skill = weaponSkill ?? skillsForFruit(sourceId as FruitAbilityId)[slot];
     if (!skill) return;
+
+    // 차지 스킬(고무 피스톨)이면, 실제로 발동됐던 사거리(chargeFrac만큼 늘어난
+    // 값)로 스킬을 다시 만들어서 이펙트가 CombatSystem이 실제로 판정한 범위와
+    // 정확히 같은 모양으로 보이게 합니다 — withChargedRange는 CombatSystem이
+    // 판정에 쓰는 것과 똑같은 함수입니다.
+    if (skill.chargeable && typeof chargeFrac === "number") {
+      skill = withChargedRange(skill, chargeFrac);
+    }
 
     // 무기(검) 스킬은 기존 도형 기반 이펙트 그대로, 열매 스킬은 이름/속성에 맞춘
     // 전용 이펙트(FRUIT_SKILL_EFFECT_BUILDERS)를 씁니다 — 검과 열매가 똑같이
@@ -685,6 +698,9 @@ export class SceneRenderer {
     // 늘였다 되감습니다 — 다른 플레이어/원격 중계분은 팔 관절 모델이 따로
     // 없어서(ensureRemotePlayerVisual은 단순 그룹) 지금은 로컬 전용입니다.
     if (isLocalPlayer && main.armStretch && main.armStretch.length > 0) {
+      // 차지로 뒤로 당겨져 있던 자세를 그대로 이어받아, 그 자세에서부터
+      // 앞으로 튕겨나가는 것처럼 보이게 합니다(sync()의 rubberFrac 계산 참고).
+      this.rubberArmReleaseRotX = this.playerParts.rightArmPivot.rotation.x;
       this.rubberArmStartedAtMs = nowMs;
       this.rubberArmTotalDurationMs = main.durationMs;
       this.rubberArmPunches = main.armStretch;
@@ -948,26 +964,48 @@ export class SceneRenderer {
     const attackSwingArc = attackSwingT >= 0 && attackSwingT < 1 ? Math.sin(attackSwingT * Math.PI) : 0;
     this.playerParts.rightArmPivot.rotation.x -= attackSwingArc * ATTACK_SWING_ARM_AMPLITUDE;
 
+    // 고무 열매 Z 차지 — 지금 Z를 누르고 있는 중이면(놓기 전) 누른 시간에
+    // 비례해 팔을 뒤로 당겨 "탄력을 모으는" 자세를 보여줍니다. 실제 발동(사거리
+    // 계산 등)은 CombatSystem이 손을 뗄 때 처리하고, 여기서는 순수 연출만 합니다.
+    let rubberChargeFrac = 0;
+    if (state.player.chargingSkillSlot !== null && state.player.fruitDrawn) {
+      const chargingSkill = skillsForFruit(state.player.equippedFruit)[state.player.chargingSkillSlot];
+      if (chargingSkill?.chargeable) {
+        const maxMs = Math.max(1, (chargingSkill.maxChargeSec ?? 1) * 1000);
+        rubberChargeFrac = Math.min(1, (nowMs - state.player.chargingSkillStartedAtMs) / maxMs);
+      }
+    }
+    if (rubberChargeFrac > 0.0005) {
+      const baseRotX = this.playerParts.rightArmPivot.rotation.x;
+      this.playerParts.rightArmPivot.rotation.x = baseRotX + rubberChargeFrac * (RUBBER_ARM_WINDUP_PITCH - baseRotX);
+    }
+
     // 고무 열매 펀치 — 이번 프레임에 예약된 스트레치 구간이 있으면 진짜 오른팔
-    // 메시(rightArmMesh)를 그 길이만큼 늘이고, 팔 피벗을 정면으로 접어 편치
-    // 자세를 만듭니다. 걷기/공격 스윙으로 이미 정해진 현재 회전값에서
-    // 정면 자세로 보간해, 걸으면서/베면서 뻗어도 툭 끊기지 않습니다.
+    // 메시(rightArmMesh)를 그 길이만큼 늘이고, 팔 피벗을 정면으로 접어 펀치
+    // 자세를 만듭니다. 차지 중이었다면(위) 뒤로 당겨진 자세(rubberArmReleaseRotX)
+    // 에서 이어받아 앞으로 튕겨나가고, 그렇지 않았다면(즉발 스킬) 걷기/공격
+    // 스윙으로 이미 정해진 현재 회전값에서 정면 자세로 보간합니다.
     {
       const rubberT = (nowMs - this.rubberArmStartedAtMs) / Math.max(1, this.rubberArmTotalDurationMs);
       let rubberFrac = 0;
       let rubberLength = 0;
+      let inBuildupOrHold = false;
       if (rubberT >= 0 && rubberT < 1) {
         for (const punch of this.rubberArmPunches) {
           if (rubberT < punch.startT || rubberT > punch.endT) continue;
           const span = Math.max(0.0001, punch.endT - punch.startT);
           const localT = (rubberT - punch.startT) / span;
+          const holdEnd = punch.peakFrac + punch.holdFrac;
           if (localT < punch.peakFrac) {
             rubberFrac = punch.peakFrac > 0 ? localT / punch.peakFrac : 1;
-          } else if (localT < punch.peakFrac + punch.holdFrac) {
+            inBuildupOrHold = true;
+          } else if (localT < holdEnd) {
             rubberFrac = 1;
+            inBuildupOrHold = true;
           } else {
-            const retractFrac = Math.max(0.0001, 1 - punch.peakFrac - punch.holdFrac);
-            rubberFrac = Math.max(0, 1 - (localT - punch.peakFrac - punch.holdFrac) / retractFrac);
+            const retractFrac = Math.max(0.0001, 1 - holdEnd);
+            rubberFrac = Math.max(0, 1 - (localT - holdEnd) / retractFrac);
+            inBuildupOrHold = false;
           }
           rubberLength = punch.length;
           break;
@@ -978,11 +1016,14 @@ export class SceneRenderer {
         const stretch = 1 + rubberFrac * (rubberLength / RUBBER_ARM_BASE_LENGTH - 1);
         armMesh.scale.y = stretch;
         armMesh.position.y = RUBBER_ARM_BASE_OFFSET_Y * stretch;
-        const thin = 1 - rubberFrac * (1 - RUBBER_ARM_THIN_FACTOR);
-        armMesh.scale.x = thin;
-        armMesh.scale.z = thin;
-        const baseRotX = this.playerParts.rightArmPivot.rotation.x;
-        this.playerParts.rightArmPivot.rotation.x = baseRotX + rubberFrac * (RUBBER_ARM_FORWARD_PITCH - baseRotX);
+        const thickness = 1 + rubberFrac * (RUBBER_ARM_THICKNESS_FACTOR - 1);
+        armMesh.scale.x = thickness;
+        armMesh.scale.z = thickness;
+        // 뻗는(+버티는) 동안은 차지로 당겨져 있던 자세에서 정면으로, 되감는
+        // 동안은 지금의 걷기/공격 스윙 자세로 되돌아갑니다 — 경계(holdEnd)에서
+        // 양쪽 다 rubberFrac=1이라 값이 정확히 이어집니다.
+        const rotStart = inBuildupOrHold ? this.rubberArmReleaseRotX : this.playerParts.rightArmPivot.rotation.x;
+        this.playerParts.rightArmPivot.rotation.x = rotStart + rubberFrac * (RUBBER_ARM_FORWARD_PITCH - rotStart);
       } else if (armMesh.scale.y !== 1) {
         armMesh.scale.set(1, 1, 1);
         armMesh.position.y = RUBBER_ARM_BASE_OFFSET_Y;
@@ -1043,6 +1084,7 @@ export class SceneRenderer {
             state.player.aimYaw,
             nowMs,
             true,
+            ev.chargeFrac,
           );
         }
       }

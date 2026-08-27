@@ -5,7 +5,7 @@ import { grantExp } from "./Leveling";
 import { effectiveMeleeDamage } from "./HakiSystem";
 import { fruitExpFromEnemy, fruitLevelDamageMultiplier, grantFruitExp } from "./FruitLeveling";
 import { weaponExpFromEnemy, weaponLevelDamageMultiplier, weaponMasteryLevel, grantWeaponExp } from "./WeaponLeveling";
-import { isSlotUnlocked, skillsForFruit, type SkillDef } from "./skills";
+import { isSlotUnlocked, skillsForFruit, withChargedRange, type SkillDef } from "./skills";
 import { isWeaponSlotUnlocked, skillsForWeapon } from "./weaponSkills";
 import {
   drawnWeapon,
@@ -315,6 +315,14 @@ export function stepCombat(
     player.events.push({ type: "melee_attack_fired" });
   }
 
+  // 손에서 열매를 놓치면(무기로 바꾸거나 맨손이 되면) 진행 중이던 차지도
+  // 함께 취소합니다 — 차지 중엔 아직 마나/쿨다운을 쓰지 않았으므로 그냥
+  // 무산시켜도 안전합니다. 그대로 두면 나중에 열매를 다시 뽑았을 때 아주
+  // 오래전에 시작한 차지가 갑자기 "다 찼다"며 튀어나가는 버그가 됩니다.
+  if (player.chargingSkillSlot !== null && !player.fruitDrawn) {
+    player.chargingSkillSlot = null;
+  }
+
   // Z/X/C/V는 "지금 손에 뽑아 든 것"에 따라 열매 스킬 또는 무기 스킬로 갈립니다.
   // 아무것도 뽑지 않았으면(맨손) 숫자키를 눌러 열매(4번)나 무기(1~3번)를 먼저
   // 뽑아야 하고, 그 전까지는 스킬 입력을 아예 처리하지 않습니다 —
@@ -323,36 +331,69 @@ export function stepCombat(
   if (player.fruitDrawn) {
     const skills = skillsForFruit(player.equippedFruit);
     for (let slot = 0; slot < 4; slot++) {
-      if (!input.skillPressed[slot]) continue;
-
       const skill = skills[slot];
       if (!skill) continue;
 
-      if (!isSlotUnlocked(slot, player.fruitLevel)) {
-        player.events.push({
-          type: "skill_locked",
-          skillName: skill.name,
-          requiredFruitLevel: skill.unlockFruitLevel,
-        });
-        continue;
+      // 차지 스킬(고무 피스톨)은 "누르는 순간"이 아니라 "떼는 순간(또는
+      // 최대 차지 시간 도달)"에 발동하므로, 이미 차지 중인 슬롯은
+      // skillPressed(눌린 이번 프레임 엣지)가 아니어도 계속 지켜봐야 합니다.
+      const isCharging = player.chargingSkillSlot === slot;
+      if (!isCharging && !input.skillPressed[slot]) continue;
+
+      if (!isCharging) {
+        if (!isSlotUnlocked(slot, player.fruitLevel)) {
+          player.events.push({
+            type: "skill_locked",
+            skillName: skill.name,
+            requiredFruitLevel: skill.unlockFruitLevel,
+          });
+          continue;
+        }
+
+        // 토글 스킬(서리 발판·뇌광 질주)이 이미 켜져 있으면, 다시 누르는 건
+        // "끄기"입니다 — 마나·쿨다운을 소모하지 않고 즉시 꺼집니다.
+        if (skill.toggle && isToggleActive(player, skill)) {
+          setToggleActive(player, skill, false, player.position);
+          continue;
+        }
+
+        if (player.skillCooldowns[slot] > 0) continue;
+        if (player.mana < skill.manaCost) continue;
+
+        if (skill.chargeable) {
+          // 여기서는 아직 마나·쿨다운을 소모하지 않습니다 — 실제로 손을
+          // 뗄 때(아래) 소모합니다. 그래야 눌렀다가 취소하고 싶어서
+          // 무한정 누르고 있어도(최대 차지 시간까지는) 손해가 없습니다.
+          player.chargingSkillSlot = slot;
+          player.chargingSkillStartedAtMs = nowMs;
+          continue;
+        }
       }
 
-      // 토글 스킬(서리 발판·뇌광 질주)이 이미 켜져 있으면, 다시 누르는 건
-      // "끄기"입니다 — 마나·쿨다운을 소모하지 않고 즉시 꺼집니다.
-      if (skill.toggle && isToggleActive(player, skill)) {
-        setToggleActive(player, skill, false, player.position);
-        continue;
+      // 여기부터는 (a) 이미 차지 중이던 슬롯이 놓임/최대 차지 도달로
+      // 발동할 차례이거나, (b) 차지가 필요 없는 일반 스킬이 방금 눌린
+      // 경우입니다.
+      let chargeFrac = 0;
+      if (isCharging) {
+        const elapsedMs = nowMs - player.chargingSkillStartedAtMs;
+        const maxMs = Math.max(1, (skill.maxChargeSec ?? 1) * 1000);
+        if (input.skillHeld[slot] && elapsedMs < maxMs) continue; // 아직 누르고 있고 다 안 찼으면 계속 대기
+        chargeFrac = Math.min(1, elapsedMs / maxMs);
+        player.chargingSkillSlot = null;
+        // 차지하는 동안 마나가 다른 스킬로 빠져나갔을 수 있으니 놓는
+        // 순간 다시 한 번 확인합니다 — 부족하면 조용히 무산됩니다.
+        if (player.mana < skill.manaCost) continue;
       }
-
-      if (player.skillCooldowns[slot] > 0) continue;
-      if (player.mana < skill.manaCost) continue;
 
       player.skillCooldowns[slot] = skill.cooldownSec;
       player.mana -= skill.manaCost;
       player.lastManaSpentAtMs = nowMs;
-      applySkill(player, enemies, skill, "fruit", skillDamage(player, skill), player.events);
+      const firedSkill = skill.chargeable ? withChargedRange(skill, chargeFrac) : skill;
+      applySkill(player, enemies, firedSkill, "fruit", skillDamage(player, firedSkill), player.events);
       if (skill.toggle) setToggleActive(player, skill, true, player.position);
-      player.events.push({ type: "skill_fired", slot });
+      player.events.push(
+        skill.chargeable ? { type: "skill_fired", slot, chargeFrac } : { type: "skill_fired", slot },
+      );
     }
   } else if (weapon) {
     const skills = skillsForWeapon(weapon.id);

@@ -195,6 +195,16 @@ export interface PlayerState {
   skillCooldowns: number[];
 
   /**
+   * 지금 "누르고 있는 중"인 차지 스킬(고무 피스톨 등)의 슬롯 — 없으면 null.
+   * 손을 떼거나 maxChargeSec에 도달하면 CombatSystem이 이 값을 다시 null로
+   * 돌리며 실제로 발동시킵니다. 마나·쿨다운은 차지 시작이 아니라 이 발동
+   * 시점에 소모됩니다.
+   */
+  chargingSkillSlot: number | null;
+  /** 위 차지가 시작된 시각(ms, Date.now() 기준) — 경과시간으로 차지율을 계산합니다. */
+  chargingSkillStartedAtMs: number;
+
+  /**
    * 열매 레벨은 캐릭터 레벨과 완전히 별개입니다.
    * **막타를 열매 스킬로 넣었을 때만** 열매 경험치가 오릅니다.
    * 스킬 해금: Z=1, X=25, C=50, V=100
@@ -366,7 +376,8 @@ export type GameEvent =
   // 실제로 다른 플레이어를 맞혔는지는 src/network/PvpCombat.ts가 이 이벤트를
   // 보고 별도로 판정합니다.
   | { type: "melee_attack_fired" }
-  | { type: "skill_fired"; slot: number }
+  /** chargeFrac은 차지 스킬(고무 피스톨 등)일 때만 있으며, 0~1로 얼마나 눌렀는지를 나타냅니다. */
+  | { type: "skill_fired"; slot: number; chargeFrac?: number }
   | { type: "pvp_connected" }
   | { type: "pvp_disconnected"; reason: string }
   | { type: "pvp_hit_landed"; targetName: string; damage: number }
@@ -495,6 +506,8 @@ export function createInitialGameState(
 
       equippedFruit: "magma_fist",
       skillCooldowns: [0, 0, 0, 0],
+      chargingSkillSlot: null,
+      chargingSkillStartedAtMs: 0,
 
       fruitLevel: 1,
       fruitExp: 0,
