@@ -1123,9 +1123,24 @@ function input(overrides = {}) {
     moveForward: false, moveBackward: false, moveLeft: false, moveRight: false,
     jumpPressed: false, jumpHeld: false, sprintToggledOn: false, dashPressed: false, hotbarPressed: null, attackPressed: false,
     skillPressed: [false, false, false, false],
+    skillHeld: [false, false, false, false],
     interactPressed: false, toggleInventoryPressed: false, toggleStatsPressed: false,
     toggleHakiPressed: false, mouseDeltaX: 0, mouseDeltaY: 0, ...overrides,
   };
+}
+
+/**
+ * Z/X/C/V 슬롯 하나를 "탭"합니다 — 눌렀다가(1프레임) 곧바로 뗍니다(1프레임).
+ * 차지 스킬이 아니면 첫 프레임에 바로 발동하고 둘째 프레임은 아무 일도 안
+ * 합니다(기존 단발 stepCombat 호출과 100% 동일). 차지 스킬이면 첫 프레임에
+ * 차지를 시작하고, 둘째 프레임(뗌)에 거의 0%로 차지된 채 발동합니다 — 즉
+ * "짧게 탭하면 예전처럼 즉발과 똑같이 동작한다"는 걸 그대로 보장합니다.
+ */
+function tapSkill(dt, plr, enemies, slotIndex) {
+  const pressed = [false, false, false, false];
+  pressed[slotIndex] = true;
+  stepCombat(dt, input({ skillPressed: pressed, skillHeld: pressed }), plr, enemies);
+  stepCombat(dt, input(), plr, enemies);
 }
 
 // (1) 근접으로 막타 → 열매 경험치 0
@@ -1142,7 +1157,7 @@ assert(pMelee.fruitLevel === 1, "열매 레벨 그대로");
 const pFruit = freshPlayer();
 const eFruit = [makeEnemy("f1", 10, 100)];
 pFruit.events = [];
-stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pFruit, eFruit);
+tapSkill(0.016, pFruit, eFruit, 0);
 assert(!eFruit[0].alive, "열매 스킬(Z)로 처치됨");
 assert(pFruit.fruitExp > 0, `열매 막타 → 열매 경험치 획득 (${pFruit.fruitExp})`);
 
@@ -1155,7 +1170,7 @@ stepCombat(0.016, input({ attackPressed: true }), pMix, eMix);
 assert(eMix[0].alive && eMix[0].hp < 25, `근접으로 체력만 깎음 (${eMix[0].hp})`);
 assert(pMix.fruitExp === 0, "아직 열매 경험치 없음");
 pMix.skillCooldowns = [0, 0, 0, 0];
-stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pMix, eMix);
+tapSkill(0.016, pMix, eMix, 0);
 assert(!eMix[0].alive, "열매 스킬로 마무리");
 assert(pMix.fruitExp > 0, `막타가 열매라서 열매 경험치 획득 (${pMix.fruitExp})`);
 
@@ -1164,7 +1179,7 @@ const pMix2 = freshPlayer();
 pMix2.meleeDamage = 1000;
 const eMix2 = [makeEnemy("x2", 1000, 100)];
 pMix2.events = [];
-stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pMix2, eMix2);
+tapSkill(0.016, pMix2, eMix2, 0);
 assert(eMix2[0].alive, "열매 스킬로는 못 죽임(체력 많음)");
 assert(pMix2.fruitExp === 0, "아직 열매 경험치 없음");
 stepCombat(0.016, input({ attackPressed: true }), pMix2, eMix2);
@@ -1177,7 +1192,7 @@ pBurn.equippedFruit = "magma_fist";
 pBurn.fruitLevel = 25; // X(화염 방사) 해금
 const eBurn = [makeEnemy("b1", 10000, 100)];
 pBurn.events = [];
-stepCombat(0.016, input({ skillPressed: [false, true, false, false] }), pBurn, eBurn);
+tapSkill(0.016, pBurn, eBurn, 1);
 assert(eBurn[0].status.burnRemainingSec > 0, "화염 방사로 화상 부여됨");
 eBurn[0].hp = 1; // 도트로 죽기 직전
 const fruitExpBeforeBurn = pBurn.fruitExp;
@@ -1204,7 +1219,7 @@ front.position = { x: 0, y: 1, z: 3 };
 const back = makeEnemy("back", 10000, 10);
 back.position = { x: 0, y: 1, z: -3 };
 pShape.events = [];
-stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pShape, [front, back]);
+tapSkill(0.016, pShape, [front, back], 0);
 assert(front.hp < 10000, `부채꼴: 정면의 적은 피격 (${front.hp})`);
 assert(back.hp === 10000, "부채꼴: 등 뒤의 적은 안 맞음");
 
@@ -1217,7 +1232,7 @@ onAxis.position = { x: 0, y: 1, z: 6 };
 const offAxis = makeEnemy("off", 10000, 10);
 offAxis.position = { x: 4, y: 1, z: 6 };
 pLine.events = [];
-stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pLine, [onAxis, offAxis]);
+tapSkill(0.016, pLine, [onAxis, offAxis], 0);
 assert(onAxis.hp < 10000, "직선: 경로상의 적은 관통 피격");
 assert(offAxis.hp === 10000, "직선: 경로 밖의 적은 안 맞음");
 assert(onAxis.status.slowFactor === 0.5, `아이스 랜스 둔화 적용 (x${onAxis.status.slowFactor})`);
@@ -1228,7 +1243,7 @@ pDash.equippedFruit = "thunder_strike";
 pDash.fruitLevel = 1; // Z = 선더 스트라이크 (dash)
 pDash.aimYaw = 0;
 pDash.events = [];
-stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pDash, []);
+tapSkill(0.016, pDash, [], 0);
 assert(pDash.pendingDash !== null, "돌진 요청 생성됨");
 assert(Math.abs(pDash.pendingDash.z - 6) < 0.001, `정면(+Z)으로 6m 돌진 요청 (z=${pDash.pendingDash.z.toFixed(2)})`);
 
@@ -1290,7 +1305,7 @@ section("열매/무기를 뽑아야만 스킬(Z/X/C/V) 사용 가능");
   assert(pDraw.fruitDrawn === true, "fruitDrawn true로 바뀜");
   pDraw.events = [];
   const eDraw = [makeEnemy("draw1", 10, 10)];
-  stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pDraw, eDraw);
+  tapSkill(0.016, pDraw, eDraw, 0);
   assert(!eDraw[0].alive, "열매를 뽑은 뒤에는 Z 스킬이 다시 작동함");
 
   // (3) 다시 누르면 집어넣어짐

@@ -5,12 +5,18 @@ import { maxWorldRadius } from "../world/islands";
 import { boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import { skillsForWeapon } from "../simulation/weaponSkills";
-import { skillsForFruit, withChargedRange } from "../simulation/skills";
+import { skillsForFruit, withCharge } from "../simulation/skills";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
 import type { RemoteEnemyGhost, RemotePlayerView, RemoteSkillFx } from "../network/MultiplayerClient";
 import { dist2D } from "../simulation/ShapeMath";
-import { buildEmberOverlayGroup, buildFruitSkillEffectGroup, buildSkillEffectGroup, type ArmStretchPunch } from "./SkillEffects";
+import {
+  buildEmberOverlayGroup,
+  buildFruitSkillEffectGroup,
+  buildSkillEffectGroup,
+  fruitVfxTheme,
+  type ArmStretchPunch,
+} from "./SkillEffects";
 
 
 const CAMERA_DISTANCE = 6;
@@ -502,6 +508,8 @@ export class SceneRenderer {
   readonly renderer: THREE.WebGLRenderer;
   private playerParts: BlockyCharacter;
   private playerVisual: THREE.Group;
+  /** 고무가 아닌 열매를 차지하는 동안 손끝에 띄우는 에너지 구슬. */
+  private chargeGlowMesh!: THREE.Mesh;
   private playerBaseBodyColor = new THREE.Color(0xffcc66);
   private playerBaseLegColor = new THREE.Color(0x2b3a67);
   private hakiWasActive = false;
@@ -559,6 +567,16 @@ export class SceneRenderer {
     this.playerParts = buildBlockyCharacterParts(0xffcc66);
     this.playerVisual = this.playerParts.group;
     this.scene.add(this.playerVisual);
+
+    // 고무가 아닌 열매를 차지하는 동안 손끝에 띄우는 에너지 구슬 — 오른팔
+    // 피벗의 자식으로 둬서 걷기/스윙/차지 자세를 따라 자연스럽게 함께 움직입니다.
+    this.chargeGlowMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 12, 12),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
+    );
+    this.chargeGlowMesh.position.set(0, -0.85, 0.2);
+    this.chargeGlowMesh.visible = false;
+    this.playerParts.rightArmPivot.add(this.chargeGlowMesh);
 
     this.boatParts = buildBoat();
     this.boatVisual = this.boatParts.group;
@@ -677,10 +695,10 @@ export class SceneRenderer {
 
     // 차지 스킬(고무 피스톨)이면, 실제로 발동됐던 사거리(chargeFrac만큼 늘어난
     // 값)로 스킬을 다시 만들어서 이펙트가 CombatSystem이 실제로 판정한 범위와
-    // 정확히 같은 모양으로 보이게 합니다 — withChargedRange는 CombatSystem이
+    // 정확히 같은 모양으로 보이게 합니다 — withCharge는 CombatSystem이
     // 판정에 쓰는 것과 똑같은 함수입니다.
     if (skill.chargeable && typeof chargeFrac === "number") {
-      skill = withChargedRange(skill, chargeFrac);
+      skill = withCharge(skill, chargeFrac);
     }
 
     // 무기(검) 스킬은 기존 도형 기반 이펙트 그대로, 열매 스킬은 이름/속성에 맞춘
@@ -964,20 +982,36 @@ export class SceneRenderer {
     const attackSwingArc = attackSwingT >= 0 && attackSwingT < 1 ? Math.sin(attackSwingT * Math.PI) : 0;
     this.playerParts.rightArmPivot.rotation.x -= attackSwingArc * ATTACK_SWING_ARM_AMPLITUDE;
 
-    // 고무 열매 Z 차지 — 지금 Z를 누르고 있는 중이면(놓기 전) 누른 시간에
-    // 비례해 팔을 뒤로 당겨 "탄력을 모으는" 자세를 보여줍니다. 실제 발동(사거리
-    // 계산 등)은 CombatSystem이 손을 뗄 때 처리하고, 여기서는 순수 연출만 합니다.
-    let rubberChargeFrac = 0;
+    // 차지 스킬 공통(열매 6종 중 19개가 이제 차지형입니다) — 지금 어떤 슬롯이든
+    // 차지 중이면(놓기 전) 누른 시간에 비례해 팔을 뒤로 당겨 "힘을 모으는"
+    // 자세를 보여줍니다. 실제 발동(사거리/데미지 계산)은 CombatSystem이 손을
+    // 뗄 때 처리하고, 여기서는 순수 연출만 합니다 — 고무 전용이 아니라 모든
+    // 차지 스킬에 공통으로 적용됩니다.
+    let chargeWindupFrac = 0;
     if (state.player.chargingSkillSlot !== null && state.player.fruitDrawn) {
       const chargingSkill = skillsForFruit(state.player.equippedFruit)[state.player.chargingSkillSlot];
       if (chargingSkill?.chargeable) {
         const maxMs = Math.max(1, (chargingSkill.maxChargeSec ?? 1) * 1000);
-        rubberChargeFrac = Math.min(1, (nowMs - state.player.chargingSkillStartedAtMs) / maxMs);
+        chargeWindupFrac = Math.min(1, (nowMs - state.player.chargingSkillStartedAtMs) / maxMs);
       }
     }
-    if (rubberChargeFrac > 0.0005) {
+    if (chargeWindupFrac > 0.0005) {
       const baseRotX = this.playerParts.rightArmPivot.rotation.x;
-      this.playerParts.rightArmPivot.rotation.x = baseRotX + rubberChargeFrac * (RUBBER_ARM_WINDUP_PITCH - baseRotX);
+      this.playerParts.rightArmPivot.rotation.x = baseRotX + chargeWindupFrac * (RUBBER_ARM_WINDUP_PITCH - baseRotX);
+    }
+
+    // 고무가 아닌 열매(마그마·얼음·번개·어둠·모래)는 실제로 팔이 늘어나진
+    // 않으니, 그 대신 손끝에 열매 테마색 에너지 구슬을 띄워 차지가 얼마나
+    // 찼는지 눈으로 보이게 합니다. 놓는 순간(발동) 함께 사라집니다.
+    if (chargeWindupFrac > 0.0005 && state.player.equippedFruit !== "rubber_barrage") {
+      const theme = fruitVfxTheme(state.player.equippedFruit);
+      this.chargeGlowMesh.visible = true;
+      (this.chargeGlowMesh.material as THREE.MeshBasicMaterial).color.setHex(theme.glow);
+      const s = 0.12 + chargeWindupFrac * 0.34;
+      this.chargeGlowMesh.scale.setScalar(s);
+      (this.chargeGlowMesh.material as THREE.MeshBasicMaterial).opacity = 0.55 + chargeWindupFrac * 0.35;
+    } else {
+      this.chargeGlowMesh.visible = false;
     }
 
     // 고무 열매 펀치 — 이번 프레임에 예약된 스트레치 구간이 있으면 진짜 오른팔
@@ -1156,6 +1190,53 @@ export class SceneRenderer {
           const len = Math.max(0.0005, armLength * frac);
           obj.scale.z = len;
           obj.position.z = len / 2;
+        } else if (obj.userData.role === "growScale") {
+          // 열매 스킬 공통 — "쑥 자라났다가(다 자란 채로 버티다가) 사그라드는"
+          // 모션. 얼음 결정이 바닥에서 솟거나, 용암 기둥이 치솟거나, 어둠의
+          // 구멍이 벌어지는 등 "가만히 떠 있다 페이드"가 아니라 실제로
+          // 자라나는 느낌을 줄 때 씁니다(고무 팔의 extendZ와 같은 원리를
+          // 크기 전체에 적용한 버전).
+          const peakT = (obj.userData.scalePeakT as number) ?? 0.3;
+          const holdT = (obj.userData.scaleHoldT as number) ?? 0.3;
+          const retractT = (obj.userData.scaleRetractT as number) ?? 0.4;
+          const from = (obj.userData.scaleFrom as number) ?? 0;
+          const to = (obj.userData.scaleTo as number) ?? 1;
+          let frac: number;
+          if (t < peakT) frac = peakT > 0 ? t / peakT : 1;
+          else if (t < peakT + holdT) frac = 1;
+          else if (t < peakT + holdT + retractT) frac = retractT > 0 ? 1 - (t - peakT - holdT) / retractT : 0;
+          else frac = 0;
+          obj.scale.setScalar(Math.max(0.0005, from + (to - from) * frac));
+        } else if (obj.userData.role === "collapseIn") {
+          // 열매 스킬 공통 — 입자가 먼저 중심으로 빨려들었다가(collapseT까지)
+          // 그 다음 바깥으로 터져나가는 "모으고 터뜨리기" 모션. 차지 스킬의
+          // "힘을 모았다 놓는다"는 느낌과 맞춰, 용암 분출·어둠의 구멍 붕괴·
+          // 번개 응축·모래 소용돌이 등 여러 열매의 공통 시그니처로 씁니다.
+          const collapseT = (obj.userData.collapseT as number) ?? 0.35;
+          const dirX = (obj.userData.dirX as number) ?? 1;
+          const dirZ = (obj.userData.dirZ as number) ?? 0;
+          const outerR = (obj.userData.outerR as number) ?? 2;
+          const innerR = (obj.userData.innerR as number) ?? 0.15;
+          const burstR = (obj.userData.burstR as number) ?? outerR * 1.6;
+          let r: number;
+          if (t < collapseT) {
+            const p = collapseT > 0 ? t / collapseT : 1;
+            r = outerR + (innerR - outerR) * p;
+          } else {
+            const p = (t - collapseT) / Math.max(0.0001, 1 - collapseT);
+            r = innerR + (burstR - innerR) * p;
+          }
+          obj.position.x = dirX * r;
+          obj.position.z = dirZ * r;
+        } else if (obj.userData.role === "spin") {
+          // 회전하며 형성되는 결정/파편 — 정지된 파티클보다 훨씬 "마법 같은" 느낌을 줍니다.
+          const spinSpeed = (obj.userData.spinSpeed as number) ?? 6;
+          obj.rotation.y += spinSpeed * animDt;
+        }
+        // spin은 위의 "role"과 별개로 아무 롤에나 얹을 수 있는 보조 회전입니다 —
+        // 예를 들어 growScale로 쑥 자라나는 얼음 결정이 동시에 빙글빙글 돌게도 합니다.
+        if (obj.userData.spin) {
+          obj.rotation.y += ((obj.userData.spinSpeed as number) ?? 6) * animDt;
         }
       });
     }

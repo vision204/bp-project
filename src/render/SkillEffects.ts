@@ -45,6 +45,11 @@ const FRUIT_VFX_THEMES: Partial<Record<FruitAbilityId, WeaponVfxTheme>> = {
 const FROST_THEME: WeaponVfxTheme = { core: 0xbfe9ff, glow: 0xffffff, spark: 0xdff6ff };
 const EMBER_THEME: WeaponVfxTheme = { core: 0xff5a1f, glow: 0xffb347, spark: 0xffe08a };
 
+/** 열매 색 테마 조회 — SceneRenderer가 차지 중 손에 맺히는 구슬 색을 고를 때도 씁니다. */
+export function fruitVfxTheme(fruitId: FruitAbilityId): WeaponVfxTheme {
+  return FRUIT_VFX_THEMES[fruitId] ?? { core: 0xffffff, glow: 0xbbbbbb, spark: 0xffffff };
+}
+
 /** 스폰된 이펙트 하나 — SceneRenderer가 매 프레임 이 정보로 페이드/파편 이동을 갱신합니다. */
 export interface BuiltSkillEffect {
   group: THREE.Group;
@@ -306,6 +311,90 @@ export function buildSkillEffectGroup(skill: SkillDef, sourceId: ItemId | FruitA
 // 속성(빙결/전격/중력/탄성/모래)에 맞는 전용 모양·움직임을 따로 그립니다 —
 // 판정 범위(shape)는 여전히 그대로 반영해 "맞는 범위 = 보이는 범위"는 지킵니다.
 // ---------------------------------------------------------------------------
+//
+// 아래 두 함수(addCollapseBurstShards / addGrowingFormations)는 5개 열매
+// (마그마·얼음·번개·어둠·모래) 전체가 공유하는 "시그니처 모션"입니다.
+// 지금까지는 대부분 "그 자리에 나타났다 페이드"뿐이라 열매마다 실루엣만
+// 다르고 움직임은 다 똑같아 밋밋했습니다 — 이 두 모션으로 "힘을 모았다
+// 터뜨린다"(응축→폭발)와 "바닥/허공에서 쑥 자라난다"(성장)라는 서로 다른
+// 시간축 연출을 주고, 색/모양/개수/타이밍만 열매마다 바꿔서 각자 다른
+// "필살기 같은" 느낌을 내면서도 코드는 재사용합니다.
+// ---------------------------------------------------------------------------
+
+/**
+ * 파편들이 먼저 중심으로 빨려들었다가(응축) 그 다음 바깥으로 터져나가는
+ * "차지→릴리즈" 모션. SceneRenderer의 "collapseIn" 롤이 매 프레임 위치를
+ * 갱신합니다. halfAngle이 거의 π면 사방에서, 아니면 부채꼴/직선 방향에서만
+ * 모입니다.
+ */
+function addCollapseBurstShards(
+  group: THREE.Group,
+  count: number,
+  color: number,
+  geometryFactory: () => THREE.BufferGeometry,
+  halfAngle: number,
+  outerRadius: number,
+  burstRadius: number,
+  opacity: number,
+  collapseT = 0.35,
+  y = 0.7,
+) {
+  const full = halfAngle >= Math.PI - 0.01;
+  for (let i = 0; i < count; i++) {
+    const a = full ? Math.random() * Math.PI * 2 : -halfAngle + Math.random() * (2 * halfAngle);
+    const mesh = new THREE.Mesh(geometryFactory(), makeBasicMat(color, opacity));
+    mesh.position.set(0, y + (Math.random() - 0.5) * 0.5, 0);
+    mesh.userData.baseOpacity = opacity;
+    mesh.userData.role = "collapseIn";
+    mesh.userData.dirX = Math.sin(a);
+    mesh.userData.dirZ = Math.cos(a);
+    mesh.userData.outerR = outerRadius * (0.55 + Math.random() * 0.55);
+    mesh.userData.innerR = 0.08 + Math.random() * 0.14;
+    mesh.userData.burstR = burstRadius * (0.7 + Math.random() * 0.55);
+    mesh.userData.collapseT = collapseT;
+    mesh.userData.spin = true;
+    mesh.userData.spinSpeed = 4 + Math.random() * 6;
+    group.add(mesh);
+  }
+}
+
+/**
+ * 바닥/허공에서 형체가 쑥 자라났다가(growScale) 잠시 버티고 사그라드는 모션 —
+ * 용암 기둥, 얼음 결정, 모래 첨탑처럼 "지금 막 만들어지고 있다"는 인상을 줍니다.
+ */
+function addGrowingFormations(
+  group: THREE.Group,
+  count: number,
+  colorA: number,
+  colorB: number,
+  halfAngle: number,
+  range: number,
+  geometryFactory: (height: number) => THREE.BufferGeometry,
+  heightMin: number,
+  heightMax: number,
+  opacity: number,
+  spin: boolean,
+) {
+  const full = halfAngle >= Math.PI - 0.01;
+  for (let i = 0; i < count; i++) {
+    const a = full ? Math.random() * Math.PI * 2 : -halfAngle + Math.random() * (2 * halfAngle);
+    const r = range * (0.12 + Math.random() * 0.85);
+    const h = heightMin + Math.random() * (heightMax - heightMin);
+    const mesh = new THREE.Mesh(geometryFactory(h), makeBasicMat(i % 2 === 0 ? colorA : colorB, opacity));
+    mesh.position.set(Math.sin(a) * r, h * 0.32, Math.cos(a) * r);
+    mesh.rotation.y = Math.random() * Math.PI;
+    mesh.userData.baseOpacity = opacity;
+    mesh.userData.role = "growScale";
+    mesh.userData.scalePeakT = 0.15 + Math.random() * 0.12;
+    mesh.userData.scaleHoldT = 0.28 + Math.random() * 0.12;
+    mesh.userData.scaleRetractT = 0.3;
+    if (spin) {
+      mesh.userData.spin = true;
+      mesh.userData.spinSpeed = 3 + Math.random() * 5;
+    }
+    group.add(mesh);
+  }
+}
 
 /** 지그재그로 꺾인 번개 줄기의 꼭짓점들을 만듭니다 (로컬 +Z가 사거리 방향). */
 function buildZigzagPoints(range: number, width: number, segments: number): { x: number; z: number }[] {
@@ -653,15 +742,43 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
 
   switch (fruitId) {
     case "magma_fist": {
-      // 용암 — 땅이 갈라지며 불기둥이 솟구치는 느낌. 화상기는 잉걸불 오버레이가 따로 덧붙습니다.
-      const ground = buildArcMesh(0, range * (shape.kind === "line" ? 0.5 : 1), halfAngle, 24, theme.core, ultimate ? 0.5 : 0.4, 0.04);
+      // 용암 — 땅이 갈라지며 잉걸불이 안으로 모였다가 기둥째 솟구쳐 터지는
+      // "분출" 모션. 화상기는 잉걸불 오버레이가 따로 덧붙습니다.
+      const ground = buildArcMesh(0, range * (shape.kind === "line" ? 0.5 : 1), halfAngle, 24, theme.core, ultimate ? 0.55 : 0.42, 0.04);
       if (shape.kind === "line") ground.position.z = range / 2;
       group.add(ground);
-      const rim = buildArcMesh(range * 0.85, range * 1.05, halfAngle, 24, theme.glow, ultimate ? 0.6 : 0.48, 0.06);
+      const rim = buildArcMesh(range * 0.85, range * 1.05, halfAngle, 24, theme.glow, ultimate ? 0.7 : 0.55, 0.06);
       if (shape.kind === "line") rim.position.z = range / 2;
       group.add(rim);
-      addRadialShards(group, ultimate ? 22 : 13, theme.spark, halfAngle >= Math.PI ? Math.PI : halfAngle, range);
-      growTo = 0.25;
+      const magmaHalf = halfAngle >= Math.PI ? Math.PI : halfAngle;
+      addGrowingFormations(
+        group,
+        ultimate ? 10 : 6,
+        theme.spark,
+        theme.glow,
+        magmaHalf,
+        range,
+        (h) => new THREE.ConeGeometry(0.16 + Math.random() * 0.12, h, 5),
+        ultimate ? 1.6 : 1.0,
+        ultimate ? 3.1 : 2.0,
+        ultimate ? 0.85 : 0.72,
+        false,
+      );
+      addCollapseBurstShards(
+        group,
+        ultimate ? 20 : 12,
+        theme.spark,
+        () => new THREE.TetrahedronGeometry(0.07 + Math.random() * 0.07),
+        magmaHalf,
+        range * 0.9,
+        range * 1.25,
+        0.85,
+        0.3,
+        0.5,
+      );
+      addRadialShards(group, ultimate ? 16 : 9, theme.spark, magmaHalf, range);
+      growTo = 0.3;
+      durationMs = ultimate ? 800 : 560;
       break;
     }
     case "ice_lance": {
@@ -671,10 +788,38 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
         growTo = 0.15;
         durationMs = 550;
       } else {
-        addIceSpikes(group, ultimate ? 16 : freeze ? 12 : 8, theme, halfAngle, range, freeze);
-        addFrostShards(group, freeze ? 14 : 9, halfAngle, range);
-        growTo = freeze ? 0.2 : 0.1;
-        durationMs = freeze ? (ultimate ? 1000 : 750) : ultimate ? 850 : 550;
+        const iceHalf = halfAngle >= Math.PI ? Math.PI : halfAngle;
+        // 결정이 빙글빙글 돌면서 쑥 자라나는 게 이 열매의 시그니처 — 얼음이
+        // "쨍하고 순식간에 어는" 게 아니라 눈에 보이게 자라나야 마법처럼 보입니다.
+        addGrowingFormations(
+          group,
+          ultimate ? 14 : freeze ? 10 : 7,
+          theme.core,
+          theme.glow,
+          iceHalf,
+          range,
+          (h) => new THREE.OctahedronGeometry(Math.max(0.12, h * 0.32)),
+          freeze ? 1.0 : 0.6,
+          freeze ? (ultimate ? 2.4 : 1.7) : ultimate ? 1.6 : 1.1,
+          freeze ? 0.85 : 0.65,
+          true,
+        );
+        addFrostShards(group, freeze ? 14 : 9, iceHalf, range);
+        // 명중 순간, 주변 냉기가 한 번 확 빨려들었다 파삭 부서지는 임팩트.
+        addCollapseBurstShards(
+          group,
+          freeze ? 14 : 8,
+          theme.spark,
+          () => new THREE.OctahedronGeometry(0.05 + Math.random() * 0.05),
+          iceHalf,
+          range * 0.5,
+          range * 0.85,
+          0.8,
+          0.4,
+          0.9,
+        );
+        growTo = freeze ? 0.22 : 0.12;
+        durationMs = freeze ? (ultimate ? 1050 : 800) : ultimate ? 900 : 600;
       }
       break;
     }
@@ -689,21 +834,79 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
         // 것으로 그립니다(실제 판정은 CombatSystem이 가장 가까운 대상으로 처리).
         const a = Math.random() * Math.PI * 2;
         const r = range * (0.25 + Math.random() * 0.45);
+        // 벼락이 꽂히기 직전, 그 자리로 전격이 빨려드는 예비 동작을 살짝 깔아
+        // "하늘에서 그냥 뚝 떨어지는" 게 아니라 "기가 모여서 내리꽂힌다"는 느낌을 줍니다.
+        const strikeGroup = new THREE.Group();
+        strikeGroup.position.set(Math.sin(a) * r, 0, Math.cos(a) * r);
+        group.add(strikeGroup);
+        addCollapseBurstShards(
+          strikeGroup,
+          ultimate ? 12 : 7,
+          theme.spark,
+          () => new THREE.BoxGeometry(0.07, 0.07, 0.3 + Math.random() * 0.3),
+          Math.PI,
+          1.6,
+          0.4,
+          0.9,
+          0.55,
+          0.9,
+        );
         buildLightningStrike(group, Math.sin(a) * r, Math.cos(a) * r, theme, ultimate);
         growTo = 0;
-        durationMs = ultimate ? 550 : 420;
+        durationMs = ultimate ? 600 : 460;
       } else if (shape.kind === "line") {
+        // 전격이 손끝으로 응축됐다가 지그재그 번개로 터져나가는 2단 모션.
+        addCollapseBurstShards(
+          group,
+          ultimate ? 14 : 8,
+          theme.spark,
+          () => new THREE.BoxGeometry(0.06, 0.06, 0.25 + Math.random() * 0.3),
+          0.5,
+          1.3,
+          shape.range * 0.35,
+          0.9,
+          0.45,
+          0.85,
+        );
         buildLightningBolt(group, shape.range, shape.width, theme, ultimate);
         growTo = 0.03;
-        durationMs = ultimate ? 550 : 380;
+        durationMs = ultimate ? 600 : 420;
       }
       break;
     }
     case "dark_wave": {
       addVoidCore(group, theme, range, ultimate);
       addInwardVoidShards(group, ultimate ? 20 : 12, theme, halfAngle, range);
-      growTo = 0.15;
-      durationMs = ultimate ? 950 : 700;
+      // 짓누르는 무게감을 주는, 천천히 솟았다 가라앉는 어둠의 첨탑 — 회전 없이
+      // 무겁게, 마그마의 빠르고 가벼운 성장과 대비시킵니다.
+      addGrowingFormations(
+        group,
+        ultimate ? 8 : 5,
+        theme.glow,
+        theme.core,
+        halfAngle >= Math.PI ? Math.PI : halfAngle,
+        range,
+        (h) => new THREE.ConeGeometry(0.12 + Math.random() * 0.08, h, 4),
+        ultimate ? 1.3 : 0.8,
+        ultimate ? 2.6 : 1.6,
+        0.55,
+        false,
+      );
+      // 붕괴하는 공허 — 빨려들었다가 짓눌리며 짧게 터지는 잔해.
+      addCollapseBurstShards(
+        group,
+        ultimate ? 16 : 10,
+        theme.spark,
+        () => new THREE.OctahedronGeometry(0.06 + Math.random() * 0.06),
+        halfAngle >= Math.PI ? Math.PI : halfAngle,
+        range * 0.85,
+        range * 0.45,
+        0.75,
+        0.55,
+        0.6,
+      );
+      growTo = 0.18;
+      durationMs = ultimate ? 1000 : 750;
       break;
     }
     case "rubber_barrage": {
@@ -763,12 +966,40 @@ export function buildFruitSkillEffectGroup(skill: SkillDef, fruitId: FruitAbilit
     case "sand_storm": {
       if (shape.kind === "radial") {
         addSandVortex(group, theme, ultimate ? 26 : 16, shape.radius, ultimate);
+        // 소용돌이가 다 감기면서 한가운데서 모래 첨탑들이 솟구치는 마무리 한 방.
+        addGrowingFormations(
+          group,
+          ultimate ? 9 : 5,
+          theme.core,
+          theme.spark,
+          Math.PI,
+          shape.radius * 0.5,
+          (h) => new THREE.ConeGeometry(0.14 + Math.random() * 0.1, h, 4),
+          ultimate ? 1.2 : 0.7,
+          ultimate ? 2.4 : 1.5,
+          0.6,
+          true,
+        );
         growTo = 0.5;
-        durationMs = ultimate ? 1000 : 750;
+        durationMs = ultimate ? 1050 : 800;
       } else {
-        addSandGrit(group, ultimate ? 22 : 14, theme, halfAngle, range);
-        growTo = 0.15;
-        durationMs = ultimate ? 700 : 500;
+        const sandHalf = halfAngle >= Math.PI ? Math.PI : halfAngle;
+        addSandGrit(group, ultimate ? 22 : 14, theme, sandHalf, range);
+        // 날을 세우기 전, 모래가 소용돌이치며 응축됐다가 칼날처럼 터져나가는 모션.
+        addCollapseBurstShards(
+          group,
+          ultimate ? 16 : 10,
+          theme.spark,
+          () => new THREE.ConeGeometry(0.05 + Math.random() * 0.05, 0.22 + Math.random() * 0.16, 4),
+          sandHalf,
+          range * 0.75,
+          range * 1.1,
+          0.75,
+          0.32,
+          0.55,
+        );
+        growTo = 0.18;
+        durationMs = ultimate ? 780 : 560;
       }
       break;
     }

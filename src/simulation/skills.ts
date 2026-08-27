@@ -90,6 +90,11 @@ export interface SkillDef {
   chargeMinRangeMultiplier?: number;
   /** 차지 100%(최대로 눌렀을 때) 사거리 배율. */
   chargeMaxRangeMultiplier?: number;
+  /**
+   * 차지 100%일 때 데미지 배율(0%일 땐 항상 1배, 그 사이는 선형 보간).
+   * 미지정 시 1(데미지는 안 늘어나고 사거리만 늘어남).
+   */
+  chargeMaxDamageMultiplier?: number;
 
   description: string;
 }
@@ -110,7 +115,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 10,
       damage: 25,
       shape: { kind: "radial", radius: 3.5 },
-      description: "주먹에 용암을 둘러 주변을 후려칩니다.",
+      chargeable: true,
+      maxChargeSec: 1,
+      chargeMaxRangeMultiplier: 1.5,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "Z를 꾹 눌러 용암을 끌어모았다가 놓으면, 모은 만큼 더 넓고 세게 후려칩니다.",
     },
     {
       id: "magma_x",
@@ -123,7 +132,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       shape: { kind: "cone", range: 7, halfAngleDeg: 35 },
       burnDps: 6,
       burnDurationSec: 4,
-      description: "전방 부채꼴로 불길을 뿜어 화상을 입힙니다.",
+      chargeable: true,
+      maxChargeSec: 1.1,
+      chargeMaxRangeMultiplier: 1.7,
+      chargeMaxDamageMultiplier: 1.35,
+      description: "누른 시간만큼 불길을 더 멀리, 더 뜨겁게 뿜어 화상을 입힙니다.",
     },
     {
       id: "magma_c",
@@ -136,7 +149,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       shape: { kind: "radial", radius: 6 },
       burnDps: 10,
       burnDurationSec: 6,
-      description: "발밑을 용암으로 바꿔 오래 타오르게 합니다.",
+      chargeable: true,
+      maxChargeSec: 1.3,
+      chargeMaxRangeMultiplier: 1.4,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "발밑을 용암으로 바꿔 오래 타오르게 합니다. 오래 모을수록 지대가 넓어집니다.",
     },
     {
       id: "magma_v",
@@ -149,7 +166,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       shape: { kind: "radial", radius: 11 },
       burnDps: 18,
       burnDurationSec: 6,
-      description: "화산을 터뜨려 광범위를 불바다로 만듭니다.",
+      chargeable: true,
+      maxChargeSec: 1.8,
+      chargeMaxRangeMultiplier: 1.3,
+      chargeMaxDamageMultiplier: 1.3,
+      description: "화산을 터뜨려 광범위를 불바다로 만듭니다. 오래 모을수록 더 크게 터집니다.",
     },
   ],
 
@@ -166,7 +187,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       shape: { kind: "line", range: 6, width: 1.8 },
       slowFactor: 0.5,
       slowDurationSec: 2,
-      description: "얼음을 짧고 날카롭게 쏘아내는 견제기. 맞으면 둔화됩니다.",
+      chargeable: true,
+      maxChargeSec: 1,
+      chargeMaxRangeMultiplier: 1.8,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "Z를 꾹 눌러 냉기를 모았다가 놓으면, 더 멀리 뻗는 날카로운 얼음창. 맞으면 둔화됩니다.",
     },
     {
       id: "ice_x",
@@ -193,7 +218,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       damage: 22,
       shape: { kind: "radial", radius: 6 },
       freezeDurationSec: 3,
-      description: "얼음 감옥을 씌워 맞은 대상(플레이어·몬스터 모두)을 3초간 완전히 얼립니다.",
+      chargeable: true,
+      maxChargeSec: 1.3,
+      chargeMaxRangeMultiplier: 1.4,
+      chargeMaxDamageMultiplier: 1.35,
+      description: "얼음 감옥을 씌워 맞은 대상(플레이어·몬스터 모두)을 3초간 완전히 얼립니다. 오래 모을수록 범위가 넓어집니다.",
     },
     {
       id: "ice_v",
@@ -205,7 +234,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       damage: 60,
       shape: { kind: "radial", radius: 12 },
       freezeDurationSec: 5,
-      description: "일대의 온도를 절대영도까지 떨어뜨려, 범위 안 모두를 5초간 완전히 얼립니다.",
+      chargeable: true,
+      maxChargeSec: 1.8,
+      chargeMaxRangeMultiplier: 1.3,
+      chargeMaxDamageMultiplier: 1.3,
+      description: "일대의 온도를 절대영도까지 떨어뜨려, 범위 안 모두를 5초간 완전히 얼립니다. 오래 모을수록 더 넓게 퍼집니다.",
     },
   ],
 
@@ -221,7 +254,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       damage: 16,
       shape: { kind: "line", range: 6, width: 2 },
       dashDistance: 6,
-      description: "짧게 번개로 화해 앞으로 순간이동하며, 지나친 자리에 있던 대상에게 피해를 줍니다.",
+      chargeable: true,
+      maxChargeSec: 1,
+      chargeMaxRangeMultiplier: 1.8,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "Z를 꾹 눌러 전격을 모았다가 놓으면, 더 멀리 번개로 화해 순간이동하며 피해를 줍니다.",
     },
     {
       id: "thunder_x",
@@ -249,7 +286,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       damage: 42,
       shape: { kind: "radial", radius: 16 },
       autoTargetNearest: true,
-      description: "조준 없이, 근처에서 가장 가까운 적이나 플레이어에게 정확히 벼락을 내리꽂습니다.",
+      chargeable: true,
+      maxChargeSec: 1.3,
+      chargeMaxRangeMultiplier: 1.3,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "조준 없이, 근처에서 가장 가까운 적이나 플레이어에게 정확히 벼락을 내리꽂습니다. 오래 모을수록 더 세게 꽂힙니다.",
     },
     {
       id: "thunder_v",
@@ -260,7 +301,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 56,
       damage: 130,
       shape: { kind: "line", range: 24, width: 3.2 },
-      description: "하늘을 가르는 거대한 번개 한 줄기를 전방으로 발사합니다.",
+      chargeable: true,
+      maxChargeSec: 1.8,
+      chargeMaxRangeMultiplier: 1.2,
+      chargeMaxDamageMultiplier: 1.3,
+      description: "하늘을 가르는 거대한 번개 한 줄기를 전방으로 발사합니다. 오래 모을수록 더 길고 강해집니다.",
     },
   ],
 
@@ -277,7 +322,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       shape: { kind: "cone", range: 5, halfAngleDeg: 40 },
       slowFactor: 0.6,
       slowDurationSec: 1.2,
-      description: "그림자를 실체화한 칼날로 베어, 잠시 발목을 붙잡습니다.",
+      chargeable: true,
+      maxChargeSec: 1,
+      chargeMaxRangeMultiplier: 1.8,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "Z를 꾹 눌러 그림자를 모았다가 놓으면, 더 멀리 베며 잠시 발목을 붙잡습니다.",
     },
     {
       id: "dark_x",
@@ -291,6 +340,10 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       healPercentOfMaxHp: 0.08,
       slowFactor: 0.5,
       slowDurationSec: 2,
+      chargeable: true,
+      maxChargeSec: 1.1,
+      chargeMaxRangeMultiplier: 1.5,
+      chargeMaxDamageMultiplier: 1.35,
       description: "그림자 촉수로 생명력을 빨아들이며 대상을 붙잡아 둡니다. 최대 체력의 8%를 회복합니다.",
     },
     {
@@ -305,7 +358,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       freezeDurationSec: 1.5,
       burnDps: 8,
       burnDurationSec: 3,
-      description: "작은 어둠의 구멍을 만들어 짓눌러, 잠시 완전히 움직임을 멈추고 서서히 짓이겨집니다.",
+      chargeable: true,
+      maxChargeSec: 1.3,
+      chargeMaxRangeMultiplier: 1.4,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "작은 어둠의 구멍을 만들어 짓눌러, 잠시 완전히 움직임을 멈추고 서서히 짓이겨집니다. 오래 모을수록 더 크게 벌어집니다.",
     },
     {
       id: "dark_v",
@@ -318,6 +375,10 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       shape: { kind: "radial", radius: 12 },
       healPercentOfMaxHp: 0.2,
       freezeDurationSec: 2,
+      chargeable: true,
+      maxChargeSec: 1.8,
+      chargeMaxRangeMultiplier: 1.3,
+      chargeMaxDamageMultiplier: 1.3,
       description: "모든 빛을 집어삼키는 어둠을 일으켜, 범위 안 전원을 잠시 얼려붙이고 생명력을 흡수합니다.",
     },
   ],
@@ -340,7 +401,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       maxChargeSec: 1.4,
       chargeMinRangeMultiplier: 1,
       chargeMaxRangeMultiplier: 2.2,
-      description: "Z를 꾹 눌러 팔을 당겼다가 놓으면, 누른 시간만큼 더 멀리 뻗는 강타.",
+      chargeMaxDamageMultiplier: 1.4,
+      description: "Z를 꾹 눌러 팔을 당겼다가 놓으면, 누른 시간만큼 더 멀리·더 세게 뻗는 강타.",
     },
     {
       id: "rubber_x",
@@ -393,7 +455,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 9,
       damage: 18,
       shape: { kind: "cone", range: 6, halfAngleDeg: 45 },
-      description: "모래 칼날을 부채꼴로 흩뿌립니다.",
+      chargeable: true,
+      maxChargeSec: 1,
+      chargeMaxRangeMultiplier: 1.8,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "Z를 꾹 눌러 모래를 모았다가 놓으면, 더 멀리 뻗는 모래 칼날을 흩뿌립니다.",
     },
     {
       id: "sand_x",
@@ -406,6 +472,10 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       shape: { kind: "line", range: 10, width: 2 },
       burnDps: 8,
       burnDurationSec: 3,
+      chargeable: true,
+      maxChargeSec: 1.1,
+      chargeMaxRangeMultiplier: 1.6,
+      chargeMaxDamageMultiplier: 1.35,
       description: "수분을 빼앗는 모래 칼날이 직선으로 관통하며 살갗을 태웁니다.",
     },
     {
@@ -421,7 +491,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       slowDurationSec: 3,
       burnDps: 5,
       burnDurationSec: 3,
-      description: "거대한 모래 회오리를 일으켜 시야와 발을 묶고 살갗을 벗겨냅니다.",
+      chargeable: true,
+      maxChargeSec: 1.3,
+      chargeMaxRangeMultiplier: 1.4,
+      chargeMaxDamageMultiplier: 1.4,
+      description: "거대한 모래 회오리를 일으켜 시야와 발을 묶고 살갗을 벗겨냅니다. 오래 모을수록 회오리가 커집니다.",
     },
     {
       id: "sand_v",
@@ -434,7 +508,11 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       shape: { kind: "radial", radius: 13 },
       burnDps: 14,
       burnDurationSec: 5,
-      description: "사막 전체를 끌어모은 거대한 모래 칼날로 일대를 갈아버립니다.",
+      chargeable: true,
+      maxChargeSec: 1.8,
+      chargeMaxRangeMultiplier: 1.3,
+      chargeMaxDamageMultiplier: 1.3,
+      description: "사막 전체를 끌어모은 거대한 모래 칼날로 일대를 갈아버립니다. 오래 모을수록 더 넓게 갈아버립니다.",
     },
   ],
 };
@@ -456,24 +534,36 @@ export function isSlotUnlocked(slot: number, fruitLevel: number) {
 }
 
 /**
- * 차지 스킬(고무 피스톨 등)이 눌린 비율(chargeFrac, 0~1)만큼 늘어난 사거리를 가진
- * 스킬 사본을 돌려줍니다. CombatSystem(실제 판정)과 SceneRenderer(이펙트 모양)가
- * 똑같은 이 함수를 써서, "보이는 범위 = 맞는 범위"가 항상 일치하게 합니다.
- * chargeable이 아니거나 배율이 1이면 원본을 그대로 돌려줍니다(불필요한 복사 방지).
+ * 차지 스킬(고무 피스톨 등)이 눌린 비율(chargeFrac, 0~1)만큼 사거리·돌진거리·
+ * 데미지가 늘어난 스킬 사본을 돌려줍니다. CombatSystem(실제 판정)과
+ * SceneRenderer(이펙트 모양)가 똑같은 이 함수를 써서, "보이는 범위 = 맞는
+ * 범위 = 실제로 들어가는 데미지"가 항상 일치하게 합니다.
+ * chargeable이 아니면 원본을 그대로 돌려줍니다(불필요한 복사 방지).
  */
-export function withChargedRange(skill: SkillDef, chargeFrac: number): SkillDef {
+export function withCharge(skill: SkillDef, chargeFrac: number): SkillDef {
   if (!skill.chargeable) return skill;
-  const min = skill.chargeMinRangeMultiplier ?? 1;
-  const max = skill.chargeMaxRangeMultiplier ?? 1;
   const clamped = Math.max(0, Math.min(1, chargeFrac));
-  const mult = min + (max - min) * clamped;
-  if (mult === 1) return skill;
-  const shape = skill.shape;
-  if (shape.kind === "line" || shape.kind === "cone") {
-    return { ...skill, shape: { ...shape, range: shape.range * mult } };
+  const rangeMin = skill.chargeMinRangeMultiplier ?? 1;
+  const rangeMax = skill.chargeMaxRangeMultiplier ?? 1;
+  const rangeMult = rangeMin + (rangeMax - rangeMin) * clamped;
+  const dmgMult = 1 + ((skill.chargeMaxDamageMultiplier ?? 1) - 1) * clamped;
+
+  let next: SkillDef = skill;
+  if (rangeMult !== 1) {
+    const shape = skill.shape;
+    if (shape.kind === "line" || shape.kind === "cone") {
+      next = { ...next, shape: { ...shape, range: shape.range * rangeMult } };
+    } else if (shape.kind === "radial") {
+      next = { ...next, shape: { ...shape, radius: shape.radius * rangeMult } };
+    }
+    // 돌진형 스킬(고무 로켓·번개 순간이동 등)은 사거리와 함께 돌진 거리도 늘어나야
+    // "더 멀리 늘어나 튕겨나간다"는 느낌이 그대로 이어집니다.
+    if (skill.dashDistance) {
+      next = { ...next, dashDistance: skill.dashDistance * rangeMult };
+    }
   }
-  if (shape.kind === "radial") {
-    return { ...skill, shape: { ...shape, radius: shape.radius * mult } };
+  if (dmgMult !== 1) {
+    next = { ...next, damage: skill.damage * dmgMult };
   }
-  return skill;
+  return next;
 }

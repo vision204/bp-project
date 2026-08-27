@@ -5,7 +5,7 @@ import { grantExp } from "./Leveling";
 import { effectiveMeleeDamage } from "./HakiSystem";
 import { fruitExpFromEnemy, fruitLevelDamageMultiplier, grantFruitExp } from "./FruitLeveling";
 import { weaponExpFromEnemy, weaponLevelDamageMultiplier, weaponMasteryLevel, grantWeaponExp } from "./WeaponLeveling";
-import { isSlotUnlocked, skillsForFruit, withChargedRange, type SkillDef } from "./skills";
+import { isSlotUnlocked, skillsForFruit, withCharge, type SkillDef } from "./skills";
 import { isWeaponSlotUnlocked, skillsForWeapon } from "./weaponSkills";
 import {
   drawnWeapon,
@@ -388,7 +388,7 @@ export function stepCombat(
       player.skillCooldowns[slot] = skill.cooldownSec;
       player.mana -= skill.manaCost;
       player.lastManaSpentAtMs = nowMs;
-      const firedSkill = skill.chargeable ? withChargedRange(skill, chargeFrac) : skill;
+      const firedSkill = skill.chargeable ? withCharge(skill, chargeFrac) : skill;
       applySkill(player, enemies, firedSkill, "fruit", skillDamage(player, firedSkill), player.events);
       if (skill.toggle) setToggleActive(player, skill, true, player.position);
       player.events.push(
