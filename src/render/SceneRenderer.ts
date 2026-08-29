@@ -60,6 +60,20 @@ function skillModelPath(skillId: string): string {
 const SKILL_AURA_IDS = new Set(["ice_x", "thunder_x", "sand_v"]);
 
 /**
+ * 블록형 캐릭터(플레이어/몬스터 공용) 전체 높이 — buildBlockyCharacterParts()의
+ * 머리 꼭대기(y = 1.9 + 반지름 0.4 = 2.3)를 기준으로 잡았습니다.
+ */
+const NPC_HEIGHT_APPROX = 2.3;
+/**
+ * 열매 스킬 GLB 이펙트 크기 — "몬스터 키의 최소 3배, 만화처럼 비현실적으로
+ * 크게" 요청에 따라 몬스터 키의 3.6배로 잡습니다(정확히 3배가 아니라 여유를
+ * 더 둔 값 — 어떤 종은 자체 배율이 1보다 작아서 여유가 필요합니다). 템플릿은
+ * normalizeAndCenterModel(gltf.scene, 1)로 "가장 긴 변 = 1"이 되도록 정규화돼
+ * 있으므로, 이 값을 그대로 스케일 배율로 곱하면 최종 크기가 됩니다.
+ */
+const SKILL_MODEL_SCALE = NPC_HEIGHT_APPROX * 3.6;
+
+/**
  * 로드된 GLB는 크기와 원점이 제각각이라(모델러/AI 생성 파이프라인이 서로
  * 다름), 그대로 붙이면 손 크기에 안 맞거나 손 밖으로 삐져나옵니다.
  * 바운딩 박스를 재서 중심을 원점으로 옮기고, 가장 긴 변이 targetSize가
@@ -662,6 +676,13 @@ export class SceneRenderer {
     growTo: number;
     /** line/cone(투사체형) GLB 이펙트 전용 — 있으면 시작~끝 지점을 이 시간 동안 이동합니다. */
     travel?: { from: THREE.Vector3; to: THREE.Vector3 };
+    /**
+     * GLB 이펙트 전용 — 있으면 growTo 배율을 "1 + t*growTo"가 아니라
+     * "baseScale * (1 + t*growTo)"로 계산해서, 애니메이션 내내 이 크기를
+     * 기준으로 삼습니다(만화처럼 거대한 GLB 이펙트를 처음부터 그 크기로
+     * 보여주기 위함 — 기존 도형 이펙트는 이 필드가 없어서 그대로 1을 씁니다).
+     */
+    baseScale?: number;
   }[] = [];
 
   // ── 고무 열매 — 내(로컬 플레이어)가 뻗을 때만 진짜 오른팔을 늘였다 되감습니다
@@ -795,20 +816,25 @@ export class SceneRenderer {
         this.skillModelTemplates.set(skillId, template);
 
         if (SKILL_AURA_IDS.has(skillId)) {
+          // 캐릭터에 계속 붙어 있는 오라도 다른 GLB 이펙트와 똑같이
+          // SKILL_MODEL_SCALE(몬스터 키의 3배 이상) 기준으로 잡습니다 — 손에
+          // 든 대검이든 몸을 감싸는 번개 오라든, 만화처럼 비현실적으로 크게
+          // 보이는 게 목적입니다.
           const aura = cloneSkillModelInstance(template, false);
           if (skillId === "sand_v") {
-            // 손에 든 대검 — 무기와 같은 오른손 자리, 요루보다 조금 큼직하게.
-            aura.scale.setScalar(1.05);
+            // 손에 든 대검 — 자루는 오른손 자리에 두되, 날은 그 몇 배는 되는
+            // 거대한 크기로 위로 솟구칩니다.
+            aura.scale.setScalar(SKILL_MODEL_SCALE);
             aura.position.set(-0.7, 0.78, 0.05);
             aura.rotation.set(0.22, 0, 0.5);
           } else if (skillId === "ice_x") {
-            // 발밑 얼음판 — 납작하게 눕혀서 발밑에 깔립니다.
-            aura.scale.set(2.6, 0.12, 2.6);
+            // 발밑 얼음판 — 납작하게 눕혀두되, 반경 자체는 거대한 빙판이 되도록.
+            aura.scale.set(SKILL_MODEL_SCALE, 0.12, SKILL_MODEL_SCALE);
             aura.position.set(0, 0.03, 0);
           } else {
-            // 뇌광 질주 — 몸 전체를 감싸는 번개 오라.
-            aura.scale.setScalar(1.9);
-            aura.position.set(0, 0.9, 0);
+            // 뇌광 질주 — 몸을 완전히 집어삼키는 거대한 번개 오라.
+            aura.scale.setScalar(SKILL_MODEL_SCALE);
+            aura.position.set(0, NPC_HEIGHT_APPROX / 2, 0);
           }
           aura.visible = false;
           this.playerVisual.add(aura);
@@ -904,19 +930,23 @@ export class SceneRenderer {
     x = origin.x;
     z = origin.z;
 
-    // 무기(검) 스킬은 기존 도형 기반 이펙트 그대로, 열매 스킬은 이름/속성에 맞춘
-    // 전용 이펙트(FRUIT_SKILL_EFFECT_BUILDERS)를 씁니다 — 검과 열매가 똑같이
-    // "판정 도형에 색만 입힌" 모양으로 보이지 않도록 갈라둡니다.
+    // 무기(검) 스킬은 GLB 모델이 없어서 기존 도형 기반 이펙트를 그대로 씁니다.
+    // 열매 스킬은 이제 기존 도형 이펙트(SkillEffects.ts)를 화면에 띄우지 않고
+    // GLB 모델로 완전히 대체합니다(사용자 요청) — 다만 buildFruitSkillEffectGroup은
+    // 고무 열매의 실제 팔 늘리기 타이밍(armStretch)도 함께 계산해주므로, 그
+    // 메타데이터만 가져오고 group 자체는 씬에 추가하지 않습니다.
     const main = weaponSkill
       ? buildSkillEffectGroup(skill, sourceId as ItemId)
       : buildFruitSkillEffectGroup(skill, sourceId as FruitAbilityId);
-    main.group.position.set(x, y, z);
-    main.group.rotation.y = aimYaw;
-    this.scene.add(main.group);
-    this.skillEffects.push({ group: main.group, startedAtMs: nowMs, durationMs: main.durationMs, growTo: main.growTo });
+    if (weaponSkill) {
+      main.group.position.set(x, y, z);
+      main.group.rotation.y = aimYaw;
+      this.scene.add(main.group);
+      this.skillEffects.push({ group: main.group, startedAtMs: nowMs, durationMs: main.durationMs, growTo: main.growTo });
+    }
 
-    // GLB 이펙트(열매 스킬만 — 무기 스킬용 GLB는 없습니다) — 기존 도형
-    // 이펙트를 대체하지 않고 그 위에 덧씌웁니다.
+    // GLB 이펙트(열매 스킬만 — 무기 스킬용 GLB는 없습니다). 이제 기존 도형
+    // 이펙트를 대체하는 유일한 열매 스킬 이펙트입니다.
     if (!weaponSkill) this.spawnSkillModelEffect(skill, x, y, z, aimYaw, nowMs);
 
     // 고무 열매고, 내(로컬 플레이어)가 쓴 거면 진짜 오른팔을 이 타이밍표대로
@@ -931,12 +961,16 @@ export class SceneRenderer {
       this.rubberArmPunches = main.armStretch;
     }
 
-    const ember = buildEmberOverlayGroup(skill);
-    if (ember) {
-      ember.group.position.set(x, y, z);
-      ember.group.rotation.y = aimYaw;
-      this.scene.add(ember.group);
-      this.skillEffects.push({ group: ember.group, startedAtMs: nowMs, durationMs: ember.durationMs, growTo: ember.growTo });
+    // 화상 잉걸불(ember) 오버레이도 열매 스킬의 "기존 이펙트"에 속하므로 함께
+    // 뺍니다 — 무기(검) 스킬의 화상(엔마 등)에는 그대로 남겨둡니다.
+    if (weaponSkill) {
+      const ember = buildEmberOverlayGroup(skill);
+      if (ember) {
+        ember.group.position.set(x, y, z);
+        ember.group.rotation.y = aimYaw;
+        this.scene.add(ember.group);
+        this.skillEffects.push({ group: ember.group, startedAtMs: nowMs, durationMs: ember.durationMs, growTo: ember.growTo });
+      }
     }
   }
 
@@ -951,6 +985,10 @@ export class SceneRenderer {
    * - "radial"/"self" (낙뢰·빙결 감옥처럼 한 자리를 때리는 스킬): 그 자리에서
    *   커졌다 여운을 남기며 사라지는 버스트로 재생합니다(사용자가 "좀 더
    *   여운있게"를 선택해서 0.6~1.2초 사이로 잡았습니다).
+   *
+   * 크기는 어느 쪽이든 SKILL_MODEL_SCALE(몬스터 키의 3배 이상, 만화처럼
+   * 과장된 크기)을 기준으로 잡습니다 — baseScale로 넘겨서 skillEffects
+   * 갱신 루프가 그 크기를 기준으로 성장/유지하게 합니다.
    */
   private spawnSkillModelEffect(skill: SkillDef, x: number, y: number, z: number, aimYaw: number, nowMs: number) {
     const template = this.skillModelTemplates.get(skill.id);
@@ -960,32 +998,34 @@ export class SceneRenderer {
     const fx = Math.sin(aimYaw);
     const fz = Math.cos(aimYaw);
     clone.rotation.y = aimYaw;
+    clone.scale.setScalar(SKILL_MODEL_SCALE);
 
     if (skill.shape.kind === "line" || skill.shape.kind === "cone") {
       // 투사체형 — 시전 지점에서 조준 방향으로 사거리만큼 날아갑니다.
-      const range = skill.shape.kind === "line" ? skill.shape.range : skill.shape.range;
+      const range = skill.shape.range;
       const from = new THREE.Vector3(x, y + 1, z);
       const to = new THREE.Vector3(x + fx * range, y + 1, z + fz * range);
       clone.position.copy(from);
-      clone.scale.setScalar(1.1);
       this.scene.add(clone);
       this.skillEffects.push({
         group: clone,
         startedAtMs: nowMs,
         durationMs: 800,
         growTo: 0,
+        baseScale: SKILL_MODEL_SCALE,
         travel: { from, to },
       });
     } else {
-      // 제자리형(radial/self) — 판정 지점에서 커졌다가 여운을 남기며 사라집니다.
+      // 제자리형(radial/self) — 판정 지점에서 이미 거대한 크기로 나타나
+      // 살짝 더 부풀었다가(growTo) 여운을 남기며 사라집니다.
       clone.position.set(x, y + 0.05, z);
-      clone.scale.setScalar(0.6);
       this.scene.add(clone);
       this.skillEffects.push({
         group: clone,
         startedAtMs: nowMs,
         durationMs: 1000,
-        growTo: 1.6,
+        growTo: 0.25,
+        baseScale: SKILL_MODEL_SCALE,
       });
     }
   }
@@ -1401,7 +1441,10 @@ export class SceneRenderer {
         continue;
       }
       const fade = 1 - t;
-      if (eff.growTo > 0) eff.group.scale.setScalar(1 + t * eff.growTo);
+      if (eff.growTo > 0 || eff.baseScale) {
+        const base = eff.baseScale ?? 1;
+        eff.group.scale.setScalar(base * (1 + t * eff.growTo));
+      }
       if (eff.travel) {
         // 투사체형 GLB 이펙트 — 앞 70%는 날아가고, 나머지는 도착 지점에서 여운을 남기며 사라집니다.
         const flyT = Math.min(1, t / 0.7);
