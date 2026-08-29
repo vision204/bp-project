@@ -169,6 +169,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       damage: 32,
       // 사용자 요청: 사정거리를 더 늘려달라고 해서 7→12로 확장했습니다.
       shape: { kind: "cone", range: 12, halfAngleDeg: 35 },
+      originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       burnDps: 6,
       burnDurationSec: 4,
       chargeable: true,
@@ -228,6 +229,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 9,
       damage: 20,
       shape: { kind: "line", range: 6, width: 1.8 },
+      originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       slowFactor: 0.5,
       slowDurationSec: 2,
       chargeable: true,
@@ -299,14 +301,18 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 1.4,
       manaCost: 7,
       damage: 16,
-      shape: { kind: "line", range: 6, width: 2 },
-      originAtMouse: true, // 사용자 요청: 마우스 위치로 재조준되어 그 방향으로 돌진
-      dashDistance: 6,
+      // 사용자 요청: "마우스 위치로 이동하는 게 아니라 마우스 위치에 번개가
+      // 치게" — 돌진(dashDistance)을 완전히 없애고, 낙뢰(thunder_c)처럼
+      // 제자리에서 마우스가 가리키는 지점에 번개를 내리꽂는 radial 스킬로
+      // 바꿨습니다. 플레이어는 더 이상 이동하지 않습니다.
+      shape: { kind: "radial", radius: 4 },
+      originAtMouse: true,
+      originAtAim: true, // 마우스 지점을 못 구했을 때(레이캐스트 실패) 조준 방향 기준으로 폴백
       chargeable: true,
       maxChargeSec: 1,
       chargeMaxRangeMultiplier: 1.8,
       chargeMaxDamageMultiplier: 1.4,
-      description: "Z를 꾹 눌러 전격을 모았다가 놓으면, 더 멀리 번개로 화해 순간이동하며 피해를 줍니다.",
+      description: "Z를 꾹 눌러 전격을 모았다가 놓으면, 마우스가 가리키는 지점에 더 크고 강한 번개를 내리꽂습니다.",
     },
     {
       id: "thunder_x",
@@ -372,6 +378,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       damage: 24,
       // 사용자 요청: 사정거리를 더 늘려달라고 해서 5→9로 확장했습니다.
       shape: { kind: "cone", range: 9, halfAngleDeg: 40 },
+      originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       slowFactor: 0.6,
       slowDurationSec: 1.2,
       chargeable: true,
@@ -450,6 +457,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 8,
       damage: 18,
       shape: { kind: "line", range: 7, width: 1.6 },
+      originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       // Z를 꾹 눌러 팔을 뒤로 당겼다가(차지) 놓으면 튕겨나가듯 발동 — 오래
       // 누를수록 최대 1.4초까지 차서 사거리가 기본의 최대 2.2배(약 15.4m)로
       // 늘어납니다.
@@ -469,8 +477,9 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 14,
       damage: 20,
       shape: { kind: "line", range: 14, width: 2 },
+      originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사(돌진 방향도 함께 재조준)
       dashDistance: 14,
-      description: "팔을 걸고 튕겨나가듯 전방으로 크게 돌진합니다.",
+      description: "팔을 걸고 튕겨나가듯 마우스가 가리키는 방향으로 크게 돌진합니다.",
     },
     {
       id: "rubber_c",
@@ -481,6 +490,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 26,
       damage: 42,
       shape: { kind: "cone", range: 8, halfAngleDeg: 70 },
+      originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       slowFactor: 0.4,
       slowDurationSec: 1.5,
       description: "수십 발의 주먹을 넓게 퍼부어 상대를 그 자리에 붙잡아 둡니다.",
@@ -511,6 +521,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 9,
       damage: 18,
       shape: { kind: "cone", range: 6, halfAngleDeg: 45 },
+      originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       chargeable: true,
       maxChargeSec: 1,
       chargeMaxRangeMultiplier: 1.8,
@@ -526,6 +537,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 18,
       damage: 26,
       shape: { kind: "line", range: 10, width: 2 },
+      originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       burnDps: 8,
       burnDurationSec: 3,
       chargeable: true,

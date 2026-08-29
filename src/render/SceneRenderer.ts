@@ -896,10 +896,12 @@ export class SceneRenderer {
           const aura = cloneSkillModelInstance(template, false);
           if (skillId === "sand_v") {
             // 손에 든 대검 — 자루는 오른손 자리에 두고, 사용자 피드백에 따라
-            // 다른 스킬들보다 훨씬 작은 SAND_BLADE_SCALE을 씁니다.
+            // 다른 스킬들보다 훨씬 작은 SAND_BLADE_SCALE을 씁니다. z축 회전을
+            // 45도(Math.PI/4)로 잡아 대검을 몸에 걸쳐 비스듬히 든 자세로
+            // 보이게 합니다(사용자 요청).
             aura.scale.setScalar(SAND_BLADE_SCALE);
             aura.position.set(-0.7, 0.78, 0.05);
-            aura.rotation.set(0.22, 0, 0.5);
+            aura.rotation.set(0.22, 0, Math.PI / 4);
           } else if (skillId === "ice_x") {
             // 발밑 얼음판 — 납작하게 눕혀두되, 반경 자체는 거대한 빙판이 되도록.
             aura.scale.set(SKILL_MODEL_SCALE, 0.12, SKILL_MODEL_SCALE);

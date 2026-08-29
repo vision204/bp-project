@@ -1411,18 +1411,48 @@ section("originAtMouse — 마우스가 가리키는 지점에서 발생 (용암
   assert(nearMouse.hp < 10000, "용암 지대: 마우스 지점 근처의 적은 맞음");
   assert(nearFeet.hp === 10000, "용암 지대: 발밑 근처의 적은 (마우스 기준으로 옮겨져서) 안 맞음");
 
-  // line 스킬(선더 스트라이크) — 방향이 마우스 지점을 바라보도록 재조준되어야 함
+  // line 스킬(고무 로켓) — 방향이 마우스 지점을 바라보도록 재조준되어야 함
+  // (돌진형 line 스킬의 대표로 검증 — 선더 스트라이크는 이번 요청으로 더
+  // 이상 돌진 스킬이 아니라 아래 별도 섹션에서 검증합니다.)
   const pMouseDash = freshPlayer();
-  pMouseDash.equippedFruit = "thunder_strike";
-  pMouseDash.fruitLevel = 1; // Z = 선더 스트라이크
+  pMouseDash.equippedFruit = "rubber_barrage";
+  pMouseDash.fruitLevel = 25; // X = 고무 로켓
   pMouseDash.aimYaw = 0; // 카메라는 정면(+Z)을 보고 있지만
   pMouseDash.position = { x: 0, y: 1, z: 0 };
   pMouseDash.aimGroundPoint = { x: 5, z: 0 }; // 마우스는 오른쪽(+X)을 가리킴
   pMouseDash.events = [];
-  tapSkill(0.016, pMouseDash, [], 0);
-  assert(pMouseDash.pendingDash !== null, "선더 스트라이크: 마우스 방향으로 돌진 요청 생성됨");
-  assert(pMouseDash.pendingDash.x > 5, `선더 스트라이크: 마우스 방향(+X)으로 돌진함 (x=${pMouseDash.pendingDash.x.toFixed(2)})`);
-  assert(Math.abs(pMouseDash.pendingDash.z) < 0.01, `선더 스트라이크: z축 돌진량은 거의 0 (z=${pMouseDash.pendingDash.z.toFixed(2)})`);
+  tapSkill(0.016, pMouseDash, [], 1);
+  assert(pMouseDash.pendingDash !== null, "고무 로켓: 마우스 방향으로 돌진 요청 생성됨");
+  assert(pMouseDash.pendingDash.x > 5, `고무 로켓: 마우스 방향(+X)으로 돌진함 (x=${pMouseDash.pendingDash.x.toFixed(2)})`);
+  assert(Math.abs(pMouseDash.pendingDash.z) < 0.01, `고무 로켓: z축 돌진량은 거의 0 (z=${pMouseDash.pendingDash.z.toFixed(2)})`);
+}
+
+section("선더 스트라이크 재설계 — 돌진 없이, 마우스 지점에 번개가 내리꽂힘");
+{
+  const thunderZ = skillsForFruit("thunder_strike")[0];
+  assert(thunderZ.shape.kind === "radial", `선더 스트라이크는 이제 radial 스킬 (실제 ${thunderZ.shape.kind})`);
+  assert(thunderZ.dashDistance === undefined, "선더 스트라이크는 더 이상 돌진하지 않음(dashDistance 없음)");
+  assert(thunderZ.originAtMouse === true, "선더 스트라이크는 originAtMouse 스킬");
+
+  const pStrike = freshPlayer();
+  pStrike.equippedFruit = "thunder_strike";
+  pStrike.fruitLevel = 1;
+  pStrike.position = { x: 0, y: 1, z: 0 };
+  pStrike.aimGroundPoint = { x: 20, z: 0 }; // 플레이어와 멀리 떨어진 지점을 마우스로 가리킴
+  const posBefore = { ...pStrike.position };
+  const nearMouseTarget = makeEnemy("thunderNearMouse", 10000, 10);
+  nearMouseTarget.position = { x: 20, y: 1, z: 1 }; // 마우스 지점 근처
+  const nearFeetTarget = makeEnemy("thunderNearFeet", 10000, 10);
+  nearFeetTarget.position = { x: 0, y: 1, z: 1 }; // 발밑 근처(예전이라면 돌진 경로상에 있었을 자리)
+  pStrike.events = [];
+  tapSkill(0.016, pStrike, [nearMouseTarget, nearFeetTarget], 0);
+  assert(nearMouseTarget.hp < 10000, "번개가 마우스 지점 근처에 떨어져 그 근처의 적이 맞음");
+  assert(nearFeetTarget.hp === 10000, "발밑 근처의 적은 (더 이상 돌진하지 않으므로) 안 맞음");
+  assert(pStrike.pendingDash === null, "더 이상 이동(돌진) 요청이 생기지 않음");
+  assert(
+    pStrike.position.x === posBefore.x && pStrike.position.z === posBefore.z,
+    "플레이어 자신은 제자리에 그대로 있음",
+  );
 }
 
 section("requireMouseInRange — 용암 지대·대분화는 마우스가 너무 멀면 사용 자체가 막힘");
@@ -1468,6 +1498,61 @@ section("사정거리 확장 — 화염 방사·섀도우 슬래시 (사용자 �
   assert(magmaX.shape.kind === "cone" && magmaX.shape.range === 12, `화염 방사 사정거리 확장됨 (실제 ${magmaX.shape.range}m)`);
   const darkZ = skillsForFruit("dark_wave")[0];
   assert(darkZ.shape.kind === "cone" && darkZ.shape.range === 9, `섀도우 슬래시 사정거리 확장됨 (실제 ${darkZ.shape.range}m)`);
+}
+
+section("앞으로 나가는 스킬 전부 마우스 방향으로 — 사용자 요청으로 남은 8개 열매 스킬에 적용");
+{
+  const forwardSkills = [
+    ["magma_fist", 1, "화염 방사"],
+    ["ice_lance", 0, "아이스 랜스"],
+    ["dark_wave", 0, "섀도우 슬래시"],
+    ["rubber_barrage", 0, "고무 피스톨"],
+    ["rubber_barrage", 1, "고무 로켓"],
+    ["rubber_barrage", 2, "고무 개틀링"],
+    ["sand_storm", 0, "모래 칼날"],
+    ["sand_storm", 1, "사구검"],
+  ];
+  for (const [fruitId, slot, name] of forwardSkills) {
+    const sk = skillsForFruit(fruitId)[slot];
+    assert(sk.name === name, `${name} — id 매핑 확인`);
+    assert(sk.originAtMouse === true, `${name}: originAtMouse 스킬로 전환됨`);
+    assert(sk.shape.kind === "line" || sk.shape.kind === "cone", `${name}: 방향형(line/cone) 스킬 그대로 유지`);
+    // 사용자 요청: "사정거리 밖으로 조준해서 발사하면 그냥 발사하게" —
+    // 이 스킬들은 requireMouseInRange를 붙이지 않아 마우스가 아무리 멀어도
+    // 발동 자체는 막히지 않아야 합니다(사거리 자체는 shape.range가 그대로 제한).
+    assert(!sk.requireMouseInRange, `${name}: 사거리 밖이어도 발동은 막히지 않음(requireMouseInRange 없음)`);
+  }
+
+  // 실제로 마우스 방향으로 재조준되는지 대표로 하나(화염 방사, cone)만 더 검증
+  const pCone = freshPlayer();
+  pCone.equippedFruit = "magma_fist";
+  pCone.fruitLevel = 25; // X = 화염 방사
+  pCone.aimYaw = 0; // 카메라는 정면(+Z)
+  pCone.position = { x: 0, y: 1, z: 0 };
+  pCone.aimGroundPoint = { x: 0, z: -5 }; // 마우스는 뒤쪽(-Z)을 가리킴
+  const behindPlayer = makeEnemy("magmaBehind", 10000, 10);
+  behindPlayer.position = { x: 0, y: 1, z: -3 }; // 마우스 방향(뒤쪽)에 있는 적
+  const frontPlayer = makeEnemy("magmaFront", 10000, 10);
+  frontPlayer.position = { x: 0, y: 1, z: 3 }; // 카메라 정면(+Z)에 있는 적
+  pCone.events = [];
+  tapSkill(0.016, pCone, [behindPlayer, frontPlayer], 1);
+  assert(behindPlayer.hp < 10000, "화염 방사: 카메라 방향이 아니라 마우스가 가리키는 방향(뒤쪽)으로 나감");
+  assert(frontPlayer.hp === 10000, "화염 방사: 카메라 정면에 있던 적은 더 이상 안 맞음");
+
+  // 마우스 지점이 아주 멀어도(사거리 밖) 발동 자체는 막히지 않고, 그 방향으로 나가되
+  // shape.range만큼만 실제로 맞음
+  const pFarAim = freshPlayer();
+  pFarAim.equippedFruit = "magma_fist";
+  pFarAim.fruitLevel = 25;
+  pFarAim.position = { x: 0, y: 1, z: 0 };
+  pFarAim.aimGroundPoint = { x: 0, z: 9999 }; // 스킬 사거리(12m)를 훨씬 넘는 먼 지점
+  const withinRange = makeEnemy("magmaWithinRange", 10000, 10);
+  withinRange.position = { x: 0, y: 1, z: 5 }; // 그 방향, 사거리(12m) 안
+  pFarAim.events = [];
+  const manaBeforeFar = pFarAim.mana;
+  tapSkill(0.016, pFarAim, [withinRange], 1);
+  assert(withinRange.hp < 10000, "화염 방사: 마우스가 사거리 밖을 가리켜도 그냥 발사되어 그 방향의 사거리 안 적은 맞음");
+  assert(pFarAim.mana < manaBeforeFar, "화염 방사: 마우스가 멀어도 발동 자체는 막히지 않아 마나가 소모됨");
 }
 
 section("밸런스 — 사막의 대검 (모래 열매 V, 쿨다운 없이 토글로 장착/해제)");
@@ -1522,14 +1607,16 @@ section("밸런스 — 사막의 대검 (모래 열매 V, 쿨다운 없이 토�
 }
 
 section("돌진 / 자기 강화");
+// 선더 스트라이크는 이번 요청으로 돌진 스킬이 아니게 됐으므로, 돌진 자체의
+// 기본 동작 검증은 여전히 돌진형인 고무 로켓(rubber_x)으로 합니다.
 const pDash = freshPlayer();
-pDash.equippedFruit = "thunder_strike";
-pDash.fruitLevel = 1; // Z = 선더 스트라이크 (dash)
+pDash.equippedFruit = "rubber_barrage";
+pDash.fruitLevel = 25; // X = 고무 로켓 (dash)
 pDash.aimYaw = 0;
 pDash.events = [];
-tapSkill(0.016, pDash, [], 0);
+tapSkill(0.016, pDash, [], 1);
 assert(pDash.pendingDash !== null, "돌진 요청 생성됨");
-assert(Math.abs(pDash.pendingDash.z - 6) < 0.001, `정면(+Z)으로 6m 돌진 요청 (z=${pDash.pendingDash.z.toFixed(2)})`);
+assert(Math.abs(pDash.pendingDash.z - 14) < 0.001, `정면(+Z)으로 14m 돌진 요청 (z=${pDash.pendingDash.z.toFixed(2)})`);
 
 // X = 뇌광 질주 (토글형 번개 변신) — 켜짐/꺼짐 확인
 const pToggle = freshPlayer();
