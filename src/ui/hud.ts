@@ -552,6 +552,9 @@ export class Hud {
         case "weapon_skill_locked":
           this.pushToast(`${ev.skillName}은(는) 무기 Lv.${ev.requiredWeaponLevel}부터 사용 가능합니다`, "red");
           break;
+        case "skill_target_too_far":
+          this.pushToast(`${ev.skillName}: 마우스 위치가 너무 멀어서 사용할 수 없습니다`, "red");
+          break;
         case "haki_learned":
           this.pushToast("무장색을 익혔습니다! J키로 발동하세요");
           break;

@@ -13,7 +13,7 @@ import {
   weaponBonusRange,
   weaponDamageMultiplier,
 } from "./WeaponSystem";
-import { dist2D, pointInShape, skillOrigin } from "./ShapeMath";
+import { dist2D, isMouseTargetInRange, pointInShape, skillOrigin } from "./ShapeMath";
 
 /** 뇌광 질주(번개 열매 X)의 변신 수치 — skills.ts가 유일한 출처이므로 여기서 다시 정의하지 않고 그대로 읽습니다. */
 const LIGHTNING_FORM_SKILL = skillsForFruit("thunder_strike")[1];
@@ -39,7 +39,7 @@ export type DamageSource = "melee" | "fruit" | "weapon";
  */
 function isInShape(player: PlayerState, enemy: EnemyState, skill: SkillDef): boolean {
   return pointInShape(
-    skillOrigin(player.position, player.aimYaw, skill),
+    skillOrigin(player.position, player.aimYaw, skill, player.aimGroundPoint),
     enemy.position.x,
     enemy.position.z,
     skill.shape,
@@ -132,11 +132,16 @@ function applySkill(
     player.hp = Math.min(player.maxHp, player.hp + player.maxHp * skill.healPercentOfMaxHp);
   }
 
+  // 판정 원점 — originAtMouse/originAtAim 스킬이면 마우스/조준 지점 기준으로
+  // 재계산됩니다. 돌진 방향도 이 origin.aimYaw(마우스 방향으로 재조준된 값)를
+  // 써야 "선더 스트라이크가 마우스 방향으로 돌진한다" 등이 실제로 맞습니다.
+  const origin = skillOrigin(player.position, player.aimYaw, skill, player.aimGroundPoint);
+
   // 돌진 — 물리 바디 이동은 Simulation이 처리하도록 요청만 남깁니다. (공통)
   if (skill.dashDistance) {
     player.pendingDash = {
-      x: Math.sin(player.aimYaw) * skill.dashDistance,
-      z: Math.cos(player.aimYaw) * skill.dashDistance,
+      x: Math.sin(origin.aimYaw) * skill.dashDistance,
+      z: Math.cos(origin.aimYaw) * skill.dashDistance,
     };
   }
 
@@ -144,11 +149,11 @@ function applySkill(
 
   // 낙뢰처럼 조준 없이 "근처 가장 가까운 대상 하나"만 노리는 스킬은, 범위 안에
   // 있는 후보들 중 가장 가까운 하나만 골라 그 대상에게만 효과를 적용합니다.
-  // "가장 가까운"의 기준점도 originAtAim 스킬이면 실제 판정 원점(조준 지점)과
-  // 맞춰야 합니다 — 안 그러면 화면상 번개가 안 떨어진 곳의 적이 맞을 수 있습니다.
+  // "가장 가까운"의 기준점도 originAtAim/originAtMouse 스킬이면 실제 판정
+  // 원점(조준·마우스 지점)과 맞춰야 합니다 — 안 그러면 화면상 번개가 안 떨어진
+  // 곳의 적이 맞을 수 있습니다.
   let targets = enemies.filter((enemy) => enemy.alive && isInShape(player, enemy, skill));
   if (skill.autoTargetNearest && targets.length > 1) {
-    const origin = skillOrigin(player.position, player.aimYaw, skill);
     let nearest = targets[0];
     let nearestDist = dist2D(origin.x, origin.z, nearest.position.x, nearest.position.z);
     for (const enemy of targets.slice(1)) {
@@ -380,6 +385,17 @@ export function stepCombat(
 
         if (player.skillCooldowns[slot] > 0) continue;
         if (player.mana < skill.manaCost) continue;
+
+        // 용암 지대·대분화(requireMouseInRange)는 마우스 지점이 물리적으로
+        // 너무 멀면(또는 없으면) 아예 발동을 막습니다 — 마나·쿨다운 소모 없이
+        // 조용히 무산되고, skill_target_too_far 이벤트로 HUD에 안내합니다.
+        // (다른 originAtMouse 스킬들은 마우스가 없어도 originAtAim/발밑 기준으로
+        // 조용히 폴백할 뿐 발동을 막지 않습니다 — 사용자 요청 범위가 그 두
+        // 스킬로 한정돼 있었습니다.)
+        if (skill.requireMouseInRange && !isMouseTargetInRange(player.position, player.aimGroundPoint)) {
+          player.events.push({ type: "skill_target_too_far", skillName: skill.name });
+          continue;
+        }
 
         if (skill.chargeable) {
           // 여기서는 아직 마나·쿨다운을 소모하지 않습니다 — 실제로 손을

@@ -70,7 +70,40 @@ export function dist2D(ax: number, az: number, bx: number, bz: number) {
  * "클라에서는 맞은 것 같은데 서버가 인정 안 해준다" 같은 어긋남이 생기지 않습니다
  * — ShapeMath.ts 파일 상단 설명과 같은 이유입니다.
  */
-export function skillOrigin(position: { x: number; z: number }, aimYaw: number, skill: SkillDef): ShapeOrigin {
+/**
+ * originAtMouse 스킬을 쓸 수 있는 최대 물리 거리(플레이어 발밑 기준, m).
+ * 이보다 마우스 지점이 멀면 CombatSystem.ts의 stepCombat이 스킬 발동 자체를
+ * 막고 skill_target_too_far 이벤트를 띄웁니다(사용자 요청).
+ */
+export const MAX_MOUSE_TARGET_DISTANCE = 40;
+
+/** aimGroundPoint가 존재하고 사거리 안(MAX_MOUSE_TARGET_DISTANCE 이내)인지 검사 */
+export function isMouseTargetInRange(
+  position: { x: number; z: number },
+  aimGroundPoint: { x: number; z: number } | null | undefined,
+): boolean {
+  if (!aimGroundPoint) return false;
+  return dist2D(position.x, position.z, aimGroundPoint.x, aimGroundPoint.z) <= MAX_MOUSE_TARGET_DISTANCE;
+}
+
+export function skillOrigin(
+  position: { x: number; z: number },
+  aimYaw: number,
+  skill: SkillDef,
+  aimGroundPoint?: { x: number; z: number } | null,
+): ShapeOrigin {
+  // 마우스 위치 타게팅이 최우선 — 마우스 지점이 유효(사거리 안)할 때만 적용하고,
+  // 그렇지 않으면(레이캐스트 실패 등) originAtAim 방식으로 안전하게 폴백합니다.
+  if (skill.originAtMouse && aimGroundPoint && isMouseTargetInRange(position, aimGroundPoint)) {
+    if (skill.shape.kind === "line" || skill.shape.kind === "cone" || skill.shape.kind === "self") {
+      // 방향성 있는 스킬은 원점은 그대로 두고, 마우스 지점을 바라보는 방향으로 재조준합니다.
+      const retargetedYaw = Math.atan2(aimGroundPoint.x - position.x, aimGroundPoint.z - position.z);
+      return { x: position.x, z: position.z, aimYaw: retargetedYaw };
+    }
+    // radial 스킬은 마우스 지점 자체가 원점이 됩니다.
+    return { x: aimGroundPoint.x, z: aimGroundPoint.z, aimYaw };
+  }
+
   if (!skill.originAtAim || skill.shape.kind !== "radial") {
     return { x: position.x, z: position.z, aimYaw };
   }

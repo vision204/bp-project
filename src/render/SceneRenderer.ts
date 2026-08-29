@@ -60,6 +60,26 @@ function skillModelPath(skillId: string): string {
 const SKILL_AURA_IDS = new Set(["ice_x", "thunder_x", "sand_v"]);
 
 /**
+ * 일부 GLB는 모델러가 "뾰족한 앞부분"을 로컬 Z축이 아니라 X축(또는 반대
+ * 방향)에 맞춰 만들어서, aimYaw 그대로 회전시키면 진행 방향과 어긋나 보입니다
+ * (아이스 랜스가 가로로 누운 채 날아가는 문제 — 사용자 피드백). 스킬 id별로
+ * 이 보정 각도(라디안)를 추가로 더해 "뾰족한 부분이 진행 방향을 보도록"
+ * 바로잡습니다.
+ */
+const SKILL_MODEL_YAW_OFFSET: Record<string, number> = {
+  ice_z: Math.PI / 2,
+};
+
+/**
+ * 뇌광 질주(thunder_x)는 원래 "제자리 자기 강화형"(shape.kind === "self")이라
+ * 판정 범위 개념이 없지만, 사용자 요청("미사일 형식으로 사정거리 길게")에 따라
+ * 켜지는 순간 전방으로 길게 날아가는 번개 미사일을 시각 연출로 추가합니다.
+ * 실제 접촉 판정(lightningFormContactRadius)은 그대로 몸 주변에 남아있고,
+ * 이건 순수 연출용 사거리입니다.
+ */
+const THUNDER_X_MISSILE_RANGE = 30;
+
+/**
  * 블록형 캐릭터(플레이어/몬스터 공용) 전체 높이 — buildBlockyCharacterParts()의
  * 머리 꼭대기(y = 1.9 + 반지름 0.4 = 2.3)를 기준으로 잡았습니다.
  */
@@ -72,6 +92,12 @@ const NPC_HEIGHT_APPROX = 2.3;
  * 있으므로, 이 값을 그대로 스케일 배율로 곱하면 최종 크기가 됩니다.
  */
 const SKILL_MODEL_SCALE = NPC_HEIGHT_APPROX * 3.6;
+/**
+ * 사막의 대검(sand_v)만 전용으로 쓰는 더 작은 크기 — 다른 스킬들과 같은
+ * SKILL_MODEL_SCALE을 쓰니 손에 든 대검이 몸통보다 훨씬 커서 우스꽝스럽다는
+ * 사용자 피드백(ㅋㅋㅋ)에 따라 "손에 든 큰 검" 정도의 크기로 줄였습니다.
+ */
+const SAND_BLADE_SCALE = NPC_HEIGHT_APPROX * 1.15;
 
 /**
  * 로드된 GLB는 크기와 원점이 제각각이라(모델러/AI 생성 파이프라인이 서로
@@ -869,9 +895,9 @@ export class SceneRenderer {
           // 보이는 게 목적입니다.
           const aura = cloneSkillModelInstance(template, false);
           if (skillId === "sand_v") {
-            // 손에 든 대검 — 자루는 오른손 자리에 두되, 날은 그 몇 배는 되는
-            // 거대한 크기로 위로 솟구칩니다.
-            aura.scale.setScalar(SKILL_MODEL_SCALE);
+            // 손에 든 대검 — 자루는 오른손 자리에 두고, 사용자 피드백에 따라
+            // 다른 스킬들보다 훨씬 작은 SAND_BLADE_SCALE을 씁니다.
+            aura.scale.setScalar(SAND_BLADE_SCALE);
             aura.position.set(-0.7, 0.78, 0.05);
             aura.rotation.set(0.22, 0, 0.5);
           } else if (skillId === "ice_x") {
@@ -956,6 +982,7 @@ export class SceneRenderer {
     nowMs: number,
     isLocalPlayer = false,
     chargeFrac?: number,
+    aimGroundPoint?: { x: number; z: number } | null,
   ) {
     const weaponSkill = skillsForWeapon(sourceId as ItemId)[slot];
     let skill = weaponSkill ?? skillsForFruit(sourceId as FruitAbilityId)[slot];
@@ -969,13 +996,16 @@ export class SceneRenderer {
       skill = withCharge(skill, chargeFrac);
     }
 
-    // originAtAim 스킬(낙뢰·빙결 감옥·절대 영도·중력정)은 판정도 이펙트도 발밑이
-    // 아니라 조준 지점에서 나야 합니다 — CombatSystem.ts의 isInShape과 정확히
-    // 같은 계산(skillOrigin)을 그대로 재사용해서 판정과 눈에 보이는 위치가
-    // 어긋나지 않게 합니다.
-    const origin = skillOrigin({ x, z }, aimYaw, skill);
+    // originAtAim/originAtMouse 스킬(낙뢰·빙결 감옥·절대 영도·중력정·용암 지대 등)은
+    // 판정도 이펙트도 발밑이 아니라 조준/마우스 지점에서 나야 합니다 —
+    // CombatSystem.ts의 isInShape과 정확히 같은 계산(skillOrigin)을 그대로
+    // 재사용해서 판정과 눈에 보이는 위치·방향이 어긋나지 않게 합니다.
+    // aimGroundPoint는 로컬 플레이어가 쓴 스킬일 때만 있고(원격 중계분은
+    // 마우스 정보가 없어 originAtAim 폴백으로 자연스럽게 넘어갑니다).
+    const origin = skillOrigin({ x, z }, aimYaw, skill, aimGroundPoint);
     x = origin.x;
     z = origin.z;
+    aimYaw = origin.aimYaw;
 
     // 무기(검) 스킬은 GLB 모델이 없어서 기존 도형 기반 이펙트를 그대로 씁니다.
     // 열매 스킬은 이제 기존 도형 이펙트(SkillEffects.ts)를 화면에 띄우지 않고
@@ -1044,12 +1074,14 @@ export class SceneRenderer {
     const clone = cloneSkillModelInstance(template, true);
     const fx = Math.sin(aimYaw);
     const fz = Math.cos(aimYaw);
-    clone.rotation.y = aimYaw;
+    clone.rotation.y = aimYaw + (SKILL_MODEL_YAW_OFFSET[skill.id] ?? 0);
     clone.scale.setScalar(SKILL_MODEL_SCALE);
 
-    if (skill.shape.kind === "line" || skill.shape.kind === "cone") {
+    if (skill.shape.kind === "line" || skill.shape.kind === "cone" || skill.id === "thunder_x") {
       // 투사체형 — 시전 지점에서 조준 방향으로 사거리만큼 날아갑니다.
-      const range = skill.shape.range;
+      // 뇌광 질주(thunder_x)는 self 판정이라 shape.range가 없으므로 연출
+      // 전용 THUNDER_X_MISSILE_RANGE를 대신 씁니다.
+      const range = skill.shape.kind === "line" || skill.shape.kind === "cone" ? skill.shape.range : THUNDER_X_MISSILE_RANGE;
       const from = new THREE.Vector3(x, y + 1, z);
       const to = new THREE.Vector3(x + fx * range, y + 1, z + fz * range);
       clone.position.copy(from);
@@ -1463,6 +1495,7 @@ export class SceneRenderer {
             nowMs,
             true,
             ev.chargeFrac,
+            state.player.aimGroundPoint,
           );
         }
       }
@@ -1487,7 +1520,11 @@ export class SceneRenderer {
         this.skillEffects.splice(i, 1);
         continue;
       }
-      const fade = 1 - t;
+      // 사용자 요청: 이펙트가 재생되는 내내 서서히 투명해지지 않고, 끝날 때만
+      // 자연스럽게 사라지도록 — 수명의 앞 75%는 완전히 불투명하게 유지하다가
+      // 나머지 25% 구간에서만 opacity를 0까지 줄입니다.
+      const FADE_START_T = 0.75;
+      const fade = t < FADE_START_T ? 1 : 1 - (t - FADE_START_T) / (1 - FADE_START_T);
       if (eff.growTo > 0 || eff.baseScale) {
         const base = eff.baseScale ?? 1;
         eff.group.scale.setScalar(base * (1 + t * eff.growTo));

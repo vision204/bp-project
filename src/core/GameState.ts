@@ -260,6 +260,15 @@ export interface PlayerState {
   /** 돌진 스킬이 요청한 이동량. Simulation이 물리 바디에 적용한 뒤 비웁니다 */
   pendingDash: { x: number; z: number } | null;
 
+  /**
+   * 이번 프레임에 마우스가 가리키는 지형 위 3D 지점(x,z) — originAtMouse 스킬이
+   * "마우스 위치에서 발생"하도록 하는 데 씁니다. main.ts가 스킬을 쓰려는
+   * 프레임에만 렌더러의 raycastTerrainAt으로 계산해서 채워 넣습니다(순수
+   * 시뮬레이션 계층은 Three.js를 몰라야 하므로). 저장되지 않는 일시적
+   * 상태입니다.
+   */
+  aimGroundPoint: { x: number; z: number } | null;
+
   inventory: InventoryItem[];
 
   /** 구매해서 보유 중인 배 등급들 (소환 시 가장 좋은 배가 나옵니다) */
@@ -406,6 +415,8 @@ export type GameEvent =
   | { type: "island_entered"; islandName: string; recommendedLevel: number }
   /** Q 대쉬가 실제로 나갔을 때 — 렌더러가 이동 방향으로 바람 이펙트를 띄웁니다 */
   | { type: "player_dashed"; dx: number; dz: number }
+  /** 마우스 위치 스킬(originAtMouse)을 쓰려는데 마우스 지점이 너무 멀어서 막혔을 때 */
+  | { type: "skill_target_too_far"; skillName: string }
   // --- 멀티플레이 / PvP ---------------------------------------------------
   // CombatSystem은 다른 플레이어의 존재를 전혀 모릅니다(싱글플레이 로직은
   // 그대로 유지). 이 이벤트들은 근접/스킬 공격이 "나갔다"는 사실만 알리고,
@@ -559,6 +570,7 @@ export function createInitialGameState(
 
       aimYaw: 0,
       pendingDash: null,
+      aimGroundPoint: null,
 
       // 사용자 요청 — 해군/해적 시작 섬 모두 기본으로 나무 검을 쥐고 시작합니다.
       // 그래서 처음부터 사냥할 수 있고, 평타를 쳐도 더 이상 맨주먹을 휘두르지

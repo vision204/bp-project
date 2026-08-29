@@ -434,6 +434,18 @@ async function main() {
       gameplaySnapshot = { ...gameplaySnapshot, attackPressed: false };
     }
 
+    // 마우스 위치 타게팅 스킬(용암 지대·대분화·천벌·낙뢰 등)이 "마우스가 가리키는
+    // 지점에서 발생"하려면, 시뮬레이션이 그 프레임을 처리하기 전에 화면 좌표를
+    // 3D 지형 지점으로 미리 레이캐스트해둬야 합니다(순수 시뮬레이션 계층은
+    // Three.js를 모르므로 카메라/레이캐스트는 항상 여기 렌더러 쪽에서 처리 —
+    // R키 순간이동과 같은 이유). 열매를 뽑아 든 동안만 계산합니다.
+    if (simulation.state.player.fruitDrawn) {
+      const aimHit = renderer.raycastTerrainAt(gameplaySnapshot.mouseClientX, gameplaySnapshot.mouseClientY);
+      simulation.state.player.aimGroundPoint = aimHit ? { x: aimHit.x, z: aimHit.z } : null;
+    } else {
+      simulation.state.player.aimGroundPoint = null;
+    }
+
     simulation.step(dt, gameplaySnapshot);
     world.step();
 

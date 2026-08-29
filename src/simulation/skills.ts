@@ -106,6 +106,27 @@ export interface SkillDef {
   originAtAim?: boolean;
 
   /**
+   * true면 이 스킬의 판정 원점(및 이펙트 위치)이 "마우스 커서가 가리키는 지형
+   * 위 3D 지점"이 됩니다 — originAtAim(조준 방향으로 살짝 앞선 지점)보다 더
+   * 정확한, 실제 마우스 위치 타게팅입니다. line/cone처럼 방향이 있는 스킬은
+   * 그 지점을 "바라보는 방향"으로 재조준됩니다. 마우스 지점이 없거나(레이캐스트
+   * 실패) MAX_MOUSE_TARGET_DISTANCE보다 멀면 CombatSystem.ts의 stepCombat이
+   * 스킬 발동 자체를 막고 skill_target_too_far 이벤트를 띄웁니다.
+   * (ShapeMath.ts의 skillOrigin이 실제 원점 계산을 합니다)
+   */
+  originAtMouse?: boolean;
+
+  /**
+   * (용암 지대·대분화 전용) true면 마우스 지점이 없거나 MAX_MOUSE_TARGET_DISTANCE
+   * 보다 멀 때 스킬 발동 자체를 막습니다(사용자 요청: "너무 마우스가 물리적으로
+   * 먼 거리에 있으면 스킬을 사용하지 못하게"). originAtMouse가 있는 다른 스킬들
+   * (낙뢰·천벌·중력정 등)은 마우스 지점이 없으면 조용히 originAtAim/발밑 기준으로
+   * 폴백할 뿐 발동을 막지는 않습니다 — 사용자가 명시적으로 이 제약을 요청한
+   * 건 용암 지대·대분화 두 개뿐이었습니다.
+   */
+  requireMouseInRange?: boolean;
+
+  /**
    * (사막의 대검 전용) 장착돼 있는 동안(toggle — sandBladeActive) 손에 거대한
    * 대검이 들려 있는 것처럼, 기본 공격(좌클릭)이 무기 없이도 "무기를 든 것처럼"
    * 이 배율만큼 강해집니다. totalMeleeDamage(CombatSystem.ts)가 실제 적용 —
@@ -146,7 +167,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 6,
       manaCost: 22,
       damage: 32,
-      shape: { kind: "cone", range: 7, halfAngleDeg: 35 },
+      // 사용자 요청: 사정거리를 더 늘려달라고 해서 7→12로 확장했습니다.
+      shape: { kind: "cone", range: 12, halfAngleDeg: 35 },
       burnDps: 6,
       burnDurationSec: 4,
       chargeable: true,
@@ -164,13 +186,15 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 35,
       damage: 34,
       shape: { kind: "radial", radius: 6 },
+      originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
+      requireMouseInRange: true, // 사용자 요청: 마우스가 너무 멀면 사용 불가
       burnDps: 10,
       burnDurationSec: 6,
       chargeable: true,
       maxChargeSec: 1.3,
       chargeMaxRangeMultiplier: 1.4,
       chargeMaxDamageMultiplier: 1.4,
-      description: "발밑을 용암으로 바꿔 오래 타오르게 합니다. 오래 모을수록 지대가 넓어집니다.",
+      description: "마우스가 가리키는 지점을 용암으로 바꿔 오래 타오르게 합니다. 오래 모을수록 지대가 넓어집니다.",
     },
     {
       id: "magma_v",
@@ -181,13 +205,15 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 60,
       damage: 90,
       shape: { kind: "radial", radius: 11 },
+      originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
+      requireMouseInRange: true, // 사용자 요청: 마우스가 너무 멀면 사용 불가
       burnDps: 18,
       burnDurationSec: 6,
       chargeable: true,
       maxChargeSec: 1.8,
       chargeMaxRangeMultiplier: 1.3,
       chargeMaxDamageMultiplier: 1.3,
-      description: "화산을 터뜨려 광범위를 불바다로 만듭니다. 오래 모을수록 더 크게 터집니다.",
+      description: "마우스가 가리키는 지점에서 화산을 터뜨려 광범위를 불바다로 만듭니다. 오래 모을수록 더 크게 터집니다.",
     },
   ],
 
@@ -234,7 +260,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 30,
       damage: 22,
       shape: { kind: "radial", radius: 6 },
-      originAtAim: true, // 발밑이 아니라 조준한 곳에 감옥이 생김
+      originAtAim: true, // 발밑이 아니라 조준한 곳에 감옥이 생김 (마우스 정보 없을 때 폴백)
+      originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       freezeDurationSec: 3,
       chargeable: true,
       maxChargeSec: 1.3,
@@ -251,7 +278,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 58,
       damage: 60,
       shape: { kind: "radial", radius: 12 },
-      originAtAim: true, // 발밑이 아니라 조준한 곳을 중심으로 퍼짐
+      originAtAim: true, // 발밑이 아니라 조준한 곳을 중심으로 퍼짐 (마우스 정보 없을 때 폴백)
+      originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       freezeDurationSec: 5,
       chargeable: true,
       maxChargeSec: 1.8,
@@ -272,6 +300,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 7,
       damage: 16,
       shape: { kind: "line", range: 6, width: 2 },
+      originAtMouse: true, // 사용자 요청: 마우스 위치로 재조준되어 그 방향으로 돌진
       dashDistance: 6,
       chargeable: true,
       maxChargeSec: 1,
@@ -304,7 +333,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 26,
       damage: 42,
       shape: { kind: "radial", radius: 16 },
-      originAtAim: true, // 발밑이 아니라 조준한 곳에 번개가 떨어짐
+      originAtAim: true, // 발밑이 아니라 조준한 곳에 번개가 떨어짐 (마우스 정보 없을 때 폴백)
+      originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       autoTargetNearest: true,
       chargeable: true,
       maxChargeSec: 1.3,
@@ -321,6 +351,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 56,
       damage: 130,
       shape: { kind: "line", range: 24, width: 3.2 },
+      originAtMouse: true, // 사용자 요청: 마우스 위치로 재조준되어 그 방향으로 발사
       chargeable: true,
       maxChargeSec: 1.8,
       chargeMaxRangeMultiplier: 1.2,
@@ -339,7 +370,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 2.6,
       manaCost: 10,
       damage: 24,
-      shape: { kind: "cone", range: 5, halfAngleDeg: 40 },
+      // 사용자 요청: 사정거리를 더 늘려달라고 해서 5→9로 확장했습니다.
+      shape: { kind: "cone", range: 9, halfAngleDeg: 40 },
       slowFactor: 0.6,
       slowDurationSec: 1.2,
       chargeable: true,
@@ -357,6 +389,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 22,
       damage: 28,
       shape: { kind: "radial", radius: 5 },
+      originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       healPercentOfMaxHp: 0.08,
       slowFactor: 0.5,
       slowDurationSec: 2,
@@ -375,7 +408,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 35,
       damage: 45,
       shape: { kind: "radial", radius: 7 },
-      originAtAim: true, // 발밑이 아니라 조준한 곳에 중력정이 생김
+      originAtAim: true, // 발밑이 아니라 조준한 곳에 중력정이 생김 (마우스 정보 없을 때 폴백)
+      originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       freezeDurationSec: 1.5,
       burnDps: 8,
       burnDurationSec: 3,
@@ -394,6 +428,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 65,
       damage: 110,
       shape: { kind: "radial", radius: 12 },
+      originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       healPercentOfMaxHp: 0.2,
       freezeDurationSec: 2,
       chargeable: true,

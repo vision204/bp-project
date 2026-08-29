@@ -1383,6 +1383,85 @@ section("originAtAim — 판정 원점이 발밑이 아니라 조준 지점으�
   }
 }
 
+section("originAtMouse — 마우스가 가리키는 지점에서 발생 (용암 지대·대분화·낙뢰·천벌 등)");
+{
+  // radial 스킬(용암 지대) — 판정 원점이 발밑이 아니라 마우스 지점 자체가 되어야 함
+  const pMouse = freshPlayer();
+  pMouse.equippedFruit = "magma_fist";
+  pMouse.fruitLevel = 50; // C(용암 지대) 해금
+  pMouse.aimYaw = 0;
+  pMouse.position = { x: 0, y: 1, z: 0 };
+  pMouse.aimGroundPoint = { x: 20, z: 0 }; // 플레이어와 무관한, 옆으로 먼 지점을 마우스로 가리킴
+  const skill = skillsForFruit("magma_fist")[2];
+  assert(skill.originAtMouse === true, "용암 지대는 originAtMouse 스킬");
+  const nearMouse = makeEnemy("nearMouse", 10000, 10);
+  nearMouse.position = { x: 20, y: 1, z: 2 }; // 마우스 지점 근처(발밑 기준이면 안 맞을 자리)
+  const nearFeet = makeEnemy("nearFeet", 10000, 10);
+  nearFeet.position = { x: 0, y: 1, z: 2 }; // 발밑 기준이면 맞을 자리(마우스 기준이면 안 맞음)
+  pMouse.events = [];
+  tapSkill(0.016, pMouse, [nearMouse, nearFeet], 2);
+  assert(nearMouse.hp < 10000, "용암 지대: 마우스 지점 근처의 적은 맞음");
+  assert(nearFeet.hp === 10000, "용암 지대: 발밑 근처의 적은 (마우스 기준으로 옮겨져서) 안 맞음");
+
+  // line 스킬(선더 스트라이크) — 방향이 마우스 지점을 바라보도록 재조준되어야 함
+  const pMouseDash = freshPlayer();
+  pMouseDash.equippedFruit = "thunder_strike";
+  pMouseDash.fruitLevel = 1; // Z = 선더 스트라이크
+  pMouseDash.aimYaw = 0; // 카메라는 정면(+Z)을 보고 있지만
+  pMouseDash.position = { x: 0, y: 1, z: 0 };
+  pMouseDash.aimGroundPoint = { x: 5, z: 0 }; // 마우스는 오른쪽(+X)을 가리킴
+  pMouseDash.events = [];
+  tapSkill(0.016, pMouseDash, [], 0);
+  assert(pMouseDash.pendingDash !== null, "선더 스트라이크: 마우스 방향으로 돌진 요청 생성됨");
+  assert(pMouseDash.pendingDash.x > 5, `선더 스트라이크: 마우스 방향(+X)으로 돌진함 (x=${pMouseDash.pendingDash.x.toFixed(2)})`);
+  assert(Math.abs(pMouseDash.pendingDash.z) < 0.01, `선더 스트라이크: z축 돌진량은 거의 0 (z=${pMouseDash.pendingDash.z.toFixed(2)})`);
+}
+
+section("requireMouseInRange — 용암 지대·대분화는 마우스가 너무 멀면 사용 자체가 막힘");
+{
+  const pFar = freshPlayer();
+  pFar.equippedFruit = "magma_fist";
+  pFar.fruitLevel = 100; // V(대분화)까지 해금
+  pFar.position = { x: 0, y: 1, z: 0 };
+  const magmaC = skillsForFruit("magma_fist")[2];
+  const magmaV = skillsForFruit("magma_fist")[3];
+  assert(magmaC.requireMouseInRange === true, "용암 지대는 requireMouseInRange 스킬");
+  assert(magmaV.requireMouseInRange === true, "대분화는 requireMouseInRange 스킬");
+
+  // (1) 마우스 지점 자체가 없음(레이캐스트 실패) — 발동이 막혀야 함
+  pFar.aimGroundPoint = null;
+  const manaBefore = pFar.mana;
+  const cdBefore = pFar.skillCooldowns[2];
+  pFar.events = [];
+  tapSkill(0.016, pFar, [], 2);
+  assert(pFar.mana === manaBefore, "용암 지대: 마우스 지점이 없으면 마나를 쓰지 않고 무산됨");
+  assert(pFar.skillCooldowns[2] === cdBefore, "용암 지대: 마우스 지점이 없으면 쿨다운도 걸리지 않음");
+  assert(
+    pFar.events.some((e) => e.type === "skill_target_too_far" && e.skillName === magmaC.name),
+    "용암 지대: skill_target_too_far 이벤트가 뜸",
+  );
+
+  // (2) 마우스 지점이 너무 멀리 있음 — 마찬가지로 막혀야 함
+  pFar.aimGroundPoint = { x: 9999, z: 0 };
+  pFar.events = [];
+  tapSkill(0.016, pFar, [], 2);
+  assert(pFar.mana === manaBefore, "용암 지대: 마우스 지점이 너무 멀면 마나를 쓰지 않고 무산됨");
+
+  // (3) 사거리 안이면 정상 발동됨
+  pFar.aimGroundPoint = { x: 3, z: 0 };
+  pFar.events = [];
+  tapSkill(0.016, pFar, [], 2);
+  assert(pFar.mana < manaBefore, "용암 지대: 마우스 지점이 사거리 안이면 정상 발동되어 마나가 듦");
+}
+
+section("사정거리 확장 — 화염 방사·섀도우 슬래시 (사용자 요청: 더 멀리)");
+{
+  const magmaX = skillsForFruit("magma_fist")[1];
+  assert(magmaX.shape.kind === "cone" && magmaX.shape.range === 12, `화염 방사 사정거리 확장됨 (실제 ${magmaX.shape.range}m)`);
+  const darkZ = skillsForFruit("dark_wave")[0];
+  assert(darkZ.shape.kind === "cone" && darkZ.shape.range === 9, `섀도우 슬래시 사정거리 확장됨 (실제 ${darkZ.shape.range}m)`);
+}
+
 section("밸런스 — 사막의 대검 (모래 열매 V, 쿨다운 없이 토글로 장착/해제)");
 {
   const sandV = skillsForFruit("sand_storm")[3];
