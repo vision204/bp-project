@@ -40,6 +40,7 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     name: "요루 (흑도)",
     icon: "🗡️",
     weaponType: "sword",
+    // 사용자 요청: 세 자루 중 가장 강하게 — 요루(1위) > 엔마(2위) > 삼도류(3위, 가장 약함).
     damageMultiplier: 2.6,
     bonusRange: 1.6,
     attackSpeedMultiplier: 1,
@@ -53,12 +54,15 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     name: "삼도류",
     icon: "⚔️",
     weaponType: "sword",
-    damageMultiplier: 2.9,
+    // 사용자 요청: 세 검 중 가장 약하게. 한 방 배율은 요루(2.6)·엔마(2.3)보다
+    // 낮지만, 공격 속도가 35% 빠른(attackSpeedMultiplier 0.65) 정체성은 그대로
+    // 남겨둬서 "가장 약하지만 그나마 빠르게 연타"하는 포지션을 유지합니다.
+    damageMultiplier: 2.15,
     bonusRange: 1.2,
     attackSpeedMultiplier: 0.65, // 공격 속도 35% 빠름
     price: 2500,
     description:
-      "칼 세 자루를 양손과 입에 무는 검술. 사거리는 요루보다 짧지만 공격이 훨씬 빠릅니다.",
+      "칼 세 자루를 양손과 입에 무는 검술. 세 검 중 한 방 위력은 가장 약하지만, 사거리는 짧은 대신 공격이 훨씬 빠릅니다.",
   },
   // 화산 섬(Lv.200) 전용 — 요루보다 얇고 훨씬 긴 붉은 칼날. 가볍게 만들어서
   // 공격 속도는 요루보다 살짝 빠르지만, 배율은 그보다 낮게 잡아 요루의
@@ -68,6 +72,7 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     name: "엔마",
     icon: "🗡️",
     weaponType: "sword",
+    // 사용자 요청: 세 검 중 중간 — 삼도류보다는 세고 요루보다는 약함.
     damageMultiplier: 2.3,
     bonusRange: 2.0,
     attackSpeedMultiplier: 0.9,
@@ -82,11 +87,14 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     name: "새총",
     icon: "🔫",
     weaponType: "gun",
-    damageMultiplier: 1.5, // 검류(2.3~2.9)보다 낮게 — 원거리인 대신 한 방은 약합니다
+    // 사용자 요청: 기존(1.5)이 너무 강하다고 해서 최소 7분의 1 수준(1.5÷7≈0.214)
+    // 이하로 낮췄습니다 — 검류(2.15~2.6)와는 비교가 안 될 만큼 약한, 진짜
+    // "가벼운 견제용" 원거리 무기가 되도록 잡았습니다.
+    damageMultiplier: 0.21,
     bonusRange: 0, // 원거리 판정은 rangedAttack을 씁니다 — 이 값은 쓰이지 않습니다
     attackSpeedMultiplier: 1,
     price: 300,
-    description: "가볍고 값싼 원거리 무기. 검보다 데미지는 약하지만, 마우스가 가리키는 방향으로 멀리서 쏠 수 있습니다.",
+    description: "가볍고 값싼 원거리 무기. 검보다 데미지가 훨씬 약하지만, 마우스가 가리키는 방향으로 멀리서 쏠 수 있습니다.",
     rangedAttack: { range: 22, width: 2.4 },
   },
   // 해군/해적 시작 섬 모두 접속하자마자 이걸 손에 쥐고 시작합니다(사용자 요청) —

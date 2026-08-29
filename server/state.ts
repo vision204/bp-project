@@ -873,6 +873,13 @@ export class World {
       return;
     }
 
+    // 참고: 맨주먹 공격 제거(사용자 요청)는 클라이언트 CombatSystem.ts의
+    // canMeleeAttack이 막습니다 — 정상적인 클라이언트는 무기가 없으면 애초에
+    // melee_attack 메시지 자체를 보내지 않습니다. 서버는 기존과 같이 사거리·
+    // 쿨다운만 검증하고(PvP 프로토콜에 무기 보유 여부를 별도로 검증하는 필드가
+    // 없어 이번 턴에는 프로토콜 확장을 하지 않았습니다), 무기 유무 자체는
+    // 신뢰합니다 — 다른 스탯(데미지·사거리 등)도 이미 클라이언트가 보낸
+    // 값을 clampStats로 상한만 씌워 신뢰하는 것과 같은 수준입니다.
     const stats = attacker.stats;
     const fakePlayer = asPlayerStateForCombat(stats, attacker.aimYaw);
     const cooldown = totalMeleeCooldown(fakePlayer);

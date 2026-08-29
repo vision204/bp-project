@@ -34,7 +34,7 @@ const { QUEST_KILL_TARGET, QUEST_REWARD_PERCENT_OF_LEVEL, applyKillsToQuests, qu
         acceptQuest } = await import("../src/simulation/QuestSystem.ts");
 const { SLOT_KEYS, SLOT_UNLOCK_LEVELS, allSkills, skillsForFruit, isSlotUnlocked } =
   await import("../src/simulation/skills.ts");
-const { stepCombat, stepEnemyStatuses, skillDamage, weaponSkillDamage } =
+const { stepCombat, stepEnemyStatuses, skillDamage, weaponSkillDamage, canMeleeAttack } =
   await import("../src/simulation/CombatSystem.ts");
 const { fruitExpRequiredForLevel, fruitLevelDamageMultiplier, MAX_FRUIT_LEVEL } =
   await import("../src/simulation/FruitLeveling.ts");
@@ -1263,6 +1263,10 @@ function tapSkill(dt, plr, enemies, slotIndex) {
 
 // (1) 근접으로 막타 → 열매 경험치 0
 const pMelee = freshPlayer();
+// 사용자 요청으로 맨주먹 공격이 완전히 없어졌으므로, freshPlayer()가 비워둔
+// 손에 무기를 하나 쥐어줘야 근접 공격이 실제로 나갑니다.
+pMelee.hotbar[0] = "sword_wood";
+pMelee.activeHotbarSlot = 0;
 const eMelee = [makeEnemy("m1", 10, 100)];
 pMelee.events = [];
 stepCombat(0.016, input({ attackPressed: true }), pMelee, eMelee);
@@ -1281,6 +1285,8 @@ assert(pFruit.fruitExp > 0, `열매 막타 → 열매 경험치 획득 (${pFruit
 
 // (3) 근접으로 깎다가 열매로 막타 → 열매 경험치 들어옴 (막타 기준)
 const pMix = freshPlayer();
+pMix.hotbar[0] = "sword_wood"; // 맨주먹 공격이 없어졌으므로 근접 공격엔 무기가 필요
+pMix.activeHotbarSlot = 0;
 pMix.meleeDamage = 5;
 const eMix = [makeEnemy("x1", 25, 100)];
 pMix.events = [];
@@ -1294,6 +1300,8 @@ assert(pMix.fruitExp > 0, `막타가 열매라서 열매 경험치 획득 (${pMi
 
 // (4) 열매로 깎다가 근접으로 막타 → 열매 경험치 0
 const pMix2 = freshPlayer();
+pMix2.hotbar[0] = "sword_wood"; // 맨주먹 공격이 없어졌으므로 근접 공격엔 무기가 필요
+pMix2.activeHotbarSlot = 0;
 pMix2.meleeDamage = 1000;
 const eMix2 = [makeEnemy("x2", 1000, 100)];
 pMix2.events = [];
@@ -1671,13 +1679,16 @@ section("무기 스킬(ZXCV) — 무기를 뽑았을 때만, 숙련도로 해금
 
 section("무기 숙련도(경험치) — 그 무기를 든 채로 낸 근접/무기스킬 막타에서 상승");
 {
-  // (1) 무기 없이(맨손) 근접으로 처치 — 무기 경험치는 없음
+  // (1) 무기도 열매도 없는 진짜 맨손 — 사용자 요청으로 맨주먹 공격을 완전히
+  // 없앴으므로, 이제는 공격 자체가 아예 나가지 않아야 합니다(따라서 무기
+  // 숙련도도 당연히 안 생김).
   const pNoWeapon = freshPlayer();
   pNoWeapon.fruitDrawn = false;
   const eNoWeapon = [makeEnemy("nw1", 10, 100)];
   pNoWeapon.events = [];
   stepCombat(0.016, input({ attackPressed: true }), pNoWeapon, eNoWeapon);
-  assert(!eNoWeapon[0].alive, "맨손 근접으로 처치됨");
+  assert(eNoWeapon[0].alive, "맨손(무기·열매 모두 없음)으로는 공격이 나가지 않아 몬스터가 안 죽음");
+  assert(!pNoWeapon.events.some((e) => e.type === "melee_attack_fired"), "맨손 공격은 melee_attack_fired 이벤트조차 발생하지 않음");
   assert(Object.keys(pNoWeapon.weaponMastery).length === 0, "무기가 없으면 무기 숙련도가 전혀 생기지 않음");
 
   // (2) 무기를 뽑고 근접으로 처치 — 그 무기의 숙련 경험치가 오름
@@ -1834,6 +1845,52 @@ section("기본 지급 나무 검 — 해군/해적 두 시작 섬 모두, 평�
   // 나무 검은 시작할 때 공짜로 쥐어주는 것뿐, 화면 상점에서는 팔지 않음
   assert(!WEAPON_CATALOG.some((w) => w.id === "sword_wood"), "나무 검은 상점 목록에 나오지 않음(공짜 시작 장비)");
   assert(WEAPONS.sword_wood?.price === 0, "나무 검 가격은 0(구매 불가 취지)");
+}
+
+section("맨주먹 공격 완전 제거 — canMeleeAttack (무기도 열매도 없으면 평타 자체가 안 나감)");
+{
+  const pBareAttack = freshPlayer();
+  pBareAttack.fruitDrawn = false; // 무기도 열매도 진짜 아무것도 안 뽑은 상태
+  assert(canMeleeAttack(pBareAttack) === false, "무기도 열매(사막의 대검)도 없으면 근접 공격 불가");
+
+  const eBareAttack = [makeEnemy("bareAtk", 10, 100)];
+  pBareAttack.events = [];
+  const cdBefore = pBareAttack.meleeRemainingCooldownSec;
+  stepCombat(0.016, input({ attackPressed: true }), pBareAttack, eBareAttack);
+  assert(eBareAttack[0].alive, "맨손으로는 실제로 데미지가 들어가지 않음");
+  assert(pBareAttack.meleeRemainingCooldownSec === cdBefore, "맨손 공격은 쿨다운도 소모하지 않음(애초에 시도조차 안 됨)");
+  assert(!pBareAttack.events.some((e) => e.type === "melee_attack_fired"), "melee_attack_fired 이벤트도 뜨지 않음(휘두르는 모션도 없음)");
+
+  // 무기를 손에 들면 다시 가능해짐
+  pBareAttack.hotbar[0] = "sword_wood";
+  pBareAttack.activeHotbarSlot = 0;
+  assert(canMeleeAttack(pBareAttack) === true, "무기를 들면 다시 근접 공격 가능");
+
+  // 무기 없이도 사막의 대검이 장착돼 있으면 예외적으로 근접 공격 가능(기존 설계 유지)
+  const pSandBlade = freshPlayer();
+  pSandBlade.hotbar = [null, null, null];
+  pSandBlade.activeHotbarSlot = null;
+  pSandBlade.fruitDrawn = true;
+  pSandBlade.sandBladeActive = true;
+  assert(canMeleeAttack(pSandBlade) === true, "무기가 없어도 사막의 대검이 장착돼 있으면 근접 공격 가능");
+}
+
+section("검 3종 밸런스 — 요루(1위) > 엔마(2위) > 삼도류(3위, 가장 약함)");
+{
+  const yoruDm = WEAPONS.sword_yoru.damageMultiplier;
+  const enmaDm = WEAPONS.sword_enma.damageMultiplier;
+  const santoryuDm = WEAPONS.sword_santoryu.damageMultiplier;
+  assert(santoryuDm < enmaDm, `삼도류(x${santoryuDm}) < 엔마(x${enmaDm})`);
+  assert(enmaDm < yoruDm, `엔마(x${enmaDm}) < 요루(x${yoruDm})`);
+  assert(santoryuDm < yoruDm, `삼도류(x${santoryuDm}) < 요루(x${yoruDm})`);
+}
+
+section("새총 데미지 대폭 하향 — 최소 기존(1.5)의 7분의 1 수준까지");
+{
+  const OLD_SLINGSHOT_MULT = 1.5; // 이번 하향 전 값(사용자가 "지금 데미지"라고 지칭한 기준)
+  const slingshotDm = WEAPONS.gun_slingshot.damageMultiplier;
+  assert(slingshotDm <= OLD_SLINGSHOT_MULT / 7 + 1e-9, `새총 배율이 기존의 최소 7분의 1 이하로 줄어듦 (x${slingshotDm.toFixed(3)} <= x${(OLD_SLINGSHOT_MULT / 7).toFixed(3)})`);
+  assert(slingshotDm < WEAPONS.sword_santoryu.damageMultiplier, "새총은 이제 가장 약한 검(삼도류)보다도 훨씬 약함");
 }
 
 section("흑도(요루) — 인벤토리 장착 → 숫자키로 뽑기");

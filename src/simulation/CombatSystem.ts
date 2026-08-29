@@ -218,6 +218,19 @@ export function meleeDps(player: PlayerState) {
 }
 
 /**
+ * 지금 근접 공격(좌클릭)을 낼 수 있는 상태인지 — 사용자 요청으로 "맨주먹
+ * 공격"을 완전히 없앴습니다. 손에 진짜 무기를 들고 있거나(drawnWeapon),
+ * 사막의 대검이 장착돼 있을 때(fruitDrawn && sandBladeActive — 대검도 실제
+ * 무기처럼 취급하는 예외)만 공격이 나갑니다. 접속 시 기본으로 나무 검을
+ * 쥐고 시작하므로(다른 턴의 요청) 정상적인 플레이에서는 사실상 항상
+ * true지만, 숫자키로 무기를 완전히 집어넣은 채 열매도 안 뽑은 경우처럼
+ * "진짜로 아무것도 안 든" 상태에서는 false가 되어 평타 자체가 막힙니다.
+ */
+export function canMeleeAttack(player: PlayerState): boolean {
+  return drawnWeapon(player) !== null || (player.fruitDrawn && player.sandBladeActive);
+}
+
+/**
  * 근접 공격 (좌클릭) — 기본은 플레이어 주변 원형 판정입니다.
  *
  * 새총처럼 rangedAttack이 있는 무기를 들었으면 원형 대신, 조준 방향(카메라
@@ -328,7 +341,11 @@ export function stepCombat(
   // 뇌광 질주 — 번개 변신 중이면 접촉 반경 안 몬스터에게 지속 피해.
   stepLightningForm(player, enemies, dt, player.events);
 
-  if (input.attackPressed && player.meleeRemainingCooldownSec <= 0) {
+  // 사용자 요청: 맨주먹 공격을 완전히 없앴습니다 — 무기(또는 사막의 대검)를
+  // 손에 든 상태가 아니면 좌클릭을 눌러도 아무 일도 일어나지 않습니다(쿨다운도
+  // 걸리지 않고, melee_attack_fired 이벤트도 뜨지 않아 휘두르는 애니메이션조차
+  // 재생되지 않습니다 — SceneRenderer.ts가 이 이벤트로 팔 휘두르기를 재생합니다).
+  if (input.attackPressed && player.meleeRemainingCooldownSec <= 0 && canMeleeAttack(player)) {
     player.meleeRemainingCooldownSec = totalMeleeCooldown(player);
     applyMelee(player, enemies, player.events);
     // 몬스터를 한 마리도 맞히지 못했어도 "공격이 나갔다"는 사실 자체는 필요합니다.
