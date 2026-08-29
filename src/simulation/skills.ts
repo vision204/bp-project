@@ -96,6 +96,25 @@ export interface SkillDef {
    */
   chargeMaxDamageMultiplier?: number;
 
+  /**
+   * true면 이 스킬의 판정 원점이 플레이어 자신이 아니라 "조준 방향으로 조금
+   * 앞선 지점"이 됩니다(반경 × 0.6만큼 앞으로). 낙뢰·빙결 감옥·절대 영도·
+   * 중력정처럼 "내 발밑이 아니라 내가 보는 곳을 때리는" 스킬 전용 —
+   * 사용자 요청으로 판정과 이펙트 위치를 둘 다 조준 지점 기준으로 옮겼습니다.
+   * (CombatSystem.ts의 isInShape이 실제 원점 계산을 합니다)
+   */
+  originAtAim?: boolean;
+
+  /**
+   * (사막의 대검 전용) 발동하는 순간 손에 거대한 대검이 소환되어, 이 시간(초)
+   * 동안은 기본 공격(좌클릭)이 무기 없이도 "무기를 든 것처럼" 이 배율만큼
+   * 강해집니다. totalMeleeDamage(CombatSystem.ts)가 실제 적용 — 무장색·검
+   * 스텟과도 실제 무기처럼 함께 곱해집니다.
+   */
+  meleeFormMultiplier?: number;
+  /** (사막의 대검 전용) 위 배율이 유지되는 시간(초) */
+  meleeFormDurationSec?: number;
+
   description: string;
 }
 
@@ -217,6 +236,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 30,
       damage: 22,
       shape: { kind: "radial", radius: 6 },
+      originAtAim: true, // 발밑이 아니라 조준한 곳에 감옥이 생김
       freezeDurationSec: 3,
       chargeable: true,
       maxChargeSec: 1.3,
@@ -233,6 +253,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 58,
       damage: 60,
       shape: { kind: "radial", radius: 12 },
+      originAtAim: true, // 발밑이 아니라 조준한 곳을 중심으로 퍼짐
       freezeDurationSec: 5,
       chargeable: true,
       maxChargeSec: 1.8,
@@ -285,6 +306,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 26,
       damage: 42,
       shape: { kind: "radial", radius: 16 },
+      originAtAim: true, // 발밑이 아니라 조준한 곳에 번개가 떨어짐
       autoTargetNearest: true,
       chargeable: true,
       maxChargeSec: 1.3,
@@ -355,6 +377,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       manaCost: 35,
       damage: 45,
       shape: { kind: "radial", radius: 7 },
+      originAtAim: true, // 발밑이 아니라 조준한 곳에 중력정이 생김
       freezeDurationSec: 1.5,
       burnDps: 8,
       burnDurationSec: 3,
@@ -499,7 +522,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
     },
     {
       id: "sand_v",
-      name: "그랜드 사바스",
+      name: "사막의 대검",
       slot: 3,
       unlockFruitLevel: 100,
       cooldownSec: 23,
@@ -512,7 +535,14 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       maxChargeSec: 1.8,
       chargeMaxRangeMultiplier: 1.3,
       chargeMaxDamageMultiplier: 1.3,
-      description: "사막 전체를 끌어모은 거대한 모래 칼날로 일대를 갈아버립니다. 오래 모을수록 더 넓게 갈아버립니다.",
+      // 사용자 요청: 모래모래 열매만의 고유 검 — V를 누르면 손에 사막의 대검이
+      // 소환되고(그 순간 일대를 갈아버리는 건 그대로), 이후 15초 동안은 그
+      // 대검으로 기본 공격을 하는 것처럼 요루(2.6배)보다 살짝 낮은 배율로
+      // 근접 데미지가 강해집니다 — YORU_DAMAGE_MULTIPLIER보다 낮게 잡았습니다.
+      meleeFormMultiplier: 2.4,
+      meleeFormDurationSec: 15,
+      description:
+        "사막의 정수를 응축해 손에 거대한 사막의 대검을 소환합니다. 소환과 동시에 일대를 갈아버리고, 15초 동안은 그 대검으로 기본 공격이 요루에 살짝 못 미치는 위력을 냅니다. 오래 모을수록 소환 일격이 더 넓게 갈아버립니다.",
     },
   ],
 };

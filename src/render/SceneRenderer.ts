@@ -7,11 +7,11 @@ import { maxWorldRadius } from "../world/islands";
 import { boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import { skillsForWeapon } from "../simulation/weaponSkills";
-import { skillsForFruit, withCharge } from "../simulation/skills";
+import { skillsForFruit, withCharge, type SkillDef } from "../simulation/skills";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
 import type { RemoteEnemyGhost, RemotePlayerView, RemoteSkillFx } from "../network/MultiplayerClient";
-import { dist2D } from "../simulation/ShapeMath";
+import { dist2D, skillOrigin } from "../simulation/ShapeMath";
 import {
   buildEmberOverlayGroup,
   buildFruitSkillEffectGroup,
@@ -33,6 +33,31 @@ const FRUIT_MODEL_PATHS: Record<FruitAbilityId, string> = {
   rubber_barrage: "models/fruits/rubber_barrage.glb",
   sand_storm: "models/fruits/sand_storm.glb",
 };
+
+// ── 열매 스킬 이펙트 3D 모델 (GLB) ────────────────────────────────────────
+// public/models/skills/ 아래에 24개(열매 6종 × Z/X/C/V) 스킬 이펙트 glb를
+// 스킬 id로 이름 붙여뒀습니다. 스킬을 쓰면 이 모델이 판정 모양(shape)에 맞춰
+// 앞으로 발사되거나(line/cone) 조준한 자리에 나타났다 사라지며(radial/self),
+// 기존의 도형 기반 이펙트(SkillEffects.ts) 위에 덧씌워집니다 — 기존 이펙트는
+// 하나도 건드리지 않고, 실제 3D 모델을 더해서 더 생동감 있게 만드는 방식입니다.
+const SKILL_MODEL_IDS = [
+  "magma_z", "magma_x", "magma_c", "magma_v",
+  "ice_z", "ice_x", "ice_c", "ice_v",
+  "thunder_z", "thunder_x", "thunder_c", "thunder_v",
+  "dark_z", "dark_x", "dark_c", "dark_v",
+  "rubber_z", "rubber_x", "rubber_c", "rubber_v",
+  "sand_z", "sand_x", "sand_c", "sand_v",
+] as const;
+function skillModelPath(skillId: string): string {
+  return `models/skills/${skillId}.glb`;
+}
+/**
+ * "자기 강화형(self)" 또는 토글 스킬 중, 발동 중인 동안 캐릭터에 계속 붙어
+ * 있어야 하는 3종 — 서리 발판(발밑 얼음판), 뇌광 질주(번개 오라),
+ * 사막의 대검(손에 든 대검). 나머지 21개는 순간적으로 스폰했다 사라지는
+ * 1회성 이펙트로만 씁니다.
+ */
+const SKILL_AURA_IDS = new Set(["ice_x", "thunder_x", "sand_v"]);
 
 /**
  * 로드된 GLB는 크기와 원점이 제각각이라(모델러/AI 생성 파이프라인이 서로
@@ -56,6 +81,35 @@ function normalizeAndCenterModel(root: THREE.Object3D, targetSize: number): THRE
   wrapper.add(inner);
   inner.scale.setScalar(targetSize / maxDim);
   return wrapper;
+}
+
+/**
+ * 스킬 이펙트 템플릿을 화면에 띄울 인스턴스 하나로 복제합니다. THREE.Object3D.clone()은
+ * 지오메트리/머티리얼을 원본과 "공유"하는데, 스킬 이펙트는 동시에 여러 개가
+ * 떠 있을 수 있고(연타) 끝나면 각자 dispose되므로 공유했다간 먼저 끝난 것이
+ * dispose한 머티리얼을 나중 것이 계속 쓰다가 깨집니다. 그래서 메시마다
+ * 지오메트리는 공유하되(어차피 안 바뀜) 머티리얼만 각자 clone합니다.
+ *
+ * fadeOut=true(순간 스폰됐다 사라지는 1회성 이펙트)면 transparent를 켜서
+ * skillEffects 갱신 루프가 매 프레임 opacity를 줄여나갈 수 있게 합니다.
+ * fadeOut=false(서리 발판·뇌광 질주·사막의 대검처럼 계속 붙어 있는 인스턴스)면
+ * 평소처럼 불투명하게 둡니다 — 안 그러면 depthWrite 문제로 다른 물체와
+ * 겹칠 때 렌더링이 이상해집니다.
+ */
+function cloneSkillModelInstance(template: THREE.Group, fadeOut: boolean): THREE.Group {
+  const clone = template.clone(true);
+  clone.traverse((obj) => {
+    if (!(obj instanceof THREE.Mesh)) return;
+    const mat = Array.isArray(obj.material) ? obj.material[0] : obj.material;
+    const cloned = mat.clone();
+    if (fadeOut) {
+      cloned.transparent = true;
+      cloned.depthWrite = false;
+      obj.userData.baseOpacity = 1;
+    }
+    obj.material = cloned;
+  });
+  return clone;
 }
 
 const CAMERA_DISTANCE = 6;
@@ -562,6 +616,17 @@ export class SceneRenderer {
    * 들어옵니다. 열매를 뽑았을 때(fruitDrawn) 오른손 자리에 보여줍니다.
    */
   private fruitVisuals = new Map<FruitAbilityId, THREE.Group>();
+  /**
+   * 스킬 이펙트 GLB 원본(템플릿) — 실제로 화면에 스폰할 때는 이걸 clone해서
+   * 씁니다(재질도 따로 clone해서, 여러 개가 동시에 떠 있어도 서로의 페이드에
+   * 영향을 주지 않고 각자 안전하게 dispose됩니다). 씬에는 직접 추가되지 않습니다.
+   */
+  private skillModelTemplates = new Map<string, THREE.Group>();
+  /**
+   * SKILL_AURA_IDS(서리 발판·뇌광 질주·사막의 대검) 전용 — 캐릭터에 계속
+   * 붙어 있다가 해당 상태가 켜져 있는 동안만 보이는 인스턴스입니다.
+   */
+  private skillAuraVisuals = new Map<string, THREE.Group>();
   private readonly gltfLoader: GLTFLoader;
   private enemyVisuals = new Map<string, EnemyVisual>();
   private npcVisuals = new Map<string, NpcVisual>();
@@ -590,7 +655,14 @@ export class SceneRenderer {
   private attackSwingStartedAtMs = -Infinity;
 
   // ── 요루/삼도류/엔마 스킬 이펙트 (내 것 + 다른 플레이어 것 공용) ─────────────
-  private skillEffects: { group: THREE.Group; startedAtMs: number; durationMs: number; growTo: number }[] = [];
+  private skillEffects: {
+    group: THREE.Group;
+    startedAtMs: number;
+    durationMs: number;
+    growTo: number;
+    /** line/cone(투사체형) GLB 이펙트 전용 — 있으면 시작~끝 지점을 이 시간 동안 이동합니다. */
+    travel?: { from: THREE.Vector3; to: THREE.Vector3 };
+  }[] = [];
 
   // ── 고무 열매 — 내(로컬 플레이어)가 뻗을 때만 진짜 오른팔을 늘였다 되감습니다
   // (다른 플레이어는 팔 관절이 노출돼 있지 않아 지금은 로컬 전용입니다).
@@ -668,6 +740,9 @@ export class SceneRenderer {
     for (const fruitId of Object.keys(FRUIT_MODEL_PATHS) as FruitAbilityId[]) {
       this.loadFruitVisual(fruitId);
     }
+    for (const skillId of SKILL_MODEL_IDS) {
+      this.loadSkillModel(skillId);
+    }
 
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -701,6 +776,48 @@ export class SceneRenderer {
       undefined,
       (err) => {
         console.warn(`열매 모델을 불러오지 못했습니다 (${fruitId}):`, err);
+      },
+    );
+  }
+
+  /**
+   * 스킬 이펙트 GLB 하나를 비동기로 불러와 템플릿으로 저장합니다. 서리
+   * 발판·뇌광 질주·사막의 대검(SKILL_AURA_IDS)이면, 로드가 끝나는 대로
+   * 캐릭터에 계속 붙어 있는 인스턴스도 하나 만들어 둡니다(처음엔 안 보임 —
+   * 실제로 켜져 있을 때만 sync()가 visible을 켭니다).
+   */
+  private loadSkillModel(skillId: string) {
+    const url = `${import.meta.env.BASE_URL}${skillModelPath(skillId)}`;
+    this.gltfLoader.load(
+      url,
+      (gltf) => {
+        const template = normalizeAndCenterModel(gltf.scene, 1);
+        this.skillModelTemplates.set(skillId, template);
+
+        if (SKILL_AURA_IDS.has(skillId)) {
+          const aura = cloneSkillModelInstance(template, false);
+          if (skillId === "sand_v") {
+            // 손에 든 대검 — 무기와 같은 오른손 자리, 요루보다 조금 큼직하게.
+            aura.scale.setScalar(1.05);
+            aura.position.set(-0.7, 0.78, 0.05);
+            aura.rotation.set(0.22, 0, 0.5);
+          } else if (skillId === "ice_x") {
+            // 발밑 얼음판 — 납작하게 눕혀서 발밑에 깔립니다.
+            aura.scale.set(2.6, 0.12, 2.6);
+            aura.position.set(0, 0.03, 0);
+          } else {
+            // 뇌광 질주 — 몸 전체를 감싸는 번개 오라.
+            aura.scale.setScalar(1.9);
+            aura.position.set(0, 0.9, 0);
+          }
+          aura.visible = false;
+          this.playerVisual.add(aura);
+          this.skillAuraVisuals.set(skillId, aura);
+        }
+      },
+      undefined,
+      (err) => {
+        console.warn(`스킬 이펙트 모델을 불러오지 못했습니다 (${skillId}):`, err);
       },
     );
   }
@@ -779,6 +896,14 @@ export class SceneRenderer {
       skill = withCharge(skill, chargeFrac);
     }
 
+    // originAtAim 스킬(낙뢰·빙결 감옥·절대 영도·중력정)은 판정도 이펙트도 발밑이
+    // 아니라 조준 지점에서 나야 합니다 — CombatSystem.ts의 isInShape과 정확히
+    // 같은 계산(skillOrigin)을 그대로 재사용해서 판정과 눈에 보이는 위치가
+    // 어긋나지 않게 합니다.
+    const origin = skillOrigin({ x, z }, aimYaw, skill);
+    x = origin.x;
+    z = origin.z;
+
     // 무기(검) 스킬은 기존 도형 기반 이펙트 그대로, 열매 스킬은 이름/속성에 맞춘
     // 전용 이펙트(FRUIT_SKILL_EFFECT_BUILDERS)를 씁니다 — 검과 열매가 똑같이
     // "판정 도형에 색만 입힌" 모양으로 보이지 않도록 갈라둡니다.
@@ -789,6 +914,10 @@ export class SceneRenderer {
     main.group.rotation.y = aimYaw;
     this.scene.add(main.group);
     this.skillEffects.push({ group: main.group, startedAtMs: nowMs, durationMs: main.durationMs, growTo: main.growTo });
+
+    // GLB 이펙트(열매 스킬만 — 무기 스킬용 GLB는 없습니다) — 기존 도형
+    // 이펙트를 대체하지 않고 그 위에 덧씌웁니다.
+    if (!weaponSkill) this.spawnSkillModelEffect(skill, x, y, z, aimYaw, nowMs);
 
     // 고무 열매고, 내(로컬 플레이어)가 쓴 거면 진짜 오른팔을 이 타이밍표대로
     // 늘였다 되감습니다 — 다른 플레이어/원격 중계분은 팔 관절 모델이 따로
@@ -808,6 +937,56 @@ export class SceneRenderer {
       ember.group.rotation.y = aimYaw;
       this.scene.add(ember.group);
       this.skillEffects.push({ group: ember.group, startedAtMs: nowMs, durationMs: ember.durationMs, growTo: ember.growTo });
+    }
+  }
+
+  /**
+   * 열매 스킬용 GLB 이펙트를 스폰합니다 — 기존 도형 이펙트(main) 위에 덧씌우는
+   * "진짜 모델" 연출입니다. 아직 로드가 안 끝났으면(비동기라 스킬을 먼저 쓸 수도
+   * 있습니다) 조용히 아무것도 안 합니다.
+   *
+   * shape.kind에 따라 두 갈래로 나뉩니다:
+   * - "line"/"cone" (다크 슬래시처럼 앞으로 뻗어나가는 스킬): 시전 지점에서
+   *   조준 방향으로 사거리만큼 날아가는 투사체처럼 travel을 채워 넣습니다.
+   * - "radial"/"self" (낙뢰·빙결 감옥처럼 한 자리를 때리는 스킬): 그 자리에서
+   *   커졌다 여운을 남기며 사라지는 버스트로 재생합니다(사용자가 "좀 더
+   *   여운있게"를 선택해서 0.6~1.2초 사이로 잡았습니다).
+   */
+  private spawnSkillModelEffect(skill: SkillDef, x: number, y: number, z: number, aimYaw: number, nowMs: number) {
+    const template = this.skillModelTemplates.get(skill.id);
+    if (!template) return;
+
+    const clone = cloneSkillModelInstance(template, true);
+    const fx = Math.sin(aimYaw);
+    const fz = Math.cos(aimYaw);
+    clone.rotation.y = aimYaw;
+
+    if (skill.shape.kind === "line" || skill.shape.kind === "cone") {
+      // 투사체형 — 시전 지점에서 조준 방향으로 사거리만큼 날아갑니다.
+      const range = skill.shape.kind === "line" ? skill.shape.range : skill.shape.range;
+      const from = new THREE.Vector3(x, y + 1, z);
+      const to = new THREE.Vector3(x + fx * range, y + 1, z + fz * range);
+      clone.position.copy(from);
+      clone.scale.setScalar(1.1);
+      this.scene.add(clone);
+      this.skillEffects.push({
+        group: clone,
+        startedAtMs: nowMs,
+        durationMs: 800,
+        growTo: 0,
+        travel: { from, to },
+      });
+    } else {
+      // 제자리형(radial/self) — 판정 지점에서 커졌다가 여운을 남기며 사라집니다.
+      clone.position.set(x, y + 0.05, z);
+      clone.scale.setScalar(0.6);
+      this.scene.add(clone);
+      this.skillEffects.push({
+        group: clone,
+        startedAtMs: nowMs,
+        durationMs: 1000,
+        growTo: 1.6,
+      });
     }
   }
 
@@ -1223,6 +1402,11 @@ export class SceneRenderer {
       }
       const fade = 1 - t;
       if (eff.growTo > 0) eff.group.scale.setScalar(1 + t * eff.growTo);
+      if (eff.travel) {
+        // 투사체형 GLB 이펙트 — 앞 70%는 날아가고, 나머지는 도착 지점에서 여운을 남기며 사라집니다.
+        const flyT = Math.min(1, t / 0.7);
+        eff.group.position.lerpVectors(eff.travel.from, eff.travel.to, flyT);
+      }
       eff.group.traverse((obj) => {
         if (!(obj instanceof THREE.Mesh)) return;
         const mat = obj.material as THREE.MeshBasicMaterial;
@@ -1339,6 +1523,17 @@ export class SceneRenderer {
     // 동안의 시각 피드백은 위의 차지 이펙트/글로우가 대신합니다.
     for (const [id, visual] of this.fruitVisuals) {
       visual.visible = state.player.heldFruitCandidate === id;
+    }
+
+    // 캐릭터에 계속 붙어 있는 스킬 오라(GLB) — 실제로 그 상태가 켜져 있을 때만 보입니다.
+    for (const [skillId, aura] of this.skillAuraVisuals) {
+      if (skillId === "ice_x") {
+        aura.visible = state.player.iceWalkActive;
+      } else if (skillId === "thunder_x") {
+        aura.visible = state.player.lightningFormRemainingSec > 0;
+      } else if (skillId === "sand_v") {
+        aura.visible = state.player.sandBladeRemainingSec > 0 && state.player.fruitDrawn;
+      }
     }
 
     // 무장색 발동 → 전신이 검게 변합니다. 상태가 바뀔 때만 머티리얼을 건드립니다.

@@ -243,6 +243,13 @@ export interface PlayerState {
   fruitBuffMultiplier: number;
   fruitBuffRemainingSec: number;
 
+  /**
+   * 사막의 대검(모래 열매 V) 소환 후 남은 시간(초). 0보다 크고 fruitDrawn이면
+   * totalMeleeDamage(CombatSystem.ts)가 무기 없이도 손에 대검을 든 것처럼
+   * 취급합니다. 저장되지 않는 일시적 상태입니다(SaveData.ts).
+   */
+  sandBladeRemainingSec: number;
+
   /** 질주(Shift 한 번으로 토글) 중인지 — HUD 표시용 */
   sprinting: boolean;
 
@@ -544,6 +551,7 @@ export function createInitialGameState(
       fruitMastery: {},
       fruitBuffMultiplier: 1,
       fruitBuffRemainingSec: 0,
+      sandBladeRemainingSec: 0,
 
       sprinting: false,
 

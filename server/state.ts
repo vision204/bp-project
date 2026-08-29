@@ -41,7 +41,7 @@ import {
 import { isSlotUnlocked, skillsForFruit } from "../src/simulation/skills";
 import { isWeaponSlotUnlocked, skillsForWeapon } from "../src/simulation/weaponSkills";
 import { fruitLevelDamageMultiplier } from "../src/simulation/FruitLeveling";
-import { dist2D, pointInShape } from "../src/simulation/ShapeMath";
+import { dist2D, pointInShape, skillOrigin } from "../src/simulation/ShapeMath";
 import {
   addCrewBounty,
   crewBonusForKill,
@@ -932,15 +932,14 @@ export class World {
     }
 
     const shape = skill.shape;
+    // originAtAim 스킬(낙뢰·빙결 감옥·절대 영도·중력정)은 PvE(CombatSystem.ts)와
+    // 똑같이 조준 지점을 원점으로 판정해야 합니다 — ShapeMath.ts의 skillOrigin이
+    // 그 계산을 공유합니다(클라/서버 판정이 어긋나지 않도록).
+    const origin = skillOrigin({ x: attacker.position.x, z: attacker.position.z }, attacker.aimYaw, skill);
     const inRange =
       shape.kind === "self"
         ? false
-        : pointInShape(
-            { x: attacker.position.x, z: attacker.position.z, aimYaw: attacker.aimYaw },
-            target.position.x,
-            target.position.z,
-            widenShapeForLatency(shape),
-          );
+        : pointInShape(origin, target.position.x, target.position.z, widenShapeForLatency(shape));
     if (!inRange) {
       this.send(attacker, { type: "pvp_rejected", reason: "out_of_range" });
       return;

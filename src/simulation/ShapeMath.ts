@@ -1,4 +1,4 @@
-import type { SkillShape } from "./skills";
+import type { SkillDef, SkillShape } from "./skills";
 
 // ---------------------------------------------------------------------------
 // 스킬 판정 모양(원형·부채꼴·직선) 기하 계산을 CombatSystem에서 분리했습니다.
@@ -58,4 +58,26 @@ export function pointInShape(origin: ShapeOrigin, targetX: number, targetZ: numb
 /** 두 지점의 수평(x,z) 거리 — 근접 공격/사거리 판정에 씁니다. */
 export function dist2D(ax: number, az: number, bx: number, bz: number) {
   return Math.hypot(ax - bx, az - bz);
+}
+
+/**
+ * 스킬의 실제 판정 원점을 계산합니다. 대부분의 스킬은 플레이어 위치 그대로지만,
+ * skill.originAtAim이 true인 스킬(낙뢰·빙결 감옥·절대 영도·중력정)은 조준 방향으로
+ * "반경 × 0.6"만큼 앞선 지점이 원점이 됩니다 — 발밑이 아니라 내가 보는 곳을
+ * 때리는 스킬이기 때문입니다(사용자 요청).
+ *
+ * CombatSystem.ts(PvE)와 server/state.ts(PvP)가 이 함수를 그대로 같이 써야
+ * "클라에서는 맞은 것 같은데 서버가 인정 안 해준다" 같은 어긋남이 생기지 않습니다
+ * — ShapeMath.ts 파일 상단 설명과 같은 이유입니다.
+ */
+export function skillOrigin(position: { x: number; z: number }, aimYaw: number, skill: SkillDef): ShapeOrigin {
+  if (!skill.originAtAim || skill.shape.kind !== "radial") {
+    return { x: position.x, z: position.z, aimYaw };
+  }
+  const offset = skill.shape.radius * 0.6;
+  return {
+    x: position.x + Math.sin(aimYaw) * offset,
+    z: position.z + Math.cos(aimYaw) * offset,
+    aimYaw,
+  };
 }

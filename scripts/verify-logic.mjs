@@ -1302,6 +1302,64 @@ assert(onAxis.hp < 10000, "직선: 경로상의 적은 관통 피격");
 assert(offAxis.hp === 10000, "직선: 경로 밖의 적은 안 맞음");
 assert(onAxis.status.slowFactor === 0.5, `아이스 랜스 둔화 적용 (x${onAxis.status.slowFactor})`);
 
+section("originAtAim — 판정 원점이 발밑이 아니라 조준 지점으로 이동 (낙뢰·빙결 감옥·절대 영도·중력정)");
+{
+  const pAim = freshPlayer();
+  pAim.equippedFruit = "ice_lance";
+  pAim.fruitLevel = 50; // C(빙결 감옥) 해금
+  pAim.aimYaw = 0; // 정면 = +Z
+  pAim.position = { x: 0, y: 1, z: 0 };
+  const skill = skillsForFruit("ice_lance")[2];
+  assert(skill.id === "ice_c" && skill.originAtAim === true, "빙결 감옥은 originAtAim 스킬");
+  // 반경 6, 오프셋 = 6 * 0.6 = 3.6 → 판정 원점은 (0, 3.6)
+  const behind = makeEnemy("behind", 10000, 10);
+  behind.position = { x: 0, y: 1, z: -3 }; // 발밑 기준이면 맞았을(거리 3) 자리 — 조준 기준이면 거리 6.6이라 빗나감
+  const farAim = makeEnemy("farAim", 10000, 10);
+  farAim.position = { x: 0, y: 1, z: 9 }; // 발밑 기준이면 사거리 밖(거리 9) — 조준 기준이면 거리 5.4라 맞음
+  pAim.events = [];
+  tapSkill(0.016, pAim, [behind, farAim], 2);
+  assert(farAim.hp < 10000, "빙결 감옥: 조준 지점 쪽으로 옮겨진 판정 범위 안의 적은 맞음");
+  assert(behind.hp === 10000, `빙결 감옥: 발밑 기준이면 맞았을 등 뒤의 적은 판정이 앞으로 옮겨져서 안 맞음 (hp ${behind.hp})`);
+
+  // 부채꼴형(다크 슬래시, Z)은 originAtAim이 아니라서 발밑 기준 그대로 유지되어야 함
+  const zSkill = skillsForFruit("dark_wave")[0];
+  assert(!zSkill.originAtAim, "다크 슬래시(부채꼴)는 originAtAim이 아님 — 발밑 기준 그대로");
+  for (const [fruitId, slot] of [["dark_wave", 2], ["thunder_strike", 2]]) {
+    const s = skillsForFruit(fruitId)[slot];
+    assert(s.originAtAim === true, `${s.name}은 originAtAim 스킬`);
+  }
+}
+
+section("밸런스 — 사막의 대검 (모래 열매 V, 소환 후 15초간 기본 공격 강화)");
+{
+  const sandV = skillsForFruit("sand_storm")[3];
+  assert(sandV.name === "사막의 대검", `사막의 대검으로 개명됨 (실제 "${sandV.name}")`);
+  assert(sandV.meleeFormMultiplier < WEAPONS.sword_yoru.damageMultiplier, `요루(x${WEAPONS.sword_yoru.damageMultiplier})보다 살짝 낮은 배율 (x${sandV.meleeFormMultiplier})`);
+  assert(sandV.meleeFormDurationSec === 15, `지속시간 15초 (실제 ${sandV.meleeFormDurationSec})`);
+
+  const pSand = freshPlayer();
+  pSand.equippedFruit = "sand_storm";
+  pSand.fruitLevel = 100; // V 해금
+  pSand.fruitDrawn = true;
+  pSand.events = [];
+  assert(pSand.sandBladeRemainingSec === 0, "평소엔 대검 버프 없음");
+  const meleeBefore = totalMeleeDamage(pSand);
+  tapSkill(0.016, pSand, [], 3);
+  assert(pSand.sandBladeRemainingSec > 0, "사막의 대검 발동 시 15초 타이머 설정됨");
+  const meleeDuring = totalMeleeDamage(pSand);
+  assert(meleeDuring > meleeBefore, `대검 소환 중엔 기본 공격력 상승 (${meleeBefore.toFixed(1)} → ${meleeDuring.toFixed(1)})`);
+
+  // 열매를 넣으면(fruitDrawn=false) 대검을 든 게 아니므로 평소 무기 공식으로 돌아감
+  pSand.fruitDrawn = false;
+  assert(Math.abs(totalMeleeDamage(pSand) - meleeBefore) < 0.001, "열매를 넣으면(fruitDrawn=false) 대검 배율 미적용");
+  pSand.fruitDrawn = true;
+
+  // 시간이 지나면 감소하다 0에서 원래 공격력으로 돌아옴
+  stepCombat(15.1, input(), pSand, []);
+  assert(pSand.sandBladeRemainingSec === 0, "15초가 지나면 버프 종료");
+  assert(Math.abs(totalMeleeDamage(pSand) - meleeBefore) < 0.001, "버프 종료 후 공격력 원복");
+}
+
 section("돌진 / 자기 강화");
 const pDash = freshPlayer();
 pDash.equippedFruit = "thunder_strike";

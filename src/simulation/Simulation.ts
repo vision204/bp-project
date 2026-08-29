@@ -365,6 +365,7 @@ export class Simulation {
     player.iceWalkActive = false;
     player.iceWalkCenter = null;
     player.lightningFormRemainingSec = 0;
+    player.sandBladeRemainingSec = 0;
     this.state.boat.riding = false;
     player.position = { ...arrival };
     this.playerController.teleport(arrival);
