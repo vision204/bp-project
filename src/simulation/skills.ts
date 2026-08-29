@@ -106,14 +106,12 @@ export interface SkillDef {
   originAtAim?: boolean;
 
   /**
-   * (사막의 대검 전용) 발동하는 순간 손에 거대한 대검이 소환되어, 이 시간(초)
-   * 동안은 기본 공격(좌클릭)이 무기 없이도 "무기를 든 것처럼" 이 배율만큼
-   * 강해집니다. totalMeleeDamage(CombatSystem.ts)가 실제 적용 — 무장색·검
-   * 스텟과도 실제 무기처럼 함께 곱해집니다.
+   * (사막의 대검 전용) 장착돼 있는 동안(toggle — sandBladeActive) 손에 거대한
+   * 대검이 들려 있는 것처럼, 기본 공격(좌클릭)이 무기 없이도 "무기를 든 것처럼"
+   * 이 배율만큼 강해집니다. totalMeleeDamage(CombatSystem.ts)가 실제 적용 —
+   * 무장색·검 스텟과도 실제 무기처럼 함께 곱해집니다.
    */
   meleeFormMultiplier?: number;
-  /** (사막의 대검 전용) 위 배율이 유지되는 시간(초) */
-  meleeFormDurationSec?: number;
 
   description: string;
 }
@@ -525,7 +523,12 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       name: "사막의 대검",
       slot: 3,
       unlockFruitLevel: 100,
-      cooldownSec: 23,
+      // 사용자 추가 요청: 쿨다운 없이 그냥 V로 장착/해제하는 토글로 바꿨습니다
+      // (서리 발판·뇌광 질주와 같은 toggle 패턴 — CombatSystem.ts의
+      // isToggleActive/setToggleActive가 sandBladeActive를 켜고 끕니다).
+      // 끌 때는 마나도 들지 않고, 켤 때만 manaCost가 듭니다.
+      cooldownSec: 0,
+      toggle: true,
       manaCost: 58,
       damage: 95,
       shape: { kind: "radial", radius: 13 },
@@ -536,13 +539,14 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       chargeMaxRangeMultiplier: 1.3,
       chargeMaxDamageMultiplier: 1.3,
       // 사용자 요청: 모래모래 열매만의 고유 검 — V를 누르면 손에 사막의 대검이
-      // 소환되고(그 순간 일대를 갈아버리는 건 그대로), 이후 15초 동안은 그
+      // 소환되고(그 순간 일대를 갈아버리는 건 그대로), 장착돼 있는 동안은 그
       // 대검으로 기본 공격을 하는 것처럼 요루(2.6배)보다 살짝 낮은 배율로
       // 근접 데미지가 강해집니다 — YORU_DAMAGE_MULTIPLIER보다 낮게 잡았습니다.
+      // (다시 V를 누르기 전까지 무제한 지속 — meleeFormDurationSec은 더 이상
+      // 쓰지 않습니다.)
       meleeFormMultiplier: 2.4,
-      meleeFormDurationSec: 15,
       description:
-        "사막의 정수를 응축해 손에 거대한 사막의 대검을 소환합니다. 소환과 동시에 일대를 갈아버리고, 15초 동안은 그 대검으로 기본 공격이 요루에 살짝 못 미치는 위력을 냅니다. 오래 모을수록 소환 일격이 더 넓게 갈아버립니다.",
+        "사막의 정수를 응축해 손에 거대한 사막의 대검을 소환합니다. 소환과 동시에 일대를 갈아버리고, 장착돼 있는 동안은 그 대검으로 기본 공격이 요루에 살짝 못 미치는 위력을 냅니다. 쿨다운 없이 V를 다시 누르면 언제든 손에서 내려놓을 수 있습니다. 오래 모을수록 소환 일격이 더 넓게 갈아버립니다.",
     },
   ],
 };

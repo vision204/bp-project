@@ -89,6 +89,22 @@ export const WEAPONS: Partial<Record<ItemId, WeaponDef>> = {
     description: "가볍고 값싼 원거리 무기. 검보다 데미지는 약하지만, 마우스가 가리키는 방향으로 멀리서 쏠 수 있습니다.",
     rangedAttack: { range: 22, width: 2.4 },
   },
+  // 해군/해적 시작 섬 모두 접속하자마자 이걸 손에 쥐고 시작합니다(사용자 요청) —
+  // 그래야 평타를 쳐도 맨주먹이 아니라 진짜 검을 휘두르는 것처럼 보이고, 처음부터
+  // 사냥이 가능합니다. 위력은 무기가 아예 없을 때(맨손)와 완전히 같도록
+  // 일부러 배율을 전부 1/0으로 잡았습니다 — 밸런스에는 영향이 없는 순수 QoL용
+  // 기본 지급 무기입니다. 상점에서는 팔지 않습니다(ShopSystem.ts에서 제외).
+  sword_wood: {
+    id: "sword_wood",
+    name: "나무 검",
+    icon: "🪵",
+    weaponType: "sword",
+    damageMultiplier: 1,
+    bonusRange: 0,
+    attackSpeedMultiplier: 1,
+    price: 0,
+    description: "이제 막 항해를 시작한 초보자에게 쥐어주는 기본 목검. 위력은 맨손과 같지만, 진짜 검을 든 채로 싸울 수 있습니다.",
+  },
 };
 
 export function weaponFor(itemId: ItemId | null | undefined): WeaponDef | null {

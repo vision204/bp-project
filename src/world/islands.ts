@@ -211,6 +211,16 @@ function estimatedMeleeHitAtLevel(level: number): number {
 const GENERAL_CONTACT_BUFF = 1.25;
 
 /**
+ * 사용자 추가 요청: "몬스터들 hp만, 공격력은 바꾸지 말고 hp만 1.3배 늘려줘 —
+ * 모든 몬스터들." 공격력(접촉 데미지, GENERAL_CONTACT_BUFF)은 건드리지 않고
+ * 체력에만 곱합니다. "저택의 주인"처럼 seed.hpMultiplier로 정확한 수치를 이미
+ * 맞춰둔 보스는 이전 요청("만렙 요루 무장색 4대에 죽어야 함")으로 이미 정밀
+ * 튜닝돼 있으므로 이 배율의 대상에서 제외합니다(원콤 방지 바닥값과 같은 예외
+ * 처리 방식).
+ */
+const MONSTER_HP_BUFF = 1.3;
+
+/**
  * 몬스터 종류가 3종류 이상인 섬은 부채꼴 하나하나가 좁아져서 같은 마리 수를
  * 그대로 두면 지나치게 빽빽해 보입니다("사용자 요청). 종류가 많을수록 종족당
  * 마리 수를 줄여서 전체 밀도를 낮춥니다 (그래도 종족당 최소 6마리는 유지 —
@@ -246,9 +256,11 @@ function buildSpecies(
       hp:
         seed.hpMultiplier !== undefined
           ? Math.round(base.hp * Math.pow(HP_STEP, k) * seed.hpMultiplier)
-          : Math.max(
-              Math.round(base.hp * Math.pow(HP_STEP, k)),
-              Math.round(estimatedMeleeHitAtLevel(tierLevel) * NO_ONESHOT_SAFETY_MARGIN),
+          : Math.round(
+              Math.max(
+                Math.round(base.hp * Math.pow(HP_STEP, k)),
+                Math.round(estimatedMeleeHitAtLevel(tierLevel) * NO_ONESHOT_SAFETY_MARGIN),
+              ) * MONSTER_HP_BUFF,
             ),
       // 1번째 종족은 기존에 검증된 값을 그대로 쓰고, 상위 종족만 곡선에서 계산합니다.
       exp: k === 0 ? base.exp : Math.round(expRequiredForLevel(tierLevel) / 8),

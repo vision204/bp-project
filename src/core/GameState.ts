@@ -56,6 +56,7 @@ export interface StatBlock {
 export type ItemId =
   | "potion_small"
   | "potion_exp"
+  | "sword_wood"
   | "sword_yoru"
   | "sword_santoryu"
   | "sword_enma"
@@ -244,11 +245,12 @@ export interface PlayerState {
   fruitBuffRemainingSec: number;
 
   /**
-   * 사막의 대검(모래 열매 V) 소환 후 남은 시간(초). 0보다 크고 fruitDrawn이면
-   * totalMeleeDamage(CombatSystem.ts)가 무기 없이도 손에 대검을 든 것처럼
-   * 취급합니다. 저장되지 않는 일시적 상태입니다(SaveData.ts).
+   * 사막의 대검(모래 열매 V)이 지금 손에 장착돼 있는지 — 서리 발판(iceWalkActive)과
+   * 같은 순수 토글입니다(사용자 요청: 쿨다운 없이 V로 장착/해제). 켜져 있고
+   * fruitDrawn이면 totalMeleeDamage(CombatSystem.ts)가 무기 없이도 손에 대검을
+   * 든 것처럼 취급합니다. 저장되지 않는 일시적 상태입니다(SaveData.ts).
    */
-  sandBladeRemainingSec: number;
+  sandBladeActive: boolean;
 
   /** 질주(Shift 한 번으로 토글) 중인지 — HUD 표시용 */
   sprinting: boolean;
@@ -551,17 +553,32 @@ export function createInitialGameState(
       fruitMastery: {},
       fruitBuffMultiplier: 1,
       fruitBuffRemainingSec: 0,
-      sandBladeRemainingSec: 0,
+      sandBladeActive: false,
 
       sprinting: false,
 
       aimYaw: 0,
       pendingDash: null,
 
-      inventory: [],
+      // 사용자 요청 — 해군/해적 시작 섬 모두 기본으로 나무 검을 쥐고 시작합니다.
+      // 그래서 처음부터 사냥할 수 있고, 평타를 쳐도 더 이상 맨주먹을 휘두르지
+      // 않습니다(WeaponSystem.ts의 sword_wood — 위력은 맨손과 동일하지만
+      // 시각적으로는 진짜 검을 휘두릅니다). hotbar[0]에 미리 장착해두고
+      // activeHotbarSlot도 0으로 시작해서, 접속하자마자 바로 손에 들려 있습니다.
+      inventory: [
+        {
+          id: "sword_wood",
+          name: "나무 검",
+          description: "이제 막 항해를 시작한 초보자에게 쥐어주는 기본 목검. 위력은 맨손과 같지만, 진짜 검을 든 채로 싸울 수 있습니다.",
+          icon: "🪵",
+          quantity: 1,
+          usable: false,
+          equippable: true,
+        },
+      ],
       ownedBoats: ["dinghy"],
-      hotbar: [null, null, null],
-      activeHotbarSlot: null,
+      hotbar: ["sword_wood", null, null],
+      activeHotbarSlot: 0,
       fruitDrawn: false,
       weaponMastery: {},
       hakiLearned: false,

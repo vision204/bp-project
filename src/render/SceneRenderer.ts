@@ -400,6 +400,46 @@ function buildSlingshot(): THREE.Group {
 }
 
 /**
+ * 나무 검 — 시작할 때 기본으로 쥐고 있는 무기(사용자 요청: 더 이상 맨주먹으로
+ * 평타를 치지 않게). 요루와 같은 실루엣(넓적한 외날 + 십자 가드 + 손잡이)이지만
+ * 훨씬 작고 투박한 목재 재질로, "이제 막 시작한 초보자의 목검" 느낌을 냅니다.
+ */
+function buildWoodenSword(): THREE.Group {
+  const group = new THREE.Group();
+  const bladeMat = new THREE.MeshStandardMaterial({ color: 0xc9a066, roughness: 0.85 });
+  const edgeMat = new THREE.MeshStandardMaterial({ color: 0xe8c68a, roughness: 0.75 });
+  const gripMat = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.9 });
+
+  // 투박한 나무 날
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.34, 1.7, 0.1), bladeMat);
+  blade.position.y = 1.1;
+  blade.castShadow = true;
+  group.add(blade);
+
+  // 뭉툭한 칼끝 (진짜 검보다 훨씬 둔함)
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.19, 0.32, 4), bladeMat);
+  tip.position.y = 2.0;
+  tip.rotation.y = Math.PI / 4;
+  tip.castShadow = true;
+  group.add(tip);
+
+  // 결 무늬처럼 보이는 옅은 세로줄
+  const grain = new THREE.Mesh(new THREE.BoxGeometry(0.045, 1.6, 0.11), edgeMat);
+  grain.position.y = 1.1;
+  group.add(grain);
+
+  // 작은 십자 가드 + 손잡이
+  const guard = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.1, 0.16), gripMat);
+  guard.position.y = 0.28;
+  group.add(guard);
+  const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.08, 0.5, 8), gripMat);
+  grip.position.y = -0.02;
+  group.add(grip);
+
+  return group;
+}
+
+/**
  * Q 대쉬 이펙트 — 대쉬 방향으로 짧게 흩날리는 "바람" 줄무늬 몇 가닥.
  * 그룹째로 위치·회전을 잡아 씌운 뒤, 1초에 걸쳐 옅어지다 사라지도록
  * SceneRenderer.sync()에서 매 프레임 투명도/크기를 갱신합니다.
@@ -730,6 +770,13 @@ export class SceneRenderer {
     yoru.position.set(-0.7, 0.78, 0.05);
     yoru.rotation.set(0.22, 0, 0.5);
     this.registerWeaponVisual("sword_yoru", yoru);
+
+    // 나무 검 — 시작할 때 기본으로 손에 들려 있는 무기(같은 오른손 자리).
+    const woodenSword = buildWoodenSword();
+    woodenSword.scale.setScalar(0.6);
+    woodenSword.position.set(-0.7, 0.78, 0.05);
+    woodenSword.rotation.set(0.22, 0, 0.5);
+    this.registerWeaponVisual("sword_wood", woodenSword);
 
     // 삼도류: 이미 양손·입 위치가 모델 안에 잡혀 있어서 그대로 붙입니다.
     const santoryu = buildSantoryu();
@@ -1575,7 +1622,7 @@ export class SceneRenderer {
       } else if (skillId === "thunder_x") {
         aura.visible = state.player.lightningFormRemainingSec > 0;
       } else if (skillId === "sand_v") {
-        aura.visible = state.player.sandBladeRemainingSec > 0 && state.player.fruitDrawn;
+        aura.visible = state.player.sandBladeActive && state.player.fruitDrawn;
       }
     }
 

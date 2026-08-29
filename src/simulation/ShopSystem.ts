@@ -120,9 +120,17 @@ export const ITEM_CATALOG: ItemCatalogEntry[] = [
  */
 export const TRAINER_ONLY_WEAPONS = new Set(["sword_santoryu"]);
 
+/**
+ * 나무 검(sword_wood)은 시작할 때 공짜로 쥐어주는 기본 무기라 상점에서는 팔지
+ * 않습니다 — 상점 목록에서는 걸러내되, ALL_PURCHASABLE에는 남겨둬서(아래)
+ * 세이브 복원·개발자 모드가 여전히 그 id를 알아볼 수 있게 합니다.
+ */
+export const STARTER_ONLY_WEAPONS = new Set(["sword_wood"]);
+
 export const WEAPON_CATALOG: ItemCatalogEntry[] = Object.values(WEAPONS)
   .filter((w): w is NonNullable<typeof w> => !!w)
   .filter((w) => !TRAINER_ONLY_WEAPONS.has(w.id))
+  .filter((w) => !STARTER_ONLY_WEAPONS.has(w.id))
   .map((w) => ({
     id: w.id,
     name: w.name,

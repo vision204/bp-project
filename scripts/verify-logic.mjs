@@ -496,6 +496,53 @@ section("밸런스 — 원콤 방지: 섬에 막 도착했을 때는 첫 몬스�
   }
 }
 
+section("밸런스 — 몬스터 체력 1.3배 (공격력은 그대로, 보스 제외)");
+{
+  // 사용자 추가 요청: "몬스터들 hp만, 공격력은 바꾸지 말고 hp만 1.3배 늘려줘 —
+  // 모든 몬스터들." islands.ts의 MONSTER_HP_BUFF(1.3)를 그대로 재현해서 확인합니다.
+  const HP_STEP = 1.28;
+  const CONTACT_STEP = 1.22;
+  const GENERAL_CONTACT_BUFF = 1.25;
+  const MONSTER_HP_BUFF = 1.3;
+  const NO_ONESHOT_SAFETY_MARGIN = 1.3;
+
+  function estimatedMeleeHitAtLevel(level) {
+    const totalPoints = Math.max(0, level - 1) * 3;
+    const perStatPoints = Math.floor(totalPoints / 5);
+    const meleeDamage = 8 + perStatPoints * 2;
+    const swordMultiplier = 1 + perStatPoints * 0.06;
+    return meleeDamage * WEAPONS.sword_yoru.damageMultiplier * swordMultiplier;
+  }
+
+  for (const island of ISLANDS.filter((i) => i.kind === "wild")) {
+    const weakest = island.species[0]; // k=0, hpMultiplier 없음 → 1.3배 버프 대상
+    const curveHp = Math.round(island.enemy.hp * Math.pow(HP_STEP, 0));
+    const floorHp = Math.round(estimatedMeleeHitAtLevel(weakest.tierLevel) * NO_ONESHOT_SAFETY_MARGIN);
+    const expectedHp = Math.round(Math.max(curveHp, floorHp) * MONSTER_HP_BUFF);
+    assert(
+      weakest.hp === expectedHp,
+      `${island.name} "${weakest.name}" hp에 1.3배가 정확히 반영됨 (실제 ${weakest.hp.toLocaleString()}, 기대 ${expectedHp.toLocaleString()})`,
+    );
+
+    // 접촉 데미지(공격력)는 이번 요청과 무관 — 이전에 정해둔 GENERAL_CONTACT_BUFF만 그대로 유지
+    const expectedContact = Math.round(island.enemy.contactDamage * Math.pow(CONTACT_STEP, 0) * GENERAL_CONTACT_BUFF);
+    assert(
+      weakest.contactDamage === expectedContact,
+      `${island.name} "${weakest.name}" 접촉 데미지는 이번 요청으로 바뀌지 않음 (실제 ${weakest.contactDamage}, 기대 ${expectedContact})`,
+    );
+  }
+
+  // 보스(hpMultiplier로 정확히 튜닝된 "저택의 주인")는 1.3배 버프 대상에서 제외됨 —
+  // "만렙 요루 무장색 4대에 죽어야 함" 튜닝을 깨지 않기 위해서입니다.
+  const mansion = ISLANDS.find((i) => i.id === "mansion");
+  const boss = mansion.species.find((s) => s.name === "저택의 주인");
+  const expectedBossHp = Math.round(mansion.enemy.hp * Math.pow(HP_STEP, 3) * 13.5);
+  assert(
+    boss.hp === expectedBossHp,
+    `보스는 1.3배 버프 제외 — 기존 튜닝값 그대로 (실제 ${boss.hp.toLocaleString()}, 기대 ${expectedBossHp.toLocaleString()})`,
+  );
+}
+
 section("NPC 배치");
 const npcs = createNpcs();
 assert(
@@ -1181,6 +1228,12 @@ function freshPlayer() {
   // 아래 스킬 테스트 대부분은 "열매를 이미 뽑아 든 상태"를 전제로 하므로
   // 기본값을 true로 둡니다 (뽑지 않은 상태 자체를 검증하는 테스트는 따로 있음).
   pl.fruitDrawn = true;
+  // createInitialGameState()는 이제 기본 나무 검을 손에 쥐고 시작합니다(사용자
+  // 요청). 이 스킬 테스트 헬퍼는 각 테스트가 무기/열매 상태를 스스로 명확히
+  // 설정하는 것을 전제로 하므로, 여기서는 그 기본값을 지우고 완전히 빈 손에서
+  // 시작합니다 — 그래야 "맨손"을 전제로 한 기존 테스트들이 그대로 유효합니다.
+  pl.hotbar = [null, null, null];
+  pl.activeHotbarSlot = null;
   return pl;
 }
 function input(overrides = {}) {
@@ -1330,34 +1383,55 @@ section("originAtAim — 판정 원점이 발밑이 아니라 조준 지점으�
   }
 }
 
-section("밸런스 — 사막의 대검 (모래 열매 V, 소환 후 15초간 기본 공격 강화)");
+section("밸런스 — 사막의 대검 (모래 열매 V, 쿨다운 없이 토글로 장착/해제)");
 {
   const sandV = skillsForFruit("sand_storm")[3];
   assert(sandV.name === "사막의 대검", `사막의 대검으로 개명됨 (실제 "${sandV.name}")`);
   assert(sandV.meleeFormMultiplier < WEAPONS.sword_yoru.damageMultiplier, `요루(x${WEAPONS.sword_yoru.damageMultiplier})보다 살짝 낮은 배율 (x${sandV.meleeFormMultiplier})`);
-  assert(sandV.meleeFormDurationSec === 15, `지속시간 15초 (실제 ${sandV.meleeFormDurationSec})`);
+  // 사용자 추가 요청: 쿨다운 없이 그냥 V로 장착/해제하는 토글로 변경
+  assert(sandV.cooldownSec === 0, `쿨다운 없음 (실제 ${sandV.cooldownSec}초)`);
+  assert(sandV.toggle === true, "토글 스킬로 등록됨");
 
   const pSand = freshPlayer();
   pSand.equippedFruit = "sand_storm";
   pSand.fruitLevel = 100; // V 해금
   pSand.fruitDrawn = true;
   pSand.events = [];
-  assert(pSand.sandBladeRemainingSec === 0, "평소엔 대검 버프 없음");
+  assert(pSand.sandBladeActive === false, "평소엔 대검 미장착");
   const meleeBefore = totalMeleeDamage(pSand);
-  tapSkill(0.016, pSand, [], 3);
-  assert(pSand.sandBladeRemainingSec > 0, "사막의 대검 발동 시 15초 타이머 설정됨");
+
+  // 장착 — 그 자리의 몬스터도 함께 갈려나가고(광역 슬래시), 배율도 올라감
+  const eSlam = [makeEnemy("slam1", 10000, 10)];
+  tapSkill(0.016, pSand, eSlam, 3);
+  assert(pSand.sandBladeActive === true, "V로 사막의 대검 장착됨");
+  assert(eSlam[0].hp < 10000, "장착과 동시에 주변 몬스터도 슬래시 피해를 입음");
+  const manaAfterEquip = pSand.mana;
+  assert(manaAfterEquip < 999, `장착에는 마나가 듦 (${999 - manaAfterEquip})`);
   const meleeDuring = totalMeleeDamage(pSand);
-  assert(meleeDuring > meleeBefore, `대검 소환 중엔 기본 공격력 상승 (${meleeBefore.toFixed(1)} → ${meleeDuring.toFixed(1)})`);
+  assert(meleeDuring > meleeBefore, `대검 장착 중엔 기본 공격력 상승 (${meleeBefore.toFixed(1)} → ${meleeDuring.toFixed(1)})`);
+
+  // 시간이 아무리 지나도(쿨다운/지속시간 개념이 없으므로) 저절로 꺼지지 않음
+  stepCombat(999, input(), pSand, []);
+  assert(pSand.sandBladeActive === true, "시간이 지나도 저절로 풀리지 않음(다시 눌러야 함)");
 
   // 열매를 넣으면(fruitDrawn=false) 대검을 든 게 아니므로 평소 무기 공식으로 돌아감
   pSand.fruitDrawn = false;
   assert(Math.abs(totalMeleeDamage(pSand) - meleeBefore) < 0.001, "열매를 넣으면(fruitDrawn=false) 대검 배율 미적용");
   pSand.fruitDrawn = true;
 
-  // 시간이 지나면 감소하다 0에서 원래 공격력으로 돌아옴
-  stepCombat(15.1, input(), pSand, []);
-  assert(pSand.sandBladeRemainingSec === 0, "15초가 지나면 버프 종료");
-  assert(Math.abs(totalMeleeDamage(pSand) - meleeBefore) < 0.001, "버프 종료 후 공격력 원복");
+  // 다시 V — 쿨다운 없이 즉시 해제, 마나도 안 들고 재슬래시도 없음
+  const eNoSlam = [makeEnemy("slam2", 10000, 10)];
+  const manaBeforeUnequip = pSand.mana;
+  tapSkill(0.016, pSand, eNoSlam, 3);
+  assert(pSand.sandBladeActive === false, "다시 V를 누르면 쿨다운 없이 즉시 해제됨");
+  assert(pSand.mana === manaBeforeUnequip, "해제할 때는 마나가 들지 않음");
+  assert(eNoSlam[0].hp === 10000, "해제할 때는 슬래시 피해가 다시 나가지 않음");
+  assert(Math.abs(totalMeleeDamage(pSand) - meleeBefore) < 0.001, "해제 후 공격력 원복");
+
+  // 곧바로 다시 장착해도 쿨다운에 막히지 않음
+  pSand.mana = 999;
+  tapSkill(0.016, pSand, [], 3);
+  assert(pSand.sandBladeActive === true, "해제 직후에도 쿨다운 없이 바로 다시 장착 가능");
 }
 
 section("돌진 / 자기 강화");
@@ -1652,6 +1726,37 @@ const dDinghy = sailDistance("dinghy");
 const dGale = sailDistance("galewind");
 assert(dGale > dDinghy * 1.8, `3초 항해 거리: 돛단배 ${dDinghy.toFixed(1)}m → 질풍호 ${dGale.toFixed(1)}m`);
 
+section("기본 지급 나무 검 — 해군/해적 두 시작 섬 모두, 평타에 더 이상 맨주먹이 없음");
+{
+  for (const faction of ["pirate", "marine"]) {
+    const st = createInitialGameState(faction);
+    const pl = st.player;
+    assert(pl.inventory.some((i) => i.id === "sword_wood"), `${faction} — 인벤토리에 나무 검이 들어있음`);
+    assert(pl.hotbar[0] === "sword_wood", `${faction} — 단축바 0번 칸에 나무 검이 올라가 있음`);
+    assert(pl.activeHotbarSlot === 0, `${faction} — 접속하자마자 손에 들려 있음(뽑힌 상태)`);
+    assert(drawnWeapon(pl)?.id === "sword_wood", `${faction} — drawnWeapon도 나무 검을 가리킴`);
+
+    // 위력은 맨손과 완전히 같아서(밸런스 변화 없음) 기본 평타 데미지도 그대로입니다.
+    recomputeDerivedStats(pl);
+    pl.hp = pl.maxHp;
+    pl.meleeDamage = 100;
+    assert(totalMeleeDamage(pl) === 100, `${faction} — 나무 검을 든 채 근접 데미지는 맨손과 동일 (${totalMeleeDamage(pl)})`);
+    assert(totalMeleeCooldown(pl) === pl.meleeCooldownSec, `${faction} — 공격 간격도 맨손과 동일`);
+    assert(totalMeleeRange(pl) === pl.meleeRange, `${faction} — 사거리도 맨손과 동일`);
+
+    // 실제로 사냥이 됩니다 — 처음부터 근접 공격이 몬스터에게 들어감
+    pl.position = { x: 0, y: 1, z: 0 };
+    const enemy = makeEnemy("wood1", 10, 100);
+    pl.events = [];
+    stepCombat(0.016, input({ attackPressed: true }), pl, [enemy]);
+    assert(!enemy.alive, `${faction} — 접속 직후 바로 근접 공격으로 몬스터를 잡을 수 있음`);
+  }
+
+  // 나무 검은 시작할 때 공짜로 쥐어주는 것뿐, 화면 상점에서는 팔지 않음
+  assert(!WEAPON_CATALOG.some((w) => w.id === "sword_wood"), "나무 검은 상점 목록에 나오지 않음(공짜 시작 장비)");
+  assert(WEAPONS.sword_wood?.price === 0, "나무 검 가격은 0(구매 불가 취지)");
+}
+
 section("흑도(요루) — 인벤토리 장착 → 숫자키로 뽑기");
 assert(WEAPON_CATALOG.length >= 1, `상점 무기 코너 ${WEAPON_CATALOG.length}종`);
 const yoru = WEAPONS.sword_yoru;
@@ -1661,6 +1766,12 @@ assert(yoru.price >= 500, `비싼 장비 (🪙${yoru.price})`);
 const wp = createInitialGameState().player;
 recomputeDerivedStats(wp);
 wp.meleeDamage = 100;
+// 이 테스트는 "완전한 맨손에서 흑도를 사서 장착하는" 흐름을 검증하는 게
+// 목적이므로, 접속 시 기본으로 쥐고 시작하는 나무 검(사용자 요청)은 여기서
+// 지우고 시작합니다 — 나무 검 자체의 기본 지급 동작은 별도 섹션에서 검증합니다.
+wp.hotbar = [null, null, null];
+wp.activeHotbarSlot = null;
+wp.inventory = [];
 wp.meleeRange = 2.2;
 
 // 사기 전엔 못 씀
@@ -1728,6 +1839,11 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   const before = createInitialGameState("marine");
   before.quests = createQuests();
   const bp = before.player;
+  // 기본 나무 검(사용자 요청)이 이 흐름에 끼어들지 않도록 지우고 시작 —
+  // 이 섹션은 sword_yoru를 사서 단축바 0번 칸에 장착하는 걸 검증합니다.
+  bp.hotbar = [null, null, null];
+  bp.activeHotbarSlot = null;
+  bp.inventory = [];
   bp.level = 137;
   bp.expToNextLevel = expRequiredForLevel(137);
   bp.exp = 250;
@@ -1997,6 +2113,11 @@ section("삼도류 — 요루보다 약하지만 훨씬 빠름");
 
   // 실제로 쿨다운에 반영되는지
   const p = createInitialGameState("pirate").player;
+  // 기본 나무 검(사용자 요청)을 지워서 진짜 맨손 기준으로 비교합니다 —
+  // 위력·공격 간격이 둘 다 맨손과 완전히 같은 무기라 어차피 수치는
+  // 같지만, 아래에서 단축바 0번 칸에 삼도류를 올릴 자리를 비워둬야 합니다.
+  p.hotbar = [null, null, null];
+  p.activeHotbarSlot = null;
   p.money = 99999;
   p.meleeCooldownSec = 0.5;
   assert(totalMeleeCooldown(p) === 0.5, "맨손 공격 간격은 그대로");
@@ -2026,6 +2147,9 @@ section("엔마 — 화산 섬에서만 사는 얇고 긴 붉은 검");
   assert(WEAPON_CATALOG.some((w) => w.id === "sword_enma"), "화면 상점 무기 목록에 나옴 (숨기지 않고 안내만)");
 
   const p = createInitialGameState("pirate").player;
+  // 기본 나무 검(사용자 요청)을 지워서 단축바 0번 칸을 비워둡니다.
+  p.hotbar = [null, null, null];
+  p.activeHotbarSlot = null;
   p.money = 99999;
   const boughtElsewhere = buyItem(p, "sword_enma", p.events, "jungle");
   assert(boughtElsewhere === false, "정글 섬 등 다른 섬에서는 구매 실패");
@@ -2165,6 +2289,10 @@ section("단축바 마우스 클릭 = 숫자키 — activateHotbarSlot()");
   // 완전히 같은 결과를 내는지, 공유 함수 activateHotbarSlot()으로 직접 확인합니다.
   const p = createInitialGameState("pirate").player;
   p.hotbar = ["sword_yoru", null, null];
+  // 기본 나무 검(사용자 요청)이 자동으로 뽑혀 있는 채로 시작하면(activeHotbarSlot
+  // 기본값 0) 첫 activateHotbarSlot(p,0) 호출이 "뽑기"가 아니라 "집어넣기"가
+  // 됩니다 — 이 테스트는 "뽑기"부터 시작해야 하므로 명시적으로 비웁니다.
+  p.activeHotbarSlot = null;
   p.fruitDrawn = false;
 
   activateHotbarSlot(p, 0);
@@ -2196,6 +2324,11 @@ section("세이브 — 점프 단수와 삼도류도 저장/복원");
   const before = createInitialGameState("pirate");
   before.quests = createQuests();
   const bp = before.player;
+  // 기본 나무 검(사용자 요청)을 지워서 단축바 0번 칸을 비워둡니다 —
+  // 아래 hotbar[0] === "sword_santoryu" 확인이 그대로 유효하려면 필요합니다.
+  bp.hotbar = [null, null, null];
+  bp.activeHotbarSlot = null;
+  bp.inventory = [];
   bp.money = 99999;
   bp.level = 400;
   bp.maxJumps = 4;
