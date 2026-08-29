@@ -277,7 +277,9 @@ async function main() {
   const panels = new PanelManager(appEl, {
     onAllocateStat: (stat) => simulation.allocateStat(stat),
     onBuyFruit: (fruitId) => simulation.buyFruit(fruitId),
-    onEquipFruit: (fruitId) => simulation.equipFruit(fruitId),
+    onHoldFruit: (fruitId) => simulation.holdFruit(fruitId),
+    onCancelHeldFruit: () => simulation.cancelHeldFruit(),
+    onConfirmHeldFruit: () => simulation.confirmHeldFruit(),
     onBuyItem: (itemId) => simulation.buyItem(itemId),
     onUseItem: (itemId) => simulation.useItem(itemId),
     onLearnHaki: () => simulation.learnHaki(),
@@ -418,11 +420,19 @@ async function main() {
     // 패널이 열려 있는 동안은 이동·전투·상호작용 입력을 무시해서
     // 마우스로 버튼을 누르는 도중 캐릭터가 움직이거나 공격이 나가지 않게 함.
     // 거래창·거래 메뉴가 열려 있을 때도 마찬가지입니다.
-    const gameplaySnapshot = (panels.isBlocking() || tradeUI.isBlocking())
+    let gameplaySnapshot = (panels.isBlocking() || tradeUI.isBlocking())
       ? { ...snapshot, moveForward: false, moveBackward: false, moveLeft: false, moveRight: false,
           jumpPressed: false, jumpHeld: false, attackPressed: false, abilityPressed: false,
           interactPressed: false, mouseDeltaX: 0, mouseDeltaY: 0, teleportPressed: false }
       : snapshot;
+
+    // 인벤토리에서 "손에 들기"로 집어든, 아직 안 먹은 열매가 있는 동안 좌클릭하면
+    // 평소처럼 공격이 나가는 대신 "정말 교체하시겠습니까?" 확인창이 뜹니다.
+    // 이 프레임의 attackPressed는 확인창을 여는 데만 쓰고, 공격으로는 넘기지 않습니다.
+    if (gameplaySnapshot.attackPressed && simulation.state.player.heldFruitCandidate) {
+      panels.promptFruitConfirm(simulation.state);
+      gameplaySnapshot = { ...gameplaySnapshot, attackPressed: false };
+    }
 
     simulation.step(dt, gameplaySnapshot);
     world.step();

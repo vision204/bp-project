@@ -327,8 +327,11 @@ export function stepCombat(
   // 아무것도 뽑지 않았으면(맨손) 숫자키를 눌러 열매(4번)나 무기(1~3번)를 먼저
   // 뽑아야 하고, 그 전까지는 스킬 입력을 아예 처리하지 않습니다 —
   // skill_locked 안내조차 뜨지 않습니다(HUD도 스킬 UI를 통째로 숨깁니다).
+  // heldFruitCandidate(인벤토리에서 손에 들었지만 아직 안 먹은 열매)가 있는
+  // 동안은 fruitDrawn이 이미 false로 강제되지만, 만약을 대비해 여기서도
+  // 한 번 더 막습니다 — "확정하기 전엔 스킬을 절대 못 쓴다"는 규칙입니다.
   const weapon = drawnWeapon(player);
-  if (player.fruitDrawn) {
+  if (player.fruitDrawn && !player.heldFruitCandidate) {
     const skills = skillsForFruit(player.equippedFruit);
     for (let slot = 0; slot < 4; slot++) {
       const skill = skills[slot];

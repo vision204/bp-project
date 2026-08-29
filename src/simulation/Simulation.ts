@@ -18,7 +18,7 @@ import { stepMana } from "./ManaSystem";
 import { stepHp } from "./HpSystem";
 import { allocateStatPoint, recomputeDerivedStats } from "./StatSystem";
 import { buyFruit, buyItem, payCrewCreationFee } from "./ShopSystem";
-import { equipFruitFromInventory } from "./FruitInventorySystem";
+import { cancelHeldFruitCandidate, confirmHeldFruitEquip, equipFruitFromInventory, holdFruitCandidate } from "./FruitInventorySystem";
 import { useItem } from "./InventorySystem";
 import { stepBuffs } from "./BuffSystem";
 import { isInWater, stepWater } from "./WaterSystem";
@@ -43,6 +43,13 @@ import type { Faction } from "../world/islands";
  * 집어넣습니다.
  */
 export function activateHotbarSlot(player: PlayerState, slot: number) {
+  // 손에 아직 안 먹은 열매(heldFruitCandidate)를 들고 있는 동안은 무기도
+  // "먹은 열매"도 뽑을 수 없습니다 — 손이 이미 그 후보 열매로 차 있습니다.
+  // 4번 키만 예외로 "도로 인벤토리에 넣기"로 씁니다 (좌클릭 확정 말고 취소하는 길).
+  if (player.heldFruitCandidate !== null) {
+    if (slot === 3) cancelHeldFruitCandidate(player);
+    return;
+  }
   if (slot === 3) {
     const result = toggleFruitDrawn(player);
     const fruitName = FRUIT_CATALOG.find((f) => f.id === player.equippedFruit)?.name ?? "열매";
@@ -221,11 +228,30 @@ export class Simulation {
   }
 
   /**
-   * 인벤토리의 열매를 장착합니다. **UI가 이미 "정말 교체하시겠습니까?" 확인을
-   * 끝냈다고 가정하고 즉시 실행합니다** — 확인은 PanelManager가 담당합니다.
+   * 인벤토리의 열매를 확인 없이 즉시 장착합니다 (지금은 UI에서 쓰지 않지만,
+   * 순수 로직 차원의 저수준 API로 남겨둡니다 — 테스트 등에서 유용합니다).
    */
   equipFruit(fruitId: FruitAbilityId) {
     return equipFruitFromInventory(this.state.player, fruitId, this.state.player.events);
+  }
+
+  /** 인벤토리의 열매를 오른손에 "들기"만 합니다 — 아직 먹지는 않습니다(확정은 좌클릭 확인 후). */
+  holdFruit(fruitId: FruitAbilityId) {
+    return holdFruitCandidate(this.state.player, fruitId);
+  }
+
+  /** 손에 든(아직 안 먹은) 열매를 도로 인벤토리에 넣습니다. */
+  cancelHeldFruit() {
+    return cancelHeldFruitCandidate(this.state.player);
+  }
+
+  /**
+   * 손에 든 열매를 실제로 장착(먹음)합니다. **UI가 "정말 교체하시겠습니까?"
+   * 확인을 이미 끝냈다고 가정하고 즉시 실행합니다** — 확인 자체는
+   * PanelManager가 좌클릭을 가로채서 담당합니다.
+   */
+  confirmHeldFruit() {
+    return confirmHeldFruitEquip(this.state.player, this.state.player.events);
   }
 
   buyItem(itemId: ItemId) {

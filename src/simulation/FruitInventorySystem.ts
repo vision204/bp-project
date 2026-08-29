@@ -1,18 +1,25 @@
 // ---------------------------------------------------------------------------
 // 열매 인벤토리 — 상점/열매 상인/뽑기로 얻은 열매를 곧바로 장착하지 않고
-// 일단 인벤토리에 보관했다가, 플레이어가 직접 "장착"을 눌러야 실제로
-// equippedFruit이 바뀌도록 하는 시스템입니다.
+// 일단 인벤토리에 보관했다가, 실제로 "먹어서"(확정) equippedFruit이 되기까지
+// 두 단계를 거치도록 하는 시스템입니다.
 //
 // 규칙 (사용자 요청 그대로):
 //   · 열매를 얻으면 fruitInventory에 쌓입니다 (자동 장착 X).
-//   · 인벤토리의 열매를 장착하면 오른손에 그 열매를 들게 됩니다(렌더러가 처리).
-//   · 이미 다른 열매를 장착 중일 때 새 열매를 장착하려 하면, 기존 열매는
-//     "삭제"됩니다(인벤토리로 돌아가지 않음) — 다만 그 열매의 숙련도
-//     (fruitMastery)는 그대로 남아서, 나중에 같은 열매를 다시 얻어 장착하면
-//     이전 레벨부터 이어집니다. 이 확인은 UI가 먼저 사용자에게 묻고("정말
-//     열매를 교체 하시겠습니까? 기존의 열매는 삭제되지만 숙련도 레벨은
-//     저장됩니다"), "예"를 눌렀을 때만 equipFruitFromInventory를 호출해야
-//     합니다 — 이 함수 자체는 확인 없이 즉시 교체를 실행합니다.
+//   · 인벤토리에서 "손에 들기"를 누르면 그 열매가 heldFruitCandidate가 되어
+//     오른손에 들립니다(렌더러가 처리) — 이 시점엔 아직 능력이 바뀌지
+//     않습니다. 손에 들고 있는 동안은 (기존에 먹은 열매 것이든 뭐든)
+//     Z/X/C/V 스킬이 전혀 발동하지 않습니다.
+//   · 그 상태에서 좌클릭하면(main.ts가 가로챕니다) "정말 열매를 교체
+//     하시겠습니까? 기존의 열매는 삭제되지만 숙련도 레벨은 저장됩니다"
+//     확인창이 뜹니다. 예를 누르면 confirmHeldFruitEquip이 실행되어 —
+//       - 기존에 먹은 열매는 "삭제"됩니다(인벤토리로 돌아가지 않음). 다만
+//         그 열매의 숙련도(fruitMastery)는 그대로 남아서, 나중에 같은
+//         열매를 다시 얻어 먹으면 이전 레벨부터 이어집니다.
+//       - 손에 든 열매는 손에서 사라지고(먹음) equippedFruit이 되어
+//         "항상 적용된" 상태로 바뀝니다.
+//     아니오를 누르거나 그냥 무시하면 계속 손에 든 채로 남고, 스킬은
+//     여전히 안 써집니다 — 다른 열매로 바꿔 들거나(다시 "손에 들기") 4번
+//     키로 도로 인벤토리에 넣을 수 있습니다(cancelHeldFruitCandidate).
 // ---------------------------------------------------------------------------
 
 import type { FruitAbilityId, GameEvent, PlayerState } from "../core/GameState";
@@ -55,9 +62,13 @@ function loadFruitMasteryCache(player: PlayerState, fruitId: FruitAbilityId) {
   }
 }
 
-/** 이미 장착 중이거나 인벤토리에 갖고 있는 열매인지 (중복 구매 방지용) */
+/** 이미 장착 중이거나, 인벤토리 또는 손(미확정)에 갖고 있는 열매인지 (중복 구매 방지용) */
 export function ownsFruit(player: PlayerState, fruitId: FruitAbilityId): boolean {
-  return player.equippedFruit === fruitId || player.fruitInventory.includes(fruitId);
+  return (
+    player.equippedFruit === fruitId ||
+    player.heldFruitCandidate === fruitId ||
+    player.fruitInventory.includes(fruitId)
+  );
 }
 
 /** 상점/열매 상인/뽑기에서 얻은 열매를 인벤토리에 넣습니다. 자동 장착하지 않습니다. */
@@ -86,6 +97,64 @@ export function equipFruitFromInventory(
   syncFruitMasteryCache(player); // 옛 열매 숙련도 저장 (열매 아이템 자체는 버려짐)
 
   player.fruitInventory.splice(idx, 1);
+  player.equippedFruit = fruitId;
+  loadFruitMasteryCache(player, fruitId);
+  player.skillCooldowns = [0, 0, 0, 0];
+  player.chargingSkillSlot = null;
+
+  events.push({
+    type: "fruit_equipped",
+    fruitName: fruitDisplayName(fruitId),
+    replacedFruitName: fruitDisplayName(replacedFruitId),
+  });
+  return true;
+}
+
+/**
+ * 인벤토리의 열매를 오른손에 "들기"만 합니다 — 아직 먹는(확정) 게 아니라서
+ * equippedFruit은 그대로고, 스킬도 안 써집니다. 손에 이미 다른(확정 안 된)
+ * 열매를 들고 있었다면 그건 인벤토리로 돌아가고 이번 열매로 바뀝니다.
+ */
+export function holdFruitCandidate(player: PlayerState, fruitId: FruitAbilityId): boolean {
+  const idx = player.fruitInventory.indexOf(fruitId);
+  if (idx === -1) return false;
+  if (player.heldFruitCandidate === fruitId) return true; // 이미 이 열매를 들고 있음
+
+  if (player.heldFruitCandidate) {
+    player.fruitInventory.push(player.heldFruitCandidate); // 들고 있던 걸 다시 인벤토리로
+  }
+  player.fruitInventory.splice(idx, 1);
+  player.heldFruitCandidate = fruitId;
+
+  // 손이 이 열매로 찼으니, 무기든 먹은 열매든 뽑혀 있던 건 집어넣습니다
+  // (무기/열매/후보 열매는 항상 셋 중 하나만 손에 들 수 있습니다).
+  player.fruitDrawn = false;
+  player.activeHotbarSlot = null;
+  player.chargingSkillSlot = null;
+  return true;
+}
+
+/** 손에 든(아직 안 먹은) 열매를 도로 인벤토리에 넣습니다. */
+export function cancelHeldFruitCandidate(player: PlayerState): boolean {
+  if (!player.heldFruitCandidate) return false;
+  player.fruitInventory.push(player.heldFruitCandidate);
+  player.heldFruitCandidate = null;
+  return true;
+}
+
+/**
+ * 손에 든 열매를 실제로 "먹습니다" — 확인 다이얼로그에서 예를 눌렀을 때만
+ * 호출해야 합니다. 이미 먹은 열매가 있었다면 그건 삭제되고(숙련도만 저장),
+ * 손에 든 열매가 새 equippedFruit이 되며 손에서 사라집니다.
+ */
+export function confirmHeldFruitEquip(player: PlayerState, events: GameEvent[]): boolean {
+  const fruitId = player.heldFruitCandidate;
+  if (!fruitId) return false;
+
+  const replacedFruitId = player.equippedFruit;
+  syncFruitMasteryCache(player); // 옛 열매 숙련도 저장 (열매 아이템 자체는 버려짐)
+
+  player.heldFruitCandidate = null;
   player.equippedFruit = fruitId;
   loadFruitMasteryCache(player, fruitId);
   player.skillCooldowns = [0, 0, 0, 0];

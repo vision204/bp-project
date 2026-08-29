@@ -125,7 +125,12 @@ export function toSaveData(state: GameState, savedAtMs: number): SaveData {
     equippedFruit: p.equippedFruit,
     fruitLevel: p.fruitLevel,
     fruitExp: p.fruitExp,
-    fruitInventory: [...p.fruitInventory],
+    // heldFruitCandidate(손에 들었지만 아직 안 먹은 열매)는 저장하지 않는
+    // 순간의 상태지만, 여기서 안 챙기면 접속을 끊는 순간 그 열매가 통째로
+    // 증발합니다. 그래서 "손에 든 채로 저장"은 없고, 대신 인벤토리로
+    // 되돌아간 것처럼 저장합니다 — 다시 접속하면 손에서는 놓여 있지만
+    // 열매 자체는 인벤토리에 그대로 있습니다.
+    fruitInventory: p.heldFruitCandidate ? [...p.fruitInventory, p.heldFruitCandidate] : [...p.fruitInventory],
     fruitMastery: (Object.entries(p.fruitMastery) as [FruitAbilityId, { level: number; exp: number }][])
       .map(([id, m]) => ({ id, level: m.level, exp: m.exp })),
     weaponMastery: (Object.entries(p.weaponMastery) as [ItemId, { level: number; exp: number }][])
@@ -276,6 +281,7 @@ export function applySaveData(state: GameState, raw: unknown): boolean {
   }
   p.activeHotbarSlot = null; // 접속하면 항상 맨손으로 시작
   p.fruitDrawn = false; // 열매도 마찬가지 — 접속 직후에는 뽑혀 있지 않음
+  p.heldFruitCandidate = null; // 손에 든(미확정) 열매는 저장 안 됨 — 접속 직후엔 항상 아무것도 안 든 상태
 
   p.ownedBoats = ["dinghy"];
   if (Array.isArray(data.ownedBoats)) {

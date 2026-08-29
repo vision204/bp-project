@@ -9,7 +9,8 @@ const { DUMMY_EXP_REWARD, createInitialEnemies } = await import("../src/simulati
 const { createQuests, createNpcs, canAcceptQuest, stepInteraction: stepInteractionQ } = await import("../src/simulation/QuestSystem.ts");
 const { FRUIT_CATALOG, ITEM_CATALOG, WEAPON_CATALOG, buyFruit, buyItem,
         CASH_PAYMENT_ENABLED, CASH_PAYMENT_NOTICE } = await import("../src/simulation/ShopSystem.ts");
-const { addFruitToInventory, ownsFruit, equipFruitFromInventory, syncFruitMasteryCache } =
+const { addFruitToInventory, ownsFruit, equipFruitFromInventory, syncFruitMasteryCache,
+        holdFruitCandidate, cancelHeldFruitCandidate, confirmHeldFruitEquip } =
   await import("../src/simulation/FruitInventorySystem.ts");
 const { WEAPONS, weaponFor, drawnWeapon, toggleHotbar, toggleDrawn, toggleFruitDrawn, weaponDamageMultiplier,
         weaponAttackSpeedMultiplier, weaponDps, isWeapon } = await import("../src/simulation/WeaponSystem.ts");
@@ -533,22 +534,46 @@ assert(player.equippedFruit === "magma_fist", "구매만으로는 장착이 바�
 assert(player.fruitInventory.includes(cheapest.id), "산 열매는 인벤토리에 들어감");
 assert(buyFruit(player, cheapest.id, player.events) === false, "이미 보유한 열매는 재구매 불가");
 
-assert(equipFruitFromInventory(player, cheapest.id, player.events) === true, "인벤토리 열매를 장착");
-assert(player.equippedFruit === cheapest.id, "장착한 열매로 실제 교체됨");
-assert(!player.fruitInventory.includes(cheapest.id), "장착한 열매는 인벤토리에서 빠짐");
+// --- 인벤토리 → 손에 들기(holdFruitCandidate) → 좌클릭 확인(confirmHeldFruitEquip) 두 단계 ---
+assert(holdFruitCandidate(player, cheapest.id) === true, "인벤토리 열매를 손에 듦");
+assert(player.heldFruitCandidate === cheapest.id, "heldFruitCandidate에 반영됨");
+assert(player.equippedFruit === "magma_fist", "손에 들기만 해서는 장착이 안 바뀜(아직 안 먹음)");
+assert(!player.fruitInventory.includes(cheapest.id), "손에 든 열매는 인벤토리에서 빠짐");
+assert(ownsFruit(player, cheapest.id) === true, "손에 든(미확정) 열매도 보유 중으로 취급");
+
+assert(cancelHeldFruitCandidate(player) === true, "도로 인벤토리에 넣기(취소)");
+assert(player.heldFruitCandidate === null, "취소하면 heldFruitCandidate가 비워짐");
+assert(player.fruitInventory.includes(cheapest.id), "취소한 열매는 다시 인벤토리로 돌아옴");
+
+assert(holdFruitCandidate(player, cheapest.id) === true, "다시 손에 듦");
+assert(confirmHeldFruitEquip(player, player.events) === true, "좌클릭 확인 후 실제로 먹음(확정)");
+assert(player.equippedFruit === cheapest.id, "확정하면 장착한 열매로 실제 교체됨");
+assert(player.heldFruitCandidate === null, "확정하면 손에서 사라짐(더 이상 heldFruitCandidate 아님)");
+assert(!player.fruitInventory.includes(cheapest.id), "확정한 열매는 인벤토리에도 없음(먹었으니까)");
 assert(skillsForFruit(player.equippedFruit).length === 4, "열매를 바꿔도 스킬은 항상 4개");
 
 const second = FRUIT_CATALOG.find((f) => f.id !== cheapest.id);
 buyFruit(player, second.id, player.events);
 assert(player.equippedFruit === cheapest.id, "새 열매를 사도 자동 장착되지 않음(여전히 이전 열매)");
 const beforeSwapFruitExp = player.fruitExp;
-assert(equipFruitFromInventory(player, second.id, player.events) === true, "새 열매로 교체 장착");
-assert(player.equippedFruit === second.id, "가장 최근에 장착한 열매로 교체");
+assert(holdFruitCandidate(player, second.id) === true, "새 열매를 손에 듦");
+assert(player.equippedFruit === cheapest.id, "손에 들기만 해서는 아직 안 바뀜");
+assert(confirmHeldFruitEquip(player, player.events) === true, "확인 후 새 열매로 교체 장착");
+assert(player.equippedFruit === second.id, "가장 최근에 확정한 열매로 교체");
 assert(
   player.fruitMastery[cheapest.id] && player.fruitMastery[cheapest.id].exp === beforeSwapFruitExp,
   "교체된 옛 열매의 숙련도(exp)가 fruitMastery에 저장됨",
 );
 assert(player.fruitLevel === 1 && player.fruitExp === 0, "처음 장착하는 열매는 1레벨부터 시작");
+
+// equipFruitFromInventory는 저수준 API로 계속 남아있음(즉시 확정) — 별도로도 계속 동작해야 함
+{
+  const p2 = createInitialGameState("pirate").player;
+  const f2 = FRUIT_CATALOG[0];
+  addFruitToInventory(p2, f2.id);
+  assert(equipFruitFromInventory(p2, f2.id, p2.events) === true, "equipFruitFromInventory(저수준 API)는 여전히 즉시 장착");
+  assert(p2.equippedFruit === f2.id, "즉시 장착됨");
+}
 
 section("열매 판매 — 중앙섬 상인은 코인, 화면 상점은 현금(표시만)");
 assert(
@@ -1340,6 +1365,20 @@ section("열매/무기를 뽑아야만 스킬(Z/X/C/V) 사용 가능");
   toggleDrawn(pEx, 0); // 다시 무기를 뽑으면
   assert(pEx.activeHotbarSlot === 0, "무기를 다시 뽑음");
   assert(pEx.fruitDrawn === false, "열매는 자동으로 집어넣어짐(상호 배타)");
+
+  // (5) 손에 든(미확정) 열매가 있으면 — fruitDrawn을 억지로 true로 만들어도
+  //     CombatSystem이 이중으로 막아서 스킬이 절대 발동하지 않아야 함
+  const pHeld = freshPlayer();
+  addFruitToInventory(pHeld, "ice_lance");
+  assert(holdFruitCandidate(pHeld, "ice_lance") === true, "열매를 손에 듦(미확정)");
+  assert(pHeld.fruitDrawn === false, "손에 들면 기존에 뽑혀있던 것도 집어넣어짐");
+  pHeld.fruitDrawn = true; // 방어 로직이 진짜로 막는지 보려고 일부러 조작
+  pHeld.fruitLevel = 100;
+  pHeld.events = [];
+  const eHeld = [makeEnemy("held1", 10000, 10)];
+  stepCombat(0.016, input({ skillPressed: [true, false, false, false] }), pHeld, eHeld);
+  assert(eHeld[0].hp === 10000, "손에 든(미확정) 열매 상태에서는 fruitDrawn을 조작해도 스킬 피해가 없음");
+  assert(pHeld.mana === 999, "마나도 소모되지 않음");
 }
 
 section("무기 스킬(ZXCV) — 무기를 뽑았을 때만, 숙련도로 해금");
@@ -1662,6 +1701,20 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   assert(ap.weaponMastery["sword_yoru"]?.exp === 5, "무기 숙련 경험치도 복원");
   assert(after.quests.find((q) => q.islandId === "desert").completions === 9, "퀘스트 완료 횟수 복원");
 
+  // 손에 든(미확정) 열매가 있는 채로 저장하면 — 증발하지 않고 인벤토리로 되돌아간 것처럼 저장됨
+  bp.heldFruitCandidate = "rubber_barrage";
+  const savedWhileHeld = toSaveData(before, 1_700_000_100_000);
+  assert(
+    savedWhileHeld.fruitInventory.includes("rubber_barrage"),
+    "손에 든 채로 저장해도 그 열매가 세이브의 fruitInventory에 포함됨(증발 방지)",
+  );
+  const afterHeld = createInitialGameState("pirate");
+  afterHeld.quests = createQuests();
+  assert(applySaveData(afterHeld, JSON.parse(JSON.stringify(savedWhileHeld))) === true, "손에 든 채로 저장한 것도 복원 성공");
+  assert(afterHeld.player.heldFruitCandidate === null, "접속 직후에는 손에 든 열매가 항상 없음(미확정 상태는 저장 안 됨)");
+  assert(afterHeld.player.fruitInventory.includes("rubber_barrage"), "대신 그 열매는 인벤토리에 그대로 들어있음(손에서만 놓인 상태)");
+  bp.heldFruitCandidate = null; // 이후 섹션에 영향 없도록 원복
+
   // 파생값은 저장하지 않고 다시 계산합니다
   assert(ap.maxHp === 100 + 41 * 12, `최대 체력을 스텟에서 다시 계산 (${ap.maxHp})`);
   assert(ap.maxMana === 50 + 30 * MANA_PER_POINT, `최대 마나를 공격 스텟에서 다시 계산 (${ap.maxMana})`);
@@ -1673,6 +1726,7 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   assert(ap.expToNextLevel === expRequiredForLevel(137), "요구 경험치도 다시 계산");
   assert(ap.activeHotbarSlot === null, "무기는 집어넣은 상태로 시작");
   assert(ap.fruitDrawn === false, "열매도 집어넣은 상태로 시작");
+  assert(ap.heldFruitCandidate === null, "손에 든(미확정) 열매도 없이 시작");
   assert(ap.hakiActive === false, "무장색은 꺼진 상태로 시작");
 }
 

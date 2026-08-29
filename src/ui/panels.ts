@@ -52,8 +52,12 @@ const STAT_LABELS: Record<StatKey, string> = {
 export interface PanelCallbacks {
   onAllocateStat: (stat: StatKey) => void;
   onBuyFruit: (fruitId: FruitAbilityId) => void;
-  /** 인벤토리의 열매를 실제로 장착 — 이미 교체 확인을 마친 뒤에만 불립니다 */
-  onEquipFruit: (fruitId: FruitAbilityId) => void;
+  /** 인벤토리의 열매를 오른손에 들기만 함 — 아직 먹지는 않음(확정은 좌클릭 확인 후) */
+  onHoldFruit: (fruitId: FruitAbilityId) => void;
+  /** 손에 든(미확정) 열매를 도로 인벤토리에 넣음 */
+  onCancelHeldFruit: () => void;
+  /** 손에 든 열매를 실제로 장착(먹음) — 좌클릭 확인창에서 "예"를 눌렀을 때만 불립니다 */
+  onConfirmHeldFruit: () => void;
   onBuyItem: (itemId: ItemId) => void;
   onUseItem: (itemId: ItemId) => void;
   onLearnHaki: () => void;
@@ -116,12 +120,6 @@ export class PanelManager {
   private questIslandId: string | null = null;
   /** 해적 사단 패널이 접속/사단 정보를 읽어오는 곳 — main.ts가 생성 직후 setMultiplayer로 넘겨줍니다 */
   private multiplayer: MultiplayerClient | null = null;
-  /**
-   * 열매 교체 확인창이 떠 있는 동안, "예"를 누르면 실제로 장착할 열매 id.
-   * 이 다이얼로그는 다른 패널(panels 레코드)과 달리 인벤토리 패널 위에
-   * 겹쳐서 뜨는 독립적인 오버레이라서 open/applyVisibility와 별도로 관리합니다.
-   */
-  private pendingFruitEquip: FruitAbilityId | null = null;
 
   constructor(
     container: HTMLElement,
@@ -293,9 +291,10 @@ export class PanelManager {
     });
     this.root.querySelector<HTMLButtonElement>("#haki-no")!.addEventListener("click", () => this.closeAll());
 
-    // 열매 교체 확인창의 예/아니오 — 인벤토리 패널 위에 겹쳐서 뜨는 독립 오버레이
+    // 열매 교체 확인창의 예/아니오 — 인벤토리 패널 위가 아니라, 손에 든(미확정)
+    // 열매를 들고 게임 화면에서 좌클릭했을 때 뜨는 독립 오버레이입니다.
     this.root.querySelector<HTMLButtonElement>("#fruit-swap-yes")!.addEventListener("click", () => {
-      if (this.pendingFruitEquip) this.callbacks.onEquipFruit(this.pendingFruitEquip);
+      this.callbacks.onConfirmHeldFruit();
       this.hideFruitSwapConfirm();
     });
     this.root.querySelector<HTMLButtonElement>("#fruit-swap-no")!.addEventListener("click", () => {
@@ -340,37 +339,29 @@ export class PanelManager {
   }
 
   /**
-   * "정말 열매를 교체 하시겠습니까?" 확인창을 띄웁니다. 현재 열려 있는 패널
-   * (보통 인벤토리)은 그대로 뒤에 남겨두고 그 위에 겹쳐서 보여줍니다.
+   * 손에 든(미확정) 열매가 있으면 "정말 열매를 교체 하시겠습니까?" 확인창을
+   * 띄웁니다. main.ts가 게임 화면에서의 좌클릭을 가로챌 때 호출합니다 —
+   * 손에 든 열매가 없으면 아무 일도 안 합니다. 지금 열려 있는 패널이 있다면
+   * (보통 없음 — 좌클릭은 패널이 닫혀 있을 때만 게임 화면으로 전달되므로)
+   * 그 위에 겹쳐서 보여줍니다.
    */
-  private showFruitSwapConfirm(newFruitId: FruitAbilityId, newFruitName: string, oldFruitName: string) {
-    this.pendingFruitEquip = newFruitId;
+  promptFruitConfirm(state: GameState) {
+    const p = state.player;
+    if (!p.heldFruitCandidate) return;
     this.root.querySelector<HTMLParagraphElement>("#fruit-swap-line")!.innerHTML =
-      `현재 <b>${oldFruitName}</b>을(를) 장착 중입니다.<br/>대신 <b>${newFruitName}</b>을(를) 장착할까요?`;
+      `현재 <b>${fruitDisplayName(p.equippedFruit)}</b>을(를) 장착 중입니다.<br/>` +
+      `대신 <b>${fruitDisplayName(p.heldFruitCandidate)}</b>을(를) 장착할까요?`;
     this.root.querySelector<HTMLDivElement>("#fruit-swap-backdrop")!.hidden = false;
     this.fruitSwapConfirmEl().hidden = false;
   }
 
   private hideFruitSwapConfirm() {
-    this.pendingFruitEquip = null;
     this.root.querySelector<HTMLDivElement>("#fruit-swap-backdrop")!.hidden = true;
     this.fruitSwapConfirmEl().hidden = true;
   }
 
   private fruitSwapConfirmEl(): HTMLDivElement {
     return this.root.querySelector<HTMLDivElement>("#panel-fruit-swap-confirm")!;
-  }
-
-  /**
-   * 인벤토리에서 열매의 "장착" 버튼을 눌렀을 때 호출됩니다. 항상 이미 장착 중인
-   * 열매가 하나 있으므로(맨 처음엔 마그마 열매), 매번 교체 확인창을 띄우고
-   * "예"를 눌러야만 실제로 Simulation.equipFruit이 호출됩니다.
-   */
-  private requestEquipFruit(state: GameState, fruitId: FruitAbilityId) {
-    const p = state.player;
-    if (fruitId === p.equippedFruit) return;
-    if (!p.fruitInventory.includes(fruitId)) return;
-    this.showFruitSwapConfirm(fruitId, fruitDisplayName(fruitId), fruitDisplayName(p.equippedFruit));
   }
 
   private applyVisibility() {
@@ -511,34 +502,47 @@ export class PanelManager {
     const p = state.player;
     const signature = [p.inventory.map((i) => `${i.id}x${i.quantity}`).join(","),
       p.hotbar.join(","), p.activeHotbarSlot,
-      p.equippedFruit, p.fruitInventory.join(",")].join("|");
+      p.equippedFruit, p.fruitInventory.join(","), p.heldFruitCandidate].join("|");
     if (!this.shouldRender("inventory", signature)) return;
 
-    // ── 보유 열매 (장착 중인 열매 + 인벤토리의 미장착 열매) ──
+    // ── 보유 열매 (장착 중인 열매 + 손에 든 미확정 열매 + 인벤토리의 나머지) ──
     const fruitBody = this.panels.inventory.querySelector("#inventory-fruit-body")!;
     const equippedRow = `
-      <div class="inv-fruit-card equipped" title="지금 오른손에 들고 있는 열매">
+      <div class="inv-fruit-card equipped" title="지금 먹어서 항상 적용 중인 열매">
         <div class="inv-fruit-icon">${FRUIT_CATALOG.find((f) => f.id === p.equippedFruit)?.icon ?? "🍈"}</div>
         <div class="inv-fruit-name">${fruitDisplayName(p.equippedFruit)}</div>
         <div class="inv-fruit-badge">장착중 · Lv.${p.fruitLevel}</div>
       </div>
     `;
+    const heldRow = p.heldFruitCandidate ? `
+      <div class="inv-fruit-card held" title="아직 안 먹었습니다 — 게임 화면에서 좌클릭하면 장착 여부를 물어봅니다">
+        <div class="inv-fruit-icon">${FRUIT_CATALOG.find((f) => f.id === p.heldFruitCandidate)?.icon ?? "🍈"}</div>
+        <div class="inv-fruit-name">${fruitDisplayName(p.heldFruitCandidate)}</div>
+        <div class="inv-fruit-badge">손에 든 상태 (미확정)</div>
+        <button class="cancel-held-fruit-btn">도로 넣기</button>
+      </div>
+    ` : "";
     const invRows = p.fruitInventory.map((fruitId, idx) => {
       const mastery = p.fruitMastery[fruitId];
       const icon = FRUIT_CATALOG.find((f) => f.id === fruitId)?.icon ?? "🍈";
       return `
-        <div class="inv-fruit-card" title="클릭하면 장착합니다 (기존 열매는 삭제되지만 숙련도는 저장됩니다)">
+        <div class="inv-fruit-card" title="클릭하면 오른손에 듭니다 (좌클릭으로 확정해야 실제 장착됩니다)">
           <div class="inv-fruit-icon">${icon}</div>
           <div class="inv-fruit-name">${fruitDisplayName(fruitId)}</div>
           ${mastery ? `<div class="inv-fruit-badge">보유중 · Lv.${mastery.level}</div>` : `<div class="inv-fruit-badge">보유중</div>`}
-          <button class="equip-fruit-btn" data-fruit-idx="${idx}" data-fruit="${fruitId}">장착</button>
+          <button class="hold-fruit-btn" data-fruit-idx="${idx}" data-fruit="${fruitId}">손에 들기</button>
         </div>
       `;
     }).join("");
-    this.setHtml(fruitBody, equippedRow + (invRows || `<div class="inv-fruit-empty">아직 보유한 열매가 없습니다. 열매 상인이나 뽑기에서 얻어보세요.</div>`));
+    const emptyHint = !p.heldFruitCandidate && invRows === "" ? `<div class="inv-fruit-empty">아직 보유한 열매가 없습니다. 열매 상인이나 뽑기에서 얻어보세요.</div>` : "";
+    const confirmHint = p.heldFruitCandidate ? `<div class="inv-fruit-hint">👆 손에 든 열매를 확정하려면 이 창을 닫고 게임 화면을 좌클릭하세요.</div>` : "";
+    this.setHtml(fruitBody, equippedRow + heldRow + invRows + emptyHint + confirmHint);
 
-    fruitBody.querySelectorAll<HTMLButtonElement>(".equip-fruit-btn").forEach((btn) => {
-      btn.addEventListener("click", () => this.requestEquipFruit(state, btn.dataset.fruit as FruitAbilityId));
+    fruitBody.querySelectorAll<HTMLButtonElement>(".hold-fruit-btn").forEach((btn) => {
+      btn.addEventListener("click", () => this.callbacks.onHoldFruit(btn.dataset.fruit as FruitAbilityId));
+    });
+    fruitBody.querySelector<HTMLButtonElement>(".cancel-held-fruit-btn")?.addEventListener("click", () => {
+      this.callbacks.onCancelHeldFruit();
     });
 
     // ── 일반 아이템 ──

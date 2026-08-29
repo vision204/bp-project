@@ -1192,7 +1192,8 @@
   color: #ffe28a;
 }
 
-.equip-fruit-btn {
+.hold-fruit-btn,
+.cancel-held-fruit-btn {
   margin-top: 2px;
   width: 100%;
   border: none;
@@ -1206,15 +1207,40 @@
   transition: transform 0.12s ease, background 0.12s ease;
 }
 
-.equip-fruit-btn:hover {
+.hold-fruit-btn:hover,
+.cancel-held-fruit-btn:hover {
   background: linear-gradient(180deg, #81c784, #43a047);
   transform: translateY(-1px);
+}
+
+.inv-fruit-card.held {
+  border-color: rgba(100, 181, 246, 0.85);
+  box-shadow: 0 0 0 2px rgba(100, 181, 246, 0.2);
+}
+
+.inv-fruit-card.held .inv-fruit-badge {
+  color: #90caf9;
+}
+
+.cancel-held-fruit-btn {
+  background: linear-gradient(180deg, #ef5350, #c62828);
+}
+
+.cancel-held-fruit-btn:hover {
+  background: linear-gradient(180deg, #ff7a75, #d32f2f);
 }
 
 .inv-fruit-empty {
   font-size: 13px;
   opacity: 0.7;
   padding: 10px 2px;
+}
+
+.inv-fruit-hint {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: #90caf9;
+  padding: 6px 2px 0;
 }
 
 /* ── 열매 교체 확인 오버레이 ──────────────────────────────────────────── */

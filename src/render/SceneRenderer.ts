@@ -1333,10 +1333,12 @@ export class SceneRenderer {
       }
     }
 
-    // 뽑아 든 열매만 보이게 (인벤토리에서 장착한 열매를 4번 키로 꺼냈을 때만) —
-    // 무기와 손 자리가 겹치므로, 무기를 뽑았으면 자동으로 안 보입니다.
+    // 인벤토리에서 "손에 들기"로 집어든, 아직 안 먹은(미확정) 열매만 실제
+    // 모델로 보여줍니다. 이미 먹어서 equippedFruit이 된 열매는 능력일 뿐
+    // 손에 들고 다니는 물건이 아니므로 모델을 띄우지 않습니다 — 뽑아서 쓰는
+    // 동안의 시각 피드백은 위의 차지 이펙트/글로우가 대신합니다.
     for (const [id, visual] of this.fruitVisuals) {
-      visual.visible = state.player.fruitDrawn && state.player.equippedFruit === id;
+      visual.visible = state.player.heldFruitCandidate === id;
     }
 
     // 무장색 발동 → 전신이 검게 변합니다. 상태가 바뀔 때만 머티리얼을 건드립니다.

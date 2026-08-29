@@ -197,6 +197,15 @@ export interface PlayerState {
    * 인벤토리에서 "장착"을 눌러야 equippedFruit이 바뀝니다.
    */
   fruitInventory: FruitAbilityId[];
+  /**
+   * 인벤토리에서 "손에 들기"를 눌러 오른손에 든, 아직 먹지(확정하지) 않은
+   * 열매. 이 값이 있는 동안은 equippedFruit이 아니라 이 열매가 손에 보이고,
+   * Z/X/C/V 스킬은 (기존에 먹은 열매 것이든 뭐든) 전혀 발동하지 않습니다 —
+   * 이 상태에서 좌클릭하면 "정말 교체하시겠습니까?" 확인창이 뜨고, 거기서
+   * 예를 눌러야만 실제로 equippedFruit이 이 값으로 바뀌면서 손에서 사라지고
+   * (=먹고) 다시 원래처럼 스킬을 쓸 수 있는 상태가 됩니다.
+   */
+  heldFruitCandidate: FruitAbilityId | null;
   /** Z/X/C/V 4개 슬롯의 남은 쿨다운(초) */
   skillCooldowns: number[];
 
@@ -524,6 +533,7 @@ export function createInitialGameState(
 
       equippedFruit: "magma_fist",
       fruitInventory: [],
+      heldFruitCandidate: null,
       skillCooldowns: [0, 0, 0, 0],
       chargingSkillSlot: null,
       chargingSkillStartedAtMs: 0,
