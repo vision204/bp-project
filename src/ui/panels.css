@@ -483,7 +483,7 @@
 
 /* 퀘스트 반복 횟수 */
 .quest-repeat {
-  font-size: 11px;
+  font-size: 13px;
   color: rgba(255, 255, 255, 0.6);
   margin-top: 4px;
 }
@@ -543,28 +543,31 @@
   justify-content: center;
 }
 
-/* ── 퀘스트: 사냥할 몬스터 고르기 ─────────────────────────────────────────── */
+/* ── 퀘스트: 사냥할 몬스터 고르기 ───────────────────────────────────────────
+ * 사용자 피드백("퀘스트 UI가 조금 작다")에 따라 패널 자체와 글자 크기를
+ * 전체적으로 키웠습니다.
+ */
 .quest-panel {
-  width: min(620px, 92vw);
+  width: min(720px, 94vw);
 }
 
 .quest-intro {
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  border-radius: 12px;
   background: rgba(79, 195, 247, 0.12);
   border: 1px solid rgba(79, 195, 247, 0.35);
-  font-size: 15px;
+  font-size: 18px;
   line-height: 1.6;
 }
 
 .quest-species {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  margin-bottom: 10px;
-  border-radius: 10px;
+  gap: 16px;
+  padding: 16px 18px;
+  margin-bottom: 12px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
@@ -575,9 +578,9 @@
 }
 
 .quest-species-dot {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   flex: 0 0 auto;
   border: 2px solid rgba(0, 0, 0, 0.35);
 }
@@ -588,19 +591,19 @@
 }
 
 .quest-species-name {
-  font-size: 16px;
+  font-size: 19px;
   font-weight: bold;
 }
 
 .quest-species-desc {
-  font-size: 13px;
-  opacity: 0.8;
-  margin-top: 3px;
+  font-size: 15px;
+  opacity: 0.85;
+  margin-top: 4px;
 }
 
 .quest-species-warn {
-  font-size: 12.5px;
-  margin-top: 4px;
+  font-size: 14px;
+  margin-top: 5px;
   color: #ff8a80;
 }
 

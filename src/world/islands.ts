@@ -170,6 +170,58 @@ const HP_STEP = 1.28;
 const CONTACT_STEP = 1.22;
 const MONEY_STEP = 1.35;
 
+/**
+ * 전체 밸런스 패치(사용자 요청): "그 섬으로 넘어갈 레벨이 되기 전까지는 몬스터가
+ * 한 방에(원콤) 죽지 않았으면 좋겠다 — 몬스터를 전체적으로 더 세게" 요청에 대한
+ * 실제 구현입니다.
+ *
+ * 그냥 체력에 고정 배율을 곱하는 것만으로는 부족합니다 — 스텟을 5개 스텟에
+ * 고르게 나눠 찍는(이 게임 자신의 기준, DevLoadout과 같은 전제) 캐릭터의
+ * 근접 데미지는 레벨이 오를수록 "공격 스텟(가산)"과 "검 스텟 배율(승산)"이
+ * 함께 커져서 거의 제곱에 가깝게 증가하는데, 섬마다 정해둔 체력 곡선은 그보다
+ * 훨씬 완만하기 때문입니다. 그래서 그 "고르게 찍은 캐릭터가 요루를 들고
+ * 기본 공격 한 대를 날렸을 때"의 예상 데미지를 직접 계산해서, 체력이 항상 그보다
+ * 넉넉히(1.3배) 높도록 바닥값을 정해두는 방식으로 바꿨습니다. 아래 상수들은
+ * StatSystem.ts / Leveling.ts / WeaponSystem.ts에 있는 진짜 공식과 같은 값을
+ * (DevLoadout.ts가 하듯) 여기서도 그대로 옮겨 적은 것입니다 — 저 파일들을
+ * world/islands.ts가 새로 import하게 만들고 싶지 않아서입니다.
+ */
+const STAT_POINTS_PER_LEVEL = 3; // Leveling.ts와 같은 값
+const BASE_MELEE_DAMAGE = 8; // StatSystem.ts와 같은 값
+const ATTACK_DMG_PER_POINT = 2; // StatSystem.ts와 같은 값
+const SWORD_DMG_MULT_PER_POINT = 0.06; // StatSystem.ts와 같은 값
+const YORU_DAMAGE_MULTIPLIER = 2.6; // WeaponSystem.ts의 sword_yoru(가장 흔한 검)와 같은 값
+/** 원콤 방지 바닥값에 주는 여유 — 예상 한 대 데미지의 1.3배는 넘도록 */
+const NO_ONESHOT_SAFETY_MARGIN = 1.3;
+
+/**
+ * "고르게 성장한 캐릭터"가 이 레벨에서 요루로 기본 공격 한 대를 날렸을 때의
+ * 예상 데미지. 체력 바닥값을 정하는 데만 씁니다 — 실제 전투 계산과는 무관한
+ * 밸런스용 근사치입니다.
+ */
+function estimatedMeleeHitAtLevel(level: number): number {
+  const totalPoints = Math.max(0, level - 1) * STAT_POINTS_PER_LEVEL;
+  const perStatPoints = Math.floor(totalPoints / 5); // 공격/방어/검/총/열매에 고르게 분배
+  const meleeDamage = BASE_MELEE_DAMAGE + perStatPoints * ATTACK_DMG_PER_POINT;
+  const swordMultiplier = 1 + perStatPoints * SWORD_DMG_MULT_PER_POINT;
+  return meleeDamage * YORU_DAMAGE_MULTIPLIER * swordMultiplier;
+}
+
+/** 체력과 함께 접촉 데미지도 살짝 더 세게 — "몬스터를 더 강하게"라는 요청 그대로 반영 */
+const GENERAL_CONTACT_BUFF = 1.25;
+
+/**
+ * 몬스터 종류가 3종류 이상인 섬은 부채꼴 하나하나가 좁아져서 같은 마리 수를
+ * 그대로 두면 지나치게 빽빽해 보입니다("사용자 요청). 종류가 많을수록 종족당
+ * 마리 수를 줄여서 전체 밀도를 낮춥니다 (그래도 종족당 최소 6마리는 유지 —
+ * 서식 구역 판정 테스트와도 맞물려 있습니다).
+ */
+function densityScaledCount(rawCount: number, speciesCount: number): number {
+  if (speciesCount < 3) return rawCount;
+  const factor = speciesCount === 3 ? 0.75 : 0.65;
+  return Math.max(6, Math.round(rawCount * factor));
+}
+
 function buildSpecies(
   islandId: string,
   requiredLevel: number,
@@ -178,18 +230,30 @@ function buildSpecies(
 ): IslandEnemySpecies[] {
   return seeds.map((seed, k) => {
     const tierLevel = requiredLevel + SPECIES_LEVEL_STEP * k;
+    const rawCount = seed.count ?? (k === 0 ? base.count : 8);
     return {
       id: `${islandId}_sp${k}`,
       name: seed.name,
       color: seed.color,
       scale: seed.scale ?? 1 + k * 0.09,
       tierLevel,
-      count: seed.count ?? (k === 0 ? base.count : 8),
-      hp: Math.round(base.hp * Math.pow(HP_STEP, k) * (seed.hpMultiplier ?? 1)),
+      count: densityScaledCount(rawCount, seeds.length),
+      // "저택의 주인"처럼 특정 수치로 이미 맞춰둔 보스는 seed.hpMultiplier를 직접
+      // 지정해뒀으므로 그 값을 그대로 쓰고(원콤 방지 바닥값 적용 안 함) — 그래서
+      // 기존 보스 밸런스 테스트(정확히 4대에 죽어야 함)는 그대로 통과합니다.
+      // 그 외의 모든 종족은, 원래 곡선(HP_STEP 성장)과 "이 레벨에서 원콤 방지에
+      // 필요한 최소 체력" 중 더 큰 값을 씁니다.
+      hp:
+        seed.hpMultiplier !== undefined
+          ? Math.round(base.hp * Math.pow(HP_STEP, k) * seed.hpMultiplier)
+          : Math.max(
+              Math.round(base.hp * Math.pow(HP_STEP, k)),
+              Math.round(estimatedMeleeHitAtLevel(tierLevel) * NO_ONESHOT_SAFETY_MARGIN),
+            ),
       // 1번째 종족은 기존에 검증된 값을 그대로 쓰고, 상위 종족만 곡선에서 계산합니다.
       exp: k === 0 ? base.exp : Math.round(expRequiredForLevel(tierLevel) / 8),
       money: Math.round(base.money * Math.pow(MONEY_STEP, k)),
-      contactDamage: Math.round(base.contactDamage * Math.pow(CONTACT_STEP, k)),
+      contactDamage: Math.round(base.contactDamage * Math.pow(CONTACT_STEP, k) * GENERAL_CONTACT_BUFF),
     };
   });
 }

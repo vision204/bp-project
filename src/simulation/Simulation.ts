@@ -168,7 +168,7 @@ export class Simulation {
         const died = e as Extract<typeof e, { type: "enemy_died" }>;
         return { islandId: died.islandId, speciesId: died.speciesId };
       });
-    applyKillsToQuests(this.state.quests, kills);
+    applyKillsToQuests(this.state, kills);
 
     stepEnemyAI(this.state.enemies, player, dt, player.events, nowMs);
     stepInteraction(this.state, input);

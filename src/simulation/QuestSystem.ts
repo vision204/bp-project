@@ -193,15 +193,46 @@ function dist2D(ax: number, az: number, bx: number, bz: number) {
 }
 
 /**
+ * 목표 마리 수를 다 채운 순간 — NPC에게 돌아가지 않아도 그 자리에서 바로
+ * 경험치·코인·포션을 지급합니다. (이전에는 NPC에게 돌아가 E를 눌러야 지급됐지만,
+ * 사용자 요청에 따라 마지막 한 마리를 잡는 즉시 지급되도록 바뀌었습니다.)
+ */
+function completeQuest(state: GameState, quest: QuestState) {
+  const player = state.player;
+  const rewardExp = questRewardExp(quest, player.expToNextLevel);
+
+  quest.status = "completed";
+  quest.completions += 1;
+  quest.killProgress = 0;
+
+  grantExp(player, rewardExp, player.events);
+  player.money += quest.rewardMoney;
+  addItem(player, {
+    id: "potion_small",
+    name: "회복 포션",
+    description: "체력을 50 회복합니다. 인벤토리(I)에서 클릭해 사용하세요.",
+    icon: "🧪",
+    usable: true,
+  });
+  player.events.push({
+    type: "quest_completed",
+    questTitle: quest.title,
+    expAwarded: rewardExp,
+    moneyAwarded: quest.rewardMoney,
+  });
+}
+
+/**
  * 처치한 몬스터가 속한 섬 + **퀘스트에서 고른 종류**일 때만 카운트를 올립니다.
  * (같은 섬이라도 다른 종류를 잡으면 진행되지 않습니다)
+ * 목표를 채우는 순간 바로 completeQuest로 보상까지 지급합니다 — NPC에게 돌아갈 필요 없음.
  */
 export function applyKillsToQuests(
-  quests: QuestState[],
+  state: GameState,
   kills: { islandId: string; speciesId: string }[],
 ) {
   if (kills.length === 0) return;
-  for (const quest of quests) {
+  for (const quest of state.quests) {
     if (quest.status !== "active") continue;
     const matching = kills.filter(
       (k) =>
@@ -210,6 +241,9 @@ export function applyKillsToQuests(
     ).length;
     if (matching > 0) {
       quest.killProgress = Math.min(quest.killTarget, quest.killProgress + matching);
+      if (quest.killProgress >= quest.killTarget) {
+        completeQuest(state, quest);
+      }
     }
   }
 }
@@ -265,34 +299,10 @@ function handleQuestNpc(state: GameState, npc: NpcState, input: InputSnapshot) {
     return;
   }
 
-  if (quest.killProgress < quest.killTarget) {
-    state.interactionPrompt = `${npc.name}: ${quest.title} (${quest.killProgress}/${quest.killTarget})`;
-    return;
-  }
-
-  const rewardExp = questRewardExp(quest, player.expToNextLevel);
-  state.interactionPrompt = `[E] ${npc.name} — 퀘스트 완료 (경험치 ${rewardExp.toLocaleString()} · 코인 ${quest.rewardMoney})`;
-  if (!input.interactPressed) return;
-
-  quest.status = "completed";
-  quest.completions += 1;
-  quest.killProgress = 0;
-
-  grantExp(player, rewardExp, player.events);
-  player.money += quest.rewardMoney;
-  addItem(player, {
-    id: "potion_small",
-    name: "회복 포션",
-    description: "체력을 50 회복합니다. 인벤토리(I)에서 클릭해 사용하세요.",
-    icon: "🧪",
-    usable: true,
-  });
-  player.events.push({
-    type: "quest_completed",
-    questTitle: quest.title,
-    expAwarded: rewardExp,
-    moneyAwarded: quest.rewardMoney,
-  });
+  // 목표를 채우는 즉시 applyKillsToQuests에서 이미 보상까지 지급되고 quest.status가
+  // "completed"로 바뀌므로, 여기 도달할 때는 항상 killProgress < killTarget인 진행 중
+  // 상태입니다 — 그냥 진행도만 보여줍니다 (돌아와서 다시 누를 필요 없음).
+  state.interactionPrompt = `${npc.name}: ${quest.title} (${quest.killProgress}/${quest.killTarget})`;
 }
 
 /**

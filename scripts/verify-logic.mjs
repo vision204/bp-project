@@ -148,7 +148,10 @@ const killsNeeded = Math.ceil(totalExp / topIsland.species[topIsland.species.len
 assert(killsNeeded < 5000, `최상위 섬 몬스터 기준 ${killsNeeded.toLocaleString()}킬이면 만렙 (그라인딩 가능 수준)`);
 
 section("퀘스트: 섬마다 1개, 7마리 처치, 레벨의 90% 경험치");
-const quests = createQuests();
+// applyKillsToQuests가 이제 보상까지 직접 지급하므로(NPC에게 안 돌아가도 됨) player가 필요합니다.
+const questState = createInitialGameState();
+questState.quests = createQuests();
+const quests = questState.quests;
 const questIslands = ISLANDS.filter((i) => i.species.length > 0);
 assert(quests.length === questIslands.length,
   `몬스터가 있는 섬 개수만큼 퀘스트 존재 (${quests.length}개 / 섬 ${ISLANDS.length}개)`);
@@ -170,20 +173,28 @@ const startQuest = quests.find((q) => q.islandId === "pirate_start");
 const jungleQuest = quests.find((q) => q.islandId === "jungle");
 startQuest.status = "active";
 jungleQuest.status = "active";
-applyKillsToQuests(quests, kills("jungle", 3));
+applyKillsToQuests(questState, kills("jungle", 3));
 assert(startQuest.killProgress === 0, "정글 몬스터를 잡아도 시작 섬 퀘스트는 진행 안 됨");
 assert(jungleQuest.killProgress === 3, `정글 퀘스트만 3 진행 (${jungleQuest.killProgress})`);
-applyKillsToQuests(quests, kills("pirate_start", 2));
+applyKillsToQuests(questState, kills("pirate_start", 2));
 assert(startQuest.killProgress === 2, `시작 섬 퀘스트 2 진행 (${startQuest.killProgress})`);
 assert(jungleQuest.killProgress === 3, "정글 퀘스트는 그대로");
 
-// 목표치를 넘겨도 초과 카운트되지 않음
-applyKillsToQuests(quests, kills("pirate_start", 20));
-assert(startQuest.killProgress === QUEST_KILL_TARGET, `목표치에서 상한 (${startQuest.killProgress})`);
+// 목표치를 채우는 순간 — NPC에게 안 돌아가도 그 자리에서 바로 완료·보상 지급됨(사용자 요청)
+const moneyBeforeAutoComplete = questState.player.money;
+applyKillsToQuests(questState, kills("pirate_start", 20));
+assert(startQuest.status === "completed", "목표치를 채우는 즉시 자동 완료됨(NPC에게 안 돌아가도 됨)");
+assert(startQuest.killProgress === 0, "완료되면 진행도는 다음 회차를 위해 초기화됨");
+assert(startQuest.completions === 1, "완료 횟수도 그 자리에서 즉시 올라감");
+assert(questState.player.money > moneyBeforeAutoComplete, "완료 즉시 코인이 지급됨(NPC 상호작용 불필요)");
+assert(
+  questState.player.events.some((e) => e.type === "quest_completed"),
+  "완료 즉시 quest_completed 이벤트가 발생함(킬 그 순간)",
+);
 
 // 수락하지 않은(available) 퀘스트는 진행되지 않음
 const desertQuest = quests.find((q) => q.islandId === "desert");
-applyKillsToQuests(quests, kills("desert", 2));
+applyKillsToQuests(questState, kills("desert", 2));
 assert(desertQuest.killProgress === 0, "수락하지 않은 퀘스트는 진행 안 됨");
 
 section("퀘스트: 몬스터 종류 선택 (여러 종류인 섬)");
@@ -207,9 +218,9 @@ section("퀘스트: 몬스터 종류 선택 (여러 종류인 섬)");
   assert(hq.rewardMoney === Math.round(captain.money * 3), `보상 코인이 그 종류 기준 (${hq.rewardMoney})`);
 
   // 같은 섬이라도 다른 종류를 잡으면 진행되면 안 됩니다 — 이번 요청의 핵심
-  applyKillsToQuests(st.quests, kills("haunted", 5, 0));
+  applyKillsToQuests(st, kills("haunted", 5, 0));
   assert(hq.killProgress === 0, `같은 섬의 다른 종류("${ghost.name}") 5마리를 잡아도 진행 안 됨`);
-  applyKillsToQuests(st.quests, kills("haunted", 3, 1));
+  applyKillsToQuests(st, kills("haunted", 3, 1));
   assert(hq.killProgress === 3, `고른 종류("${captain.name}")만 3 진행 (${hq.killProgress})`);
 
   assert(acceptQuest(st, "haunted", ghost.id) === false, "진행 중에는 다른 종류로 갈아탈 수 없음");
@@ -459,6 +470,31 @@ for (let lv = 1; lv < 900; lv++) expToMax += expRequiredForLevel(lv);
 const questsToMax = Math.ceil(899 / 0.9);
 assert(questsToMax < 1200, `Lv.900까지 퀘스트 약 ${questsToMax}회 (각 7마리) — 도달 가능한 분량`);
 console.log(`  참고: Lv.900 누적 경험치 ${Math.round(expToMax).toLocaleString()}`);
+
+section("밸런스 — 원콤 방지: 섬에 막 도착했을 때는 첫 몬스터가 한 방에 안 죽어야 함");
+{
+  // 사용자 요청: "레벨이 섬을 옮기게 되는 레벨이 되기 전까지, 그 섬 몬스터들이
+  // 한 방에(원콤) 죽지 않게 몬스터를 전체적으로 더 세게 해달라."
+  // 기준 캐릭터는 이 게임 자신이 정의하는 "고르게 성장한 캐릭터"(DevLoadout과
+  // 같은 전제 — 스텟 포인트를 5개 스텟에 균등 분배)로, 그 섬 요구 레벨에 막
+  // 도달한 시점에 가장 흔한 검(요루, 배율 2.6)으로 기본 공격 한 대를 날렸을 때
+  // 그 섬의 가장 약한(1번째) 몬스터가 죽으면 안 됩니다.
+  const yoruMult = WEAPONS.sword_yoru.damageMultiplier;
+  for (const island of ISLANDS.filter((i) => i.kind === "wild")) {
+    const arrivalLevel = island.requiredLevel;
+    const totalPoints = Math.max(0, arrivalLevel - 1) * 3; // STAT_POINTS_PER_LEVEL
+    const attackPoints = Math.floor(totalPoints / 5); // 5개 스텟에 균등 분배
+    const meleeDamage = 8 + attackPoints * 2; // BASE_MELEE_DAMAGE + ATTACK_DMG_PER_POINT
+    const swordMultiplier = 1 + attackPoints * 0.06; // SWORD_DMG_MULT_PER_POINT — 검 스텟도 똑같이 분배됨
+    const perHit = meleeDamage * yoruMult * swordMultiplier;
+    const weakest = island.species[0];
+    assert(
+      weakest.hp > perHit,
+      `${island.name}(Lv.${arrivalLevel}) 도착 직후 "${weakest.name}"은 한 방에 안 죽음 ` +
+        `(hp ${weakest.hp.toLocaleString()} > 예상 한 대 ${Math.round(perHit).toLocaleString()})`,
+    );
+  }
+}
 
 section("NPC 배치");
 const npcs = createNpcs();
@@ -1038,48 +1074,39 @@ assert(flowQuest.status === "active", "E로 퀘스트 수락됨");
 assert(fp.events.some((e) => e.type === "quest_accepted"), "quest_accepted 이벤트 발생");
 
 // 6마리만 잡으면 아직 완료 불가
-applyKillsToQuests(flow.quests, kills("pirate_start", 6));
+applyKillsToQuests(flow, kills("pirate_start", 6));
 fp.events = [];
 stepInteraction(flow, makeInput({ interactPressed: true }));
 assert(flowQuest.status === "active", "목표 미달이면 완료되지 않음");
 assert(/6\/7/.test(flow.interactionPrompt ?? ""), `진행도 표시: "${flow.interactionPrompt}"`);
 
-// 7번째 처치 → 완료 가능
-applyKillsToQuests(flow.quests, kills("pirate_start", 1));
+// 7번째 처치 → NPC에게 안 돌아가도 그 자리에서 바로 완료·지급 (사용자 요청)
 fp.events = [];
 fp.level = 20;
 fp.exp = 0;
 fp.expToNextLevel = expRequiredForLevel(20);
 const expectedReward = Math.floor(fp.expToNextLevel * 0.9);
-
-stepInteraction(flow, makeInput());
-assert(
-  flow.interactionPrompt.includes(expectedReward.toLocaleString()),
-  `완료 프롬프트에 보상 경험치 ${expectedReward} 표시`,
-);
-
 const moneyBeforeQuest = fp.money;
-stepInteraction(flow, makeInput({ interactPressed: true }));
-assert(flowQuest.status === "completed", "7마리 처치 후 완료됨");
-assert(fp.exp === expectedReward, `현재 레벨 요구 경험치의 90%를 즉시 획득 (${fp.exp}/${fp.expToNextLevel})`);
+
+applyKillsToQuests(flow, kills("pirate_start", 1));
+assert(flowQuest.status === "completed", "마지막 한 마리를 잡는 즉시 완료됨(NPC에게 안 돌아가도 됨)");
+assert(fp.exp === expectedReward, `현재 레벨 요구 경험치의 90%를 그 자리에서 즉시 획득 (${fp.exp}/${fp.expToNextLevel})`);
 assert(fp.level === 20, "90%라서 레벨업 직전까지만 오름 (레벨 유지)");
-assert(fp.money > moneyBeforeQuest, `코인도 지급 (${moneyBeforeQuest} → ${fp.money})`);
-assert(fp.events.some((e) => e.type === "quest_completed"), "quest_completed 이벤트 발생");
+assert(fp.money > moneyBeforeQuest, `코인도 킬 즉시 지급 (${moneyBeforeQuest} → ${fp.money})`);
+assert(fp.events.some((e) => e.type === "quest_completed"), "quest_completed 이벤트가 킬 시점에 바로 발생");
 assert(flowQuest.completions === 1, "완료 횟수 1");
 assert(flowQuest.killProgress === 0, "진행도 초기화");
 
-// 반복 수행 가능한지
+// 이제 NPC에게 가면 이미 보상은 받은 상태 — 그냥 반복 수락 프롬프트만 보임
 fp.events = [];
 stepInteraction(flow, makeInput());
 assert(/퀘스트 받기.*반복/.test(flow.interactionPrompt ?? ""), `반복 수락 프롬프트: "${flow.interactionPrompt}"`);
 stepInteraction(flow, makeInput({ interactPressed: true }));
 assert(flowQuest.status === "active", "완료한 퀘스트를 다시 수락 가능 (반복 퀘스트)");
 
-// 두 번째 완료 시엔 남은 10%가 채워지며 레벨업
-applyKillsToQuests(flow.quests, kills("pirate_start", 7));
-fp.events = [];
+// 두 번째 완료 시엔 남은 10%가 채워지며 레벨업 — 이것도 마지막 킬 즉시 적용
 const levelBefore = fp.level;
-stepInteraction(flow, makeInput({ interactPressed: true }));
+applyKillsToQuests(flow, kills("pirate_start", 7));
 assert(fp.level === levelBefore + 1, `두 번째 완료로 레벨업 (${levelBefore} → ${fp.level})`);
 assert(flowQuest.completions === 2, "완료 횟수 2");
 
@@ -1088,11 +1115,8 @@ fp.expBuffRemainingSec = 600;
 fp.exp = 0;
 fp.level = 30;
 fp.expToNextLevel = expRequiredForLevel(30);
-const baseReward = Math.floor(fp.expToNextLevel * 0.9);
 stepInteraction(flow, makeInput({ interactPressed: true })); // 재수락
-applyKillsToQuests(flow.quests, kills("pirate_start", 7));
-fp.events = [];
-stepInteraction(flow, makeInput({ interactPressed: true }));
+applyKillsToQuests(flow, kills("pirate_start", 7));
 assert(fp.level > 30, `버프 중엔 90% x2 = 180%라 레벨업 발생 (Lv.${fp.level})`);
 
 section("스킬 카탈로그 (열매 6종 × Z/X/C/V = 24개)");

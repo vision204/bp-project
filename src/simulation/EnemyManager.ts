@@ -34,15 +34,24 @@ export function createInitialEnemies(): EnemyState[] {
     const arc = Math.PI * 1.7;
     const sectorWidth = arc / speciesCount;
 
+    // 몬스터 종류가 3종류 이상인 섬은 부채꼴이 좁아져서 겹쳐 보이기 쉬우므로,
+    // 종족 간 거리 밴드를 더 넓게 벌리고(안쪽↔바깥쪽 폭) 개체 사이 반경도 더
+    // 흩어지게 잡습니다 — densityScaledCount로 마리 수를 줄인 것과 함께 적용해
+    // 전체적으로 "여유 있는" 배치가 되도록 했습니다.
+    const spacious = speciesCount >= 3;
+    const bandStart = spacious ? 0.28 : 0.34;
+    const bandEnd = spacious ? 0.74 : 0.68;
+    const radialJitter = spacious ? 0.1 : 0.07;
+
     island.species.forEach((species, k) => {
       const { count, hp, exp, money, contactDamage } = species;
       const sectorCenter = island.dockAngle + Math.PI + (k - (speciesCount - 1) / 2) * sectorWidth;
       // 종족이 하나뿐이면 예전처럼 섬 중반부에 고르게, 여럿이면 단계별로 바깥으로.
-      const bandRatio = speciesCount === 1 ? 0.52 : 0.34 + (0.34 * k) / (speciesCount - 1);
+      const bandRatio = speciesCount === 1 ? 0.52 : bandStart + ((bandEnd - bandStart) * k) / (speciesCount - 1);
 
       for (let i = 0; i < count; i++) {
         const angle = sectorCenter + ((i - (count - 1) / 2) / count) * sectorWidth * 0.85;
-        const dist = island.radius * (bandRatio + (i % 2 === 0 ? -0.07 : 0.07));
+        const dist = island.radius * (bandRatio + (i % 2 === 0 ? -radialJitter : radialJitter));
         const x = island.center.x + Math.cos(angle) * dist;
         const z = island.center.z + Math.sin(angle) * dist;
 
