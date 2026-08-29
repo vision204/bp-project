@@ -13,6 +13,7 @@
 
 import type { FruitAbilityId, GameEvent, PlayerState } from "../core/GameState";
 import { FRUIT_CATALOG } from "./ShopSystem";
+import { addFruitToInventory } from "./FruitInventorySystem";
 
 /** 뽑기 쿨다운 — 4시간 */
 export const GACHA_COOLDOWN_MS = 4 * 60 * 60 * 1000;
@@ -107,8 +108,8 @@ export interface GachaResult {
 }
 
 /**
- * 실제로 뽑습니다. 성공하면 코인을 내고 그 자리에서 열매가 교체됩니다
- * (악마의 열매는 한 번에 하나만 먹을 수 있다는 규칙 그대로).
+ * 실제로 뽑습니다. 성공하면 코인을 내고 뽑힌 열매가 인벤토리에 들어갑니다.
+ * 더 이상 즉시 장착되지 않습니다 — 인벤토리에서 직접 장착해야 합니다.
  */
 export function rollGacha(
   player: PlayerState,
@@ -138,8 +139,7 @@ export function rollGacha(
 
   const fruitId = pickFruit(roll);
   const entry = FRUIT_CATALOG.find((f) => f.id === fruitId)!;
-  player.equippedFruit = fruitId;
-  player.skillCooldowns = [0, 0, 0, 0];
+  addFruitToInventory(player, fruitId);
 
   events.push({ type: "gacha_rolled", fruitName: entry.name, paid });
   return { ok: true, fruitId, fruitName: entry.name, paid };

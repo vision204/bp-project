@@ -1,5 +1,6 @@
 import type { FruitAbilityId, GameEvent, ItemId, PlayerState } from "../core/GameState";
 import { addItem } from "./InventorySystem";
+import { addFruitToInventory, ownsFruit } from "./FruitInventorySystem";
 import { WEAPONS, weaponFor } from "./WeaponSystem";
 import { getIsland } from "../world/islands";
 
@@ -132,12 +133,16 @@ export const WEAPON_CATALOG: ItemCatalogEntry[] = Object.values(WEAPONS)
     equippable: true,
   }));
 
-/** 악마의 열매 구매 — 성공하면 기존 열매를 교체합니다 (한 번에 하나만 보유 가능). */
+/**
+ * 악마의 열매 구매 — 더 이상 바로 장착되지 않습니다. 인벤토리에 들어가고,
+ * 플레이어가 직접 장착을 눌러야(다른 열매를 이미 장착 중이면 교체 확인 후)
+ * 실제 능력이 바뀝니다.
+ */
 export function buyFruit(player: PlayerState, fruitId: FruitAbilityId, events: GameEvent[]): boolean {
   const entry = FRUIT_CATALOG.find((f) => f.id === fruitId);
   if (!entry) return false;
-  if (player.equippedFruit === entry.id) {
-    events.push({ type: "purchase_failed", reason: "이미 먹은 열매입니다" });
+  if (ownsFruit(player, entry.id)) {
+    events.push({ type: "purchase_failed", reason: "이미 보유한 열매입니다" });
     return false;
   }
   if (player.money < entry.price) {
@@ -146,10 +151,7 @@ export function buyFruit(player: PlayerState, fruitId: FruitAbilityId, events: G
   }
 
   player.money -= entry.price;
-  // 장착 열매 교체 = 스킬 4개가 통째로 바뀝니다. 쿨다운은 초기화.
-  // 열매 레벨(숙련도)은 캐릭터의 것이라 열매를 바꿔도 유지됩니다.
-  player.equippedFruit = entry.id;
-  player.skillCooldowns = [0, 0, 0, 0];
+  addFruitToInventory(player, entry.id);
   events.push({ type: "fruit_purchased", fruitName: entry.name });
   return true;
 }

@@ -18,6 +18,7 @@ import { stepMana } from "./ManaSystem";
 import { stepHp } from "./HpSystem";
 import { allocateStatPoint, recomputeDerivedStats } from "./StatSystem";
 import { buyFruit, buyItem, payCrewCreationFee } from "./ShopSystem";
+import { equipFruitFromInventory } from "./FruitInventorySystem";
 import { useItem } from "./InventorySystem";
 import { stepBuffs } from "./BuffSystem";
 import { isInWater, stepWater } from "./WaterSystem";
@@ -217,6 +218,14 @@ export class Simulation {
 
   buyFruit(fruitId: FruitAbilityId) {
     return buyFruit(this.state.player, fruitId, this.state.player.events);
+  }
+
+  /**
+   * 인벤토리의 열매를 장착합니다. **UI가 이미 "정말 교체하시겠습니까?" 확인을
+   * 끝냈다고 가정하고 즉시 실행합니다** — 확인은 PanelManager가 담당합니다.
+   */
+  equipFruit(fruitId: FruitAbilityId) {
+    return equipFruitFromInventory(this.state.player, fruitId, this.state.player.events);
   }
 
   buyItem(itemId: ItemId) {

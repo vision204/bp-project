@@ -191,6 +191,12 @@ export interface PlayerState {
    * 새 열매를 먹으면 이 값이 교체되고, 스킬 4개도 통째로 바뀝니다.
    */
   equippedFruit: FruitAbilityId;
+  /**
+   * 상점/열매 상인/뽑기로 얻었지만 아직 장착하지 않은 열매들. 열매를 얻어도
+   * 더 이상 곧바로 능력이 바뀌지 않고 일단 여기 쌓입니다 — 플레이어가 직접
+   * 인벤토리에서 "장착"을 눌러야 equippedFruit이 바뀝니다.
+   */
+  fruitInventory: FruitAbilityId[];
   /** Z/X/C/V 4개 슬롯의 남은 쿨다운(초) */
   skillCooldowns: number[];
 
@@ -212,6 +218,17 @@ export interface PlayerState {
   fruitLevel: number;
   fruitExp: number;
   fruitExpToNext: number;
+
+  /**
+   * 열매별 숙련도 저장소. **지금 장착 중인 열매**의 레벨/경험치는 항상
+   * 위 fruitLevel/fruitExp/fruitExpToNext에 있고, 다른 열매로 갈아타는
+   * 순간 그 값이 여기(equippedFruit를 키로)에 캐시되었다가, 나중에 그
+   * 열매를 다시 장착하면 여기서 복원됩니다. 즉 "열매를 바꾸면 그 열매
+   * 아이템 자체는 사라지지만 숙련도 레벨은 저장된다"는 규칙을 이 맵이
+   * 구현합니다. 한 번도 장착해본 적 없는 열매는 항목이 없다가, 처음
+   * 장착하는 순간 1레벨로 생깁니다. (무기의 weaponMastery와 같은 패턴)
+   */
+  fruitMastery: Partial<Record<FruitAbilityId, { level: number; exp: number; expToNext: number }>>;
 
   /** 자기 강화 스킬(기어 세컨드 등)로 얻는 열매 데미지 배율 */
   fruitBuffMultiplier: number;
@@ -346,6 +363,7 @@ export type GameEvent =
   | { type: "player_drowning" }
   | { type: "player_respawned" }
   | { type: "fruit_purchased"; fruitName: string }
+  | { type: "fruit_equipped"; fruitName: string; replacedFruitName: string }
   | { type: "item_purchased"; itemName: string }
   | { type: "item_used"; itemName: string }
   | { type: "purchase_failed"; reason: string }
@@ -505,6 +523,7 @@ export function createInitialGameState(
       meleeRange: 2.2,
 
       equippedFruit: "magma_fist",
+      fruitInventory: [],
       skillCooldowns: [0, 0, 0, 0],
       chargingSkillSlot: null,
       chargingSkillStartedAtMs: 0,
@@ -512,6 +531,7 @@ export function createInitialGameState(
       fruitLevel: 1,
       fruitExp: 0,
       fruitExpToNext: 34, // fruitExpRequiredForLevel(1)
+      fruitMastery: {},
       fruitBuffMultiplier: 1,
       fruitBuffRemainingSec: 0,
 

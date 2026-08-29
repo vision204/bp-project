@@ -9,6 +9,8 @@ const { DUMMY_EXP_REWARD, createInitialEnemies } = await import("../src/simulati
 const { createQuests, createNpcs, canAcceptQuest, stepInteraction: stepInteractionQ } = await import("../src/simulation/QuestSystem.ts");
 const { FRUIT_CATALOG, ITEM_CATALOG, WEAPON_CATALOG, buyFruit, buyItem,
         CASH_PAYMENT_ENABLED, CASH_PAYMENT_NOTICE } = await import("../src/simulation/ShopSystem.ts");
+const { addFruitToInventory, ownsFruit, equipFruitFromInventory, syncFruitMasteryCache } =
+  await import("../src/simulation/FruitInventorySystem.ts");
 const { WEAPONS, weaponFor, drawnWeapon, toggleHotbar, toggleDrawn, toggleFruitDrawn, weaponDamageMultiplier,
         weaponAttackSpeedMultiplier, weaponDps, isWeapon } = await import("../src/simulation/WeaponSystem.ts");
 const { totalMeleeDamage, totalMeleeRange } = await import("../src/simulation/CombatSystem.ts");
@@ -517,23 +519,36 @@ assert(
   "해적/해군 시작 섬의 난이도가 완전히 동일",
 );
 
-section("악마의 열매 — 한 번에 1개만");
+section("악마의 열매 — 구매하면 인벤토리로, 장착은 별도로");
 assert(FRUIT_CATALOG.length === 5, `상점에 열매 5종 등록`);
 player.money = 10;
 const cheapest = [...FRUIT_CATALOG].sort((a, b) => a.price - b.price)[0];
 assert(buyFruit(player, cheapest.id, player.events) === false, "코인 부족하면 구매 실패");
 assert(player.equippedFruit === "magma_fist", "구매 실패 시 기존 열매 유지");
+assert(player.fruitInventory.length === 0, "구매 실패 시 인벤토리도 그대로");
 
 player.money = 500;
 assert(buyFruit(player, cheapest.id, player.events) === true, "코인 충분하면 구매 성공");
-assert(typeof player.equippedFruit === "string", "장착 열매는 항상 하나(문자열 1개)");
-assert(player.equippedFruit === cheapest.id, "새 열매로 교체됨");
-assert(buyFruit(player, cheapest.id, player.events) === false, "이미 먹은 열매는 재구매 불가");
+assert(player.equippedFruit === "magma_fist", "구매만으로는 장착이 바뀌지 않음");
+assert(player.fruitInventory.includes(cheapest.id), "산 열매는 인벤토리에 들어감");
+assert(buyFruit(player, cheapest.id, player.events) === false, "이미 보유한 열매는 재구매 불가");
+
+assert(equipFruitFromInventory(player, cheapest.id, player.events) === true, "인벤토리 열매를 장착");
+assert(player.equippedFruit === cheapest.id, "장착한 열매로 실제 교체됨");
+assert(!player.fruitInventory.includes(cheapest.id), "장착한 열매는 인벤토리에서 빠짐");
+assert(skillsForFruit(player.equippedFruit).length === 4, "열매를 바꿔도 스킬은 항상 4개");
 
 const second = FRUIT_CATALOG.find((f) => f.id !== cheapest.id);
 buyFruit(player, second.id, player.events);
-assert(skillsForFruit(player.equippedFruit).length === 4, "열매를 바꿔도 스킬은 항상 4개");
-assert(player.equippedFruit === second.id, "가장 최근에 먹은 열매로 교체");
+assert(player.equippedFruit === cheapest.id, "새 열매를 사도 자동 장착되지 않음(여전히 이전 열매)");
+const beforeSwapFruitExp = player.fruitExp;
+assert(equipFruitFromInventory(player, second.id, player.events) === true, "새 열매로 교체 장착");
+assert(player.equippedFruit === second.id, "가장 최근에 장착한 열매로 교체");
+assert(
+  player.fruitMastery[cheapest.id] && player.fruitMastery[cheapest.id].exp === beforeSwapFruitExp,
+  "교체된 옛 열매의 숙련도(exp)가 fruitMastery에 저장됨",
+);
+assert(player.fruitLevel === 1 && player.fruitExp === 0, "처음 장착하는 열매는 1레벨부터 시작");
 
 section("열매 판매 — 중앙섬 상인은 코인, 화면 상점은 현금(표시만)");
 assert(
@@ -555,14 +570,15 @@ assert(
   /준비 중/.test(CASH_PAYMENT_NOTICE) && /코인/.test(CASH_PAYMENT_NOTICE),
   `안내 문구가 대안을 알려줌: "${CASH_PAYMENT_NOTICE}"`,
 );
-// 코인으로 사는 경로(buyFruit)는 여전히 정상 동작해야 합니다
+// 코인으로 사는 경로(buyFruit)는 여전히 정상 동작해야 합니다 (인벤토리로 들어감)
 {
   const buyer = createInitialGameState("pirate").player;
   const target = FRUIT_CATALOG.find((f) => f.id !== buyer.equippedFruit);
   buyer.money = target.price;
   assert(buyFruit(buyer, target.id, buyer.events) === true, `열매 상인에게 코인으로 구매 (${target.name})`);
   assert(buyer.money === 0, "코인이 정확히 차감됨");
-  assert(buyer.equippedFruit === target.id, "구매한 열매로 교체됨");
+  assert(buyer.fruitInventory.includes(target.id), "구매한 열매가 인벤토리에 들어감");
+  assert(buyer.equippedFruit !== target.id, "구매만으로는 장착되지 않음");
 }
 
 section("열매 뽑기 — 전 재산의 30% · 4시간에 1회");
@@ -608,7 +624,7 @@ assert(GACHA_COST_RATIO === 0.3, "참가비는 전 재산의 30%");
   const first = rollGacha(g, t0, g.events, 0.5);
   assert(first.ok === true, `뽑기 성공 (${first.fruitName})`);
   assert(g.money === 700, `참가비 300 차감 (1000 → ${g.money})`);
-  assert(g.equippedFruit === first.fruitId, "뽑은 열매가 바로 장착됨");
+  assert(g.fruitInventory.includes(first.fruitId), "뽑은 열매는 인벤토리로 들어감(자동 장착 X)");
   assert(g.skillCooldowns.length === 4, "스킬은 여전히 4개");
   assert(g.lastGachaAtMs === t0, "뽑은 시각이 기록됨");
 
@@ -1600,6 +1616,9 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   bp.equippedFruit = "dark_wave";
   bp.fruitLevel = 42;
   bp.fruitExp = 11;
+  bp.fruitExpToNext = fruitExpRequiredForLevel(42);
+  bp.fruitInventory = ["ice_lance", "sand_storm"];
+  bp.fruitMastery = { magma_fist: { level: 9, exp: 3, expToNext: fruitExpRequiredForLevel(9) } };
   bp.hakiLearned = true;
   bp.ownedBoats = ["dinghy", "galewind"];
   bp.lastGachaAtMs = 1_700_000_000_000;
@@ -1628,6 +1647,11 @@ section("세이브 데이터 — 저장했다 불러오면 그대로");
   assert(ap.unspentStatPoints === 5, "남은 스텟 포인트 복원");
   assert(ap.equippedFruit === "dark_wave", `열매 복원 (${ap.equippedFruit})`);
   assert(ap.fruitLevel === 42 && ap.fruitExp === 11, `열매 레벨 복원 (Lv.${ap.fruitLevel})`);
+  assert(
+    ap.fruitInventory.length === 2 && ap.fruitInventory.includes("ice_lance") && ap.fruitInventory.includes("sand_storm"),
+    `열매 인벤토리 복원 (${ap.fruitInventory.join(",")})`,
+  );
+  assert(ap.fruitMastery["magma_fist"]?.level === 9, `다른 열매 숙련도(fruitMastery)도 복원 (Lv.${ap.fruitMastery["magma_fist"]?.level})`);
   assert(ap.hakiLearned === true, "무장색 습득 복원");
   assert(ap.ownedBoats.includes("galewind"), `보유 배 복원 (${ap.ownedBoats.join(",")})`);
   assert(ap.lastGachaAtMs === 1_700_000_000_000, "뽑기 제한 시각 복원");
@@ -1673,6 +1697,12 @@ section("세이브 방어 — 이상한 값이 들어와도 안 깨짐");
     equippedFruit: "우주_열매",
     fruitLevel: 9999,
     fruitExp: 1e9,
+    fruitInventory: ["우주_열매", "ice_lance", "ice_lance", 42, null],
+    fruitMastery: [
+      { id: "ice_lance", level: 99999, exp: -5 },
+      { id: "우주_열매", level: 10, exp: 0 }, // 존재하지 않는 열매 id는 버려져야 함
+      null,
+    ],
     hakiLearned: "네",
     inventory: [{ id: "치트_아이템", quantity: 99999 }, { id: "potion_small", quantity: -5 }, null],
     hotbar: ["sword_yoru", 42, {}],
@@ -1701,6 +1731,14 @@ section("세이브 방어 — 이상한 값이 들어와도 안 깨짐");
   assert(FRUIT_CATALOG.some((f) => f.id === p.equippedFruit) || p.equippedFruit === "magma_fist",
     `존재하지 않는 열매는 무시 (${p.equippedFruit})`);
   assert(p.fruitLevel <= MAX_FRUIT_LEVEL, `열매 레벨 상한 적용 (${p.fruitLevel})`);
+  assert(
+    p.fruitInventory.length === 2 && p.fruitInventory.filter((f) => f === "ice_lance").length === 2,
+    `열매 인벤토리 — 존재하는 열매 id만, 중복은 그대로 개수만큼 복원 (${p.fruitInventory.join(",")})`,
+  );
+  assert(!p.fruitInventory.includes("우주_열매"), "존재하지 않는 열매 id는 인벤토리에서 버려짐");
+  assert(p.fruitMastery["ice_lance"]?.level === MAX_FRUIT_LEVEL, `열매 숙련 레벨도 상한(${MAX_FRUIT_LEVEL})으로 잘림`);
+  assert((p.fruitMastery["ice_lance"]?.exp ?? -1) >= 0, "음수 열매 숙련 경험치는 0 이상으로");
+  assert(!p.fruitMastery["우주_열매"], "존재하지 않는 열매 id는 fruitMastery에서도 버려짐");
   assert(p.inventory.every((i) => ITEM_CATALOG.concat(WEAPON_CATALOG).some((c) => c.id === i.id)),
     "카탈로그에 없는 아이템은 버려짐");
   assert(p.inventory.every((i) => i.quantity >= 1), "개수가 1 미만인 아이템은 1로 보정");

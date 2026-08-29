@@ -56,6 +56,10 @@ export interface SaveData {
   equippedFruit: FruitAbilityId;
   fruitLevel: number;
   fruitExp: number;
+  /** 아직 장착하지 않고 보유만 하고 있는 열매들 (중복 가능 — 같은 열매를 여러 번 얻을 수 있음) */
+  fruitInventory: FruitAbilityId[];
+  /** 열매별 숙련도 — 한 번이라도 장착해본 열매만 들어 있습니다 (지금 장착 중인 열매 제외, 그건 위 fruitLevel/fruitExp). */
+  fruitMastery: { id: FruitAbilityId; level: number; exp: number }[];
 
   /** 무기별 숙련도 — 손에 들어본 적 있는 무기만 들어 있습니다. */
   weaponMastery: { id: ItemId; level: number; exp: number }[];
@@ -91,7 +95,10 @@ export interface SaveData {
   savedAtMs: number;
 }
 
-const FRUIT_IDS = new Set(FRUIT_CATALOG.map((f) => f.id));
+// 상점 카탈로그(FRUIT_CATALOG)만 쓰면 기본 시작 열매(magma_fist, 구매 불가)가
+// 세이브 복원에서 사라집니다. "존재하는 모든 열매 id" 기준으로 복원해야
+// fruitMastery에 저장된 옛 magma_fist 숙련도도 안전하게 살아남습니다.
+const FRUIT_IDS = new Set<FruitAbilityId>([...FRUIT_CATALOG.map((f) => f.id), "magma_fist"]);
 // 상점 목록(WEAPON_CATALOG)만 쓰면 설인 전용 무기(삼도류)가 불러오기에서 사라집니다.
 // 그래서 "살 수 있는 모든 물건" 기준으로 복원합니다.
 const ITEM_IDS = new Set(ALL_PURCHASABLE.map((i) => i.id));
@@ -118,6 +125,9 @@ export function toSaveData(state: GameState, savedAtMs: number): SaveData {
     equippedFruit: p.equippedFruit,
     fruitLevel: p.fruitLevel,
     fruitExp: p.fruitExp,
+    fruitInventory: [...p.fruitInventory],
+    fruitMastery: (Object.entries(p.fruitMastery) as [FruitAbilityId, { level: number; exp: number }][])
+      .map(([id, m]) => ({ id, level: m.level, exp: m.exp })),
     weaponMastery: (Object.entries(p.weaponMastery) as [ItemId, { level: number; exp: number }][])
       .map(([id, m]) => ({ id, level: m.level, exp: m.exp })),
     hakiLearned: p.hakiLearned,
@@ -188,6 +198,30 @@ export function applySaveData(state: GameState, raw: unknown): boolean {
   p.fruitLevel = clampInt(data.fruitLevel, 1, MAX_FRUIT_LEVEL, 1);
   p.fruitExpToNext = fruitExpRequiredForLevel(p.fruitLevel);
   p.fruitExp = clampInt(data.fruitExp, 0, p.fruitExpToNext - 1, 0);
+
+  // 아직 장착 안 한 열매들 — 존재하는 열매 id만 복원 (같은 열매 중복 보유는 허용)
+  p.fruitInventory = [];
+  if (Array.isArray(data.fruitInventory)) {
+    for (const id of data.fruitInventory) {
+      if (typeof id === "string" && FRUIT_IDS.has(id as FruitAbilityId)) {
+        p.fruitInventory.push(id as FruitAbilityId);
+      }
+    }
+  }
+
+  // 열매별 숙련도 — 실제 열매 id만 복원하고, 값은 상식적인 범위로 자릅니다.
+  p.fruitMastery = {};
+  if (Array.isArray(data.fruitMastery)) {
+    for (const entry of data.fruitMastery) {
+      if (!entry || typeof entry !== "object") continue;
+      const id = (entry as { id?: unknown }).id;
+      if (typeof id !== "string" || !FRUIT_IDS.has(id as FruitAbilityId)) continue;
+      const level = clampInt((entry as { level?: unknown }).level, 1, MAX_FRUIT_LEVEL, 1);
+      const expToNext = fruitExpRequiredForLevel(level);
+      const exp = clampInt((entry as { exp?: unknown }).exp, 0, expToNext - 1, 0);
+      p.fruitMastery[id as FruitAbilityId] = { level, exp, expToNext };
+    }
+  }
 
   // 무기 숙련도 — 실제 무기 id만 복원하고, 값은 상식적인 범위로 자릅니다.
   p.weaponMastery = {};

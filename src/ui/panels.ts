@@ -1,5 +1,6 @@
 import type { FruitAbilityId, GameState, ItemId, StatBlock } from "../core/GameState";
 import { CASH_PAYMENT_NOTICE, CREW_CREATION_COST, FRUIT_CATALOG, ITEM_CATALOG, WEAPON_CATALOG } from "../simulation/ShopSystem";
+import { fruitDisplayName, ownsFruit } from "../simulation/FruitInventorySystem";
 import type { MultiplayerClient } from "../network/MultiplayerClient";
 import { BOAT_TIERS } from "../simulation/BoatSystem";
 import { HAKI_DAMAGE_MULTIPLIER, HAKI_PRICE, effectiveMeleeDamage } from "../simulation/HakiSystem";
@@ -51,6 +52,8 @@ const STAT_LABELS: Record<StatKey, string> = {
 export interface PanelCallbacks {
   onAllocateStat: (stat: StatKey) => void;
   onBuyFruit: (fruitId: FruitAbilityId) => void;
+  /** 인벤토리의 열매를 실제로 장착 — 이미 교체 확인을 마친 뒤에만 불립니다 */
+  onEquipFruit: (fruitId: FruitAbilityId) => void;
   onBuyItem: (itemId: ItemId) => void;
   onUseItem: (itemId: ItemId) => void;
   onLearnHaki: () => void;
@@ -113,6 +116,12 @@ export class PanelManager {
   private questIslandId: string | null = null;
   /** 해적 사단 패널이 접속/사단 정보를 읽어오는 곳 — main.ts가 생성 직후 setMultiplayer로 넘겨줍니다 */
   private multiplayer: MultiplayerClient | null = null;
+  /**
+   * 열매 교체 확인창이 떠 있는 동안, "예"를 누르면 실제로 장착할 열매 id.
+   * 이 다이얼로그는 다른 패널(panels 레코드)과 달리 인벤토리 패널 위에
+   * 겹쳐서 뜨는 독립적인 오버레이라서 open/applyVisibility와 별도로 관리합니다.
+   */
+  private pendingFruitEquip: FruitAbilityId | null = null;
 
   constructor(
     container: HTMLElement,
@@ -135,6 +144,9 @@ export class PanelManager {
           <button class="panel-close" data-close="inventory">✕</button>
         </div>
         <div class="panel-sub-line">사용 가능한 아이템은 클릭하면 바로 사용됩니다.</div>
+        <div class="inv-section-title">🍈 보유 열매</div>
+        <div class="inv-fruit-list" id="inventory-fruit-body"></div>
+        <div class="inv-section-title">가방</div>
         <div class="panel-body inventory-grid" id="inventory-body"></div>
       </div>
 
@@ -240,6 +252,22 @@ export class PanelManager {
         <div class="panel-body" id="crew-body"></div>
       </div>
 
+      <div class="modal-backdrop" id="fruit-swap-backdrop" hidden></div>
+      <div class="panel dialog-panel fruit-swap-panel" id="panel-fruit-swap-confirm" hidden>
+        <div class="panel-header">
+          <span>🍈 열매 교체</span>
+        </div>
+        <div class="dialog-body">
+          <div class="dialog-portrait">⚠️</div>
+          <p class="dialog-line" id="fruit-swap-line"></p>
+          <p class="dialog-question">정말 열매를 교체 하시겠습니까?<br/>기존의 열매는 삭제되지만 숙련도 레벨은 저장됩니다.</p>
+          <div class="dialog-choices">
+            <button class="choice-btn yes" id="fruit-swap-yes">예, 교체하겠습니다</button>
+            <button class="choice-btn no" id="fruit-swap-no">아니오</button>
+          </div>
+        </div>
+      </div>
+
     `;
     container.appendChild(this.root);
 
@@ -264,6 +292,18 @@ export class PanelManager {
       this.closeAll();
     });
     this.root.querySelector<HTMLButtonElement>("#haki-no")!.addEventListener("click", () => this.closeAll());
+
+    // 열매 교체 확인창의 예/아니오 — 인벤토리 패널 위에 겹쳐서 뜨는 독립 오버레이
+    this.root.querySelector<HTMLButtonElement>("#fruit-swap-yes")!.addEventListener("click", () => {
+      if (this.pendingFruitEquip) this.callbacks.onEquipFruit(this.pendingFruitEquip);
+      this.hideFruitSwapConfirm();
+    });
+    this.root.querySelector<HTMLButtonElement>("#fruit-swap-no")!.addEventListener("click", () => {
+      this.hideFruitSwapConfirm();
+    });
+    this.root.querySelector<HTMLDivElement>("#fruit-swap-backdrop")!.addEventListener("click", () => {
+      this.hideFruitSwapConfirm();
+    });
 
     this.root.querySelectorAll<HTMLButtonElement>(".panel-close").forEach((btn) => {
       btn.addEventListener("click", () => this.closeAll());
@@ -295,7 +335,42 @@ export class PanelManager {
 
   closeAll() {
     this.open = null;
+    this.hideFruitSwapConfirm();
     this.applyVisibility();
+  }
+
+  /**
+   * "정말 열매를 교체 하시겠습니까?" 확인창을 띄웁니다. 현재 열려 있는 패널
+   * (보통 인벤토리)은 그대로 뒤에 남겨두고 그 위에 겹쳐서 보여줍니다.
+   */
+  private showFruitSwapConfirm(newFruitId: FruitAbilityId, newFruitName: string, oldFruitName: string) {
+    this.pendingFruitEquip = newFruitId;
+    this.root.querySelector<HTMLParagraphElement>("#fruit-swap-line")!.innerHTML =
+      `현재 <b>${oldFruitName}</b>을(를) 장착 중입니다.<br/>대신 <b>${newFruitName}</b>을(를) 장착할까요?`;
+    this.root.querySelector<HTMLDivElement>("#fruit-swap-backdrop")!.hidden = false;
+    this.fruitSwapConfirmEl().hidden = false;
+  }
+
+  private hideFruitSwapConfirm() {
+    this.pendingFruitEquip = null;
+    this.root.querySelector<HTMLDivElement>("#fruit-swap-backdrop")!.hidden = true;
+    this.fruitSwapConfirmEl().hidden = true;
+  }
+
+  private fruitSwapConfirmEl(): HTMLDivElement {
+    return this.root.querySelector<HTMLDivElement>("#panel-fruit-swap-confirm")!;
+  }
+
+  /**
+   * 인벤토리에서 열매의 "장착" 버튼을 눌렀을 때 호출됩니다. 항상 이미 장착 중인
+   * 열매가 하나 있으므로(맨 처음엔 마그마 열매), 매번 교체 확인창을 띄우고
+   * "예"를 눌러야만 실제로 Simulation.equipFruit이 호출됩니다.
+   */
+  private requestEquipFruit(state: GameState, fruitId: FruitAbilityId) {
+    const p = state.player;
+    if (fruitId === p.equippedFruit) return;
+    if (!p.fruitInventory.includes(fruitId)) return;
+    this.showFruitSwapConfirm(fruitId, fruitDisplayName(fruitId), fruitDisplayName(p.equippedFruit));
   }
 
   private applyVisibility() {
@@ -433,18 +508,48 @@ export class PanelManager {
   }
 
   private renderInventory(state: GameState) {
-    const signature = [state.player.inventory.map((i) => `${i.id}x${i.quantity}`).join(","),
-      state.player.hotbar.join(","), state.player.activeHotbarSlot].join("|");
+    const p = state.player;
+    const signature = [p.inventory.map((i) => `${i.id}x${i.quantity}`).join(","),
+      p.hotbar.join(","), p.activeHotbarSlot,
+      p.equippedFruit, p.fruitInventory.join(",")].join("|");
     if (!this.shouldRender("inventory", signature)) return;
 
+    // ── 보유 열매 (장착 중인 열매 + 인벤토리의 미장착 열매) ──
+    const fruitBody = this.panels.inventory.querySelector("#inventory-fruit-body")!;
+    const equippedRow = `
+      <div class="inv-fruit-card equipped" title="지금 오른손에 들고 있는 열매">
+        <div class="inv-fruit-icon">${FRUIT_CATALOG.find((f) => f.id === p.equippedFruit)?.icon ?? "🍈"}</div>
+        <div class="inv-fruit-name">${fruitDisplayName(p.equippedFruit)}</div>
+        <div class="inv-fruit-badge">장착중 · Lv.${p.fruitLevel}</div>
+      </div>
+    `;
+    const invRows = p.fruitInventory.map((fruitId, idx) => {
+      const mastery = p.fruitMastery[fruitId];
+      const icon = FRUIT_CATALOG.find((f) => f.id === fruitId)?.icon ?? "🍈";
+      return `
+        <div class="inv-fruit-card" title="클릭하면 장착합니다 (기존 열매는 삭제되지만 숙련도는 저장됩니다)">
+          <div class="inv-fruit-icon">${icon}</div>
+          <div class="inv-fruit-name">${fruitDisplayName(fruitId)}</div>
+          ${mastery ? `<div class="inv-fruit-badge">보유중 · Lv.${mastery.level}</div>` : `<div class="inv-fruit-badge">보유중</div>`}
+          <button class="equip-fruit-btn" data-fruit-idx="${idx}" data-fruit="${fruitId}">장착</button>
+        </div>
+      `;
+    }).join("");
+    this.setHtml(fruitBody, equippedRow + (invRows || `<div class="inv-fruit-empty">아직 보유한 열매가 없습니다. 열매 상인이나 뽑기에서 얻어보세요.</div>`));
+
+    fruitBody.querySelectorAll<HTMLButtonElement>(".equip-fruit-btn").forEach((btn) => {
+      btn.addEventListener("click", () => this.requestEquipFruit(state, btn.dataset.fruit as FruitAbilityId));
+    });
+
+    // ── 일반 아이템 ──
     const body = this.panels.inventory.querySelector("#inventory-body")!;
     const totalSlots = 24;
-    const items = state.player.inventory;
+    const items = p.inventory;
     let html = "";
     for (let i = 0; i < totalSlots; i++) {
       const item = items[i];
       if (item) {
-        const onHotbar = state.player.hotbar.indexOf(item.id);
+        const onHotbar = p.hotbar.indexOf(item.id);
         const interactive = item.usable || item.equippable;
         const hint = item.equippable
           ? onHotbar >= 0
@@ -480,7 +585,6 @@ export class PanelManager {
     moneyLine.innerHTML = `보유 코인: <b>🪙 ${state.player.money}</b>`;
 
     const body = this.panels.shop.querySelector("#shop-body")!;
-    const equippedId = state.player.equippedFruit;
 
     const items = ITEM_CATALOG.map((item) => {
       const canAfford = state.player.money >= item.price;
@@ -500,17 +604,17 @@ export class PanelManager {
     // 결제 연동(PG사) 전이라 실제로 결제되거나 지급되는 코드는 없고, 눌러도 안내만 뜹니다.
     // 코인으로 사고 싶으면 중앙 교역섬의 열매 상인에게 가야 합니다.
     const fruits = FRUIT_CATALOG.map((fruit) => {
-      const equipped = fruit.id === equippedId;
-      const label = equipped ? "먹은 상태" : `₩${fruit.cashPrice.toLocaleString()}`;
+      const owned = ownsFruit(state.player, fruit.id);
+      const label = owned ? "보유중" : `₩${fruit.cashPrice.toLocaleString()}`;
       return `
-        <div class="shop-item cash ${equipped ? "equipped" : ""}">
+        <div class="shop-item cash ${owned ? "equipped" : ""}">
           <div class="shop-item-icon">${fruit.icon}</div>
           <div class="shop-item-info">
             <div class="shop-item-name">${fruit.name} <span class="cash-tag">현금</span></div>
             <div class="shop-item-desc">${fruit.description}</div>
             <div class="shop-item-stats">${fruit.style}</div>
           </div>
-          <button class="buy-btn cash-btn" data-cash-fruit="${fruit.id}" ${equipped ? "disabled" : ""}>${label}</button>
+          <button class="buy-btn cash-btn" data-cash-fruit="${fruit.id}" ${owned ? "disabled" : ""}>${label}</button>
         </div>
       `;
     }).join("");
@@ -622,26 +726,26 @@ export class PanelManager {
    */
   private renderFruitDealer(state: GameState) {
     const p = state.player;
-    const signature = `${p.money}|${p.equippedFruit}`;
+    const signature = `${p.money}|${p.equippedFruit}|${p.fruitInventory.join(",")}`;
     if (!this.shouldRender("fruit_dealer", signature)) return;
 
     this.panels.fruit_dealer.querySelector("#dealer-money")!.innerHTML =
-      `보유 코인: <b>🪙 ${p.money}</b> · 열매는 한 번에 하나만 먹을 수 있습니다`;
+      `보유 코인: <b>🪙 ${p.money}</b> · 산 열매는 인벤토리(I)에 들어갑니다 — 장착은 직접 골라야 합니다`;
 
     const body = this.panels.fruit_dealer.querySelector("#dealer-body")!;
     const rows = FRUIT_CATALOG.map((fruit) => {
-      const equipped = fruit.id === p.equippedFruit;
+      const owned = ownsFruit(p, fruit.id);
       const canAfford = p.money >= fruit.price;
-      const label = equipped ? "먹은 상태" : `구매 · 🪙${fruit.price}`;
+      const label = owned ? "보유중" : `구매 · 🪙${fruit.price}`;
       return `
-        <div class="shop-item ${equipped ? "equipped" : ""}">
+        <div class="shop-item ${owned ? "equipped" : ""}">
           <div class="shop-item-icon">${fruit.icon}</div>
           <div class="shop-item-info">
             <div class="shop-item-name">${fruit.name}</div>
             <div class="shop-item-desc">${fruit.description}</div>
             <div class="shop-item-stats">${fruit.style}</div>
           </div>
-          <button class="buy-btn" data-fruit="${fruit.id}" ${equipped || !canAfford ? "disabled" : ""}>${label}</button>
+          <button class="buy-btn" data-fruit="${fruit.id}" ${owned || !canAfford ? "disabled" : ""}>${label}</button>
         </div>
       `;
     }).join("");
@@ -649,7 +753,8 @@ export class PanelManager {
     this.setHtml(body, `
       <div class="dealer-intro">
         "여기가 이 바다에서 <b>코인</b>으로 열매를 살 수 있는 유일한 곳이지.
-        급하면 상점에서 현금으로 사도 되고… 뭐, 나야 아무래도 좋지만."
+        급하면 상점에서 현금으로 사도 되고… 뭐, 나야 아무래도 좋지만.
+        산다고 바로 먹는 건 아니니, 인벤토리에서 마음에 드는 놈으로 직접 장착해."
       </div>
       <div class="shop-list">${rows}</div>
     `);
@@ -857,18 +962,18 @@ export class PanelManager {
     const reason = gachaBlockReason(p, state.nowMs);
     const cost = gachaCost(p);
     // 남은 시간은 분 단위로만 바뀌게 해서 매 프레임 다시 그리지 않도록 합니다.
-    const signature = [p.money, p.equippedFruit, reason, Math.ceil(remaining / 60000)].join("|");
+    const signature = [p.money, p.equippedFruit, p.fruitInventory.join(","), reason, Math.ceil(remaining / 60000)].join("|");
     if (!this.shouldRender("gacha", signature)) return;
 
     const body = this.panels.gacha.querySelector("#gacha-body")!;
     const odds = gachaOdds()
       .map((o) => {
         const fruit = FRUIT_CATALOG.find((f) => f.id === o.id)!;
-        const equipped = o.id === p.equippedFruit;
+        const owned = ownsFruit(p, o.id);
         return `
-          <div class="gacha-odd ${equipped ? "equipped" : ""}">
+          <div class="gacha-odd ${owned ? "equipped" : ""}">
             <span class="gacha-odd-icon">${fruit.icon}</span>
-            <span class="gacha-odd-name">${fruit.name}${equipped ? " (지금 먹은 열매)" : ""}</span>
+            <span class="gacha-odd-name">${fruit.name}${owned ? " (보유중)" : ""}</span>
             <span class="gacha-odd-bar"><i style="width:${(o.chance * 100).toFixed(1)}%"></i></span>
             <span class="gacha-odd-pct">${(o.chance * 100).toFixed(1)}%</span>
           </div>

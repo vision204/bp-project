@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import type { EnemyState, FruitAbilityId, GameState, ItemId, NpcKind } from "../core/GameState";
 import { FIRST_PERSON_THRESHOLD, type PlayerController } from "../simulation/PlayerController";
 import { maxWorldRadius } from "../world/islands";
@@ -18,6 +20,43 @@ import {
   type ArmStretchPunch,
 } from "./SkillEffects";
 
+
+// ── 열매 3D 모델 (손에 드는 GLB) ──────────────────────────────────────────
+// public/models/fruits/ 아래에 열매별로 압축된 glb 하나씩을 둡니다.
+// import.meta.env.BASE_URL을 붙이는 이유: vite.config.ts의 base: "./" 설정을
+// 그대로 존중해야 서브경로 배포(Netlify 등)에서도 경로가 깨지지 않습니다.
+const FRUIT_MODEL_PATHS: Record<FruitAbilityId, string> = {
+  magma_fist: "models/fruits/magma_fist.glb",
+  ice_lance: "models/fruits/ice_lance.glb",
+  thunder_strike: "models/fruits/thunder_strike.glb",
+  dark_wave: "models/fruits/dark_wave.glb",
+  rubber_barrage: "models/fruits/rubber_barrage.glb",
+  sand_storm: "models/fruits/sand_storm.glb",
+};
+
+/**
+ * 로드된 GLB는 크기와 원점이 제각각이라(모델러/AI 생성 파이프라인이 서로
+ * 다름), 그대로 붙이면 손 크기에 안 맞거나 손 밖으로 삐져나옵니다.
+ * 바운딩 박스를 재서 중심을 원점으로 옮기고, 가장 긴 변이 targetSize가
+ * 되도록 균일하게 스케일해 6종 열매가 손 안에서 일관된 크기로 보이게 합니다.
+ */
+function normalizeAndCenterModel(root: THREE.Object3D, targetSize: number): THREE.Group {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  const center = new THREE.Vector3();
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+
+  const inner = new THREE.Group();
+  inner.add(root);
+  root.position.sub(center);
+
+  const wrapper = new THREE.Group();
+  wrapper.add(inner);
+  inner.scale.setScalar(targetSize / maxDim);
+  return wrapper;
+}
 
 const CAMERA_DISTANCE = 6;
 const CAMERA_HEIGHT_OFFSET = 1.6;
@@ -518,6 +557,12 @@ export class SceneRenderer {
   private lastBoatTier = "";
   /** 무기 id별 3D 모델 — 손에 든 것만 보이게 토글합니다 */
   private weaponVisuals = new Map<string, THREE.Group>();
+  /**
+   * 열매 id별 3D 모델(GLB) — 비동기로 로드되므로 로드가 끝난 것만 이 맵에
+   * 들어옵니다. 열매를 뽑았을 때(fruitDrawn) 오른손 자리에 보여줍니다.
+   */
+  private fruitVisuals = new Map<FruitAbilityId, THREE.Group>();
+  private readonly gltfLoader: GLTFLoader;
   private enemyVisuals = new Map<string, EnemyVisual>();
   private npcVisuals = new Map<string, NpcVisual>();
   private remotePlayerVisuals = new Map<string, RemotePlayerVisual>();
@@ -612,6 +657,18 @@ export class SceneRenderer {
     slingshot.rotation.set(0.22, 0, 0.5);
     this.registerWeaponVisual("gun_slingshot", slingshot);
 
+    // 열매 — 인벤토리에서 장착한 열매를 뽑으면(4번 키) 무기와 같은 오른손
+    // 자리에 실제로 손에 든 모습으로 보여줍니다. GLB는 비동기 로드라 로드가
+    // 끝나는 대로 하나씩 등록되고, 그 전까지는 그냥 안 보일 뿐입니다(에러는
+    // 콘솔 경고로만 남기고 게임 진행에는 지장이 없게 합니다).
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath(`${import.meta.env.BASE_URL}draco/`);
+    this.gltfLoader = new GLTFLoader();
+    this.gltfLoader.setDRACOLoader(dracoLoader);
+    for (const fruitId of Object.keys(FRUIT_MODEL_PATHS) as FruitAbilityId[]) {
+      this.loadFruitVisual(fruitId);
+    }
+
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
@@ -625,6 +682,27 @@ export class SceneRenderer {
     this.weaponVisuals.set(id, visual);
     // 휘두르기 모션이 여기서부터 튀어나갔다 되돌아올 수 있게 "쥐고 있을 때" 기본 회전을 기억해둡니다.
     this.weaponBaseRotationX.set(id, visual.rotation.x);
+  }
+
+  /** 열매 GLB 하나를 비동기로 불러와 무기와 같은 오른손 자리에 등록합니다. */
+  private loadFruitVisual(fruitId: FruitAbilityId) {
+    const url = `${import.meta.env.BASE_URL}${FRUIT_MODEL_PATHS[fruitId]}`;
+    this.gltfLoader.load(
+      url,
+      (gltf) => {
+        const normalized = normalizeAndCenterModel(gltf.scene, 0.42);
+        // 무기와 같은 "쥐는 자리" — 손 위치에 살짝 얹힌 것처럼 보이도록
+        // 무기 기본 좌표(-0.7, 0.78, 0.05)에서 살짝 앞으로 당겨둡니다.
+        normalized.position.set(-0.62, 0.72, 0.12);
+        normalized.visible = false;
+        this.playerVisual.add(normalized);
+        this.fruitVisuals.set(fruitId, normalized);
+      },
+      undefined,
+      (err) => {
+        console.warn(`열매 모델을 불러오지 못했습니다 (${fruitId}):`, err);
+      },
+    );
   }
 
   get domElement() {
@@ -1253,6 +1331,12 @@ export class SceneRenderer {
       if (weaponVisual) {
         weaponVisual.rotation.x = baseRotationX - attackSwingArc * ATTACK_SWING_WEAPON_AMPLITUDE;
       }
+    }
+
+    // 뽑아 든 열매만 보이게 (인벤토리에서 장착한 열매를 4번 키로 꺼냈을 때만) —
+    // 무기와 손 자리가 겹치므로, 무기를 뽑았으면 자동으로 안 보입니다.
+    for (const [id, visual] of this.fruitVisuals) {
+      visual.visible = state.player.fruitDrawn && state.player.equippedFruit === id;
     }
 
     // 무장색 발동 → 전신이 검게 변합니다. 상태가 바뀔 때만 머티리얼을 건드립니다.

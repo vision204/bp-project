@@ -217,6 +217,7 @@ const SAVE_WORTHY = new Set([
   "fruit_leveled_up",
   "quest_completed",
   "fruit_purchased",
+  "fruit_equipped",
   "item_purchased",
   "item_used",
   "boat_bought",
@@ -276,6 +277,7 @@ async function main() {
   const panels = new PanelManager(appEl, {
     onAllocateStat: (stat) => simulation.allocateStat(stat),
     onBuyFruit: (fruitId) => simulation.buyFruit(fruitId),
+    onEquipFruit: (fruitId) => simulation.equipFruit(fruitId),
     onBuyItem: (itemId) => simulation.buyItem(itemId),
     onUseItem: (itemId) => simulation.useItem(itemId),
     onLearnHaki: () => simulation.learnHaki(),

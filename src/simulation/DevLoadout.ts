@@ -15,7 +15,7 @@ import { ISLANDS } from "../world/islands";
 import { recomputeDerivedStats } from "./StatSystem";
 import { expRequiredForLevel } from "../core/ExpCurve";
 import { BOAT_TIERS } from "./BoatSystem";
-import { ALL_PURCHASABLE } from "./ShopSystem";
+import { ALL_PURCHASABLE, FRUIT_CATALOG } from "./ShopSystem";
 import { MAX_JUMPS } from "./TrainerSystem";
 import { weaponExpRequiredForLevel } from "./WeaponLeveling";
 import { fruitExpRequiredForLevel } from "./FruitLeveling";
@@ -100,6 +100,15 @@ export function applyDevLoadout(state: GameState) {
   p.fruitExp = 0;
   for (const weaponId of weapons) {
     p.weaponMastery[weaponId] = { level: 100, exp: 0, expToNext: weaponExpRequiredForLevel(100) };
+  }
+
+  // 상점의 열매 전부를 인벤토리에 넣어두고(장착 중인 기본 열매는 제외),
+  // 숙련도도 전부 만렙으로 캐시해둡니다 — 인벤토리에서 아무 열매나 눌러
+  // 바로 교체해봐도 곧바로 만렙 스킬을 확인할 수 있게 하려는 목적입니다.
+  p.fruitInventory = FRUIT_CATALOG.map((f) => f.id).filter((id) => id !== p.equippedFruit);
+  for (const fruitId of FRUIT_CATALOG.map((f) => f.id)) {
+    if (fruitId === p.equippedFruit) continue;
+    p.fruitMastery[fruitId] = { level: 100, exp: 0, expToNext: fruitExpRequiredForLevel(100) };
   }
 
   recomputeDerivedStats(p);
