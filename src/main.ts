@@ -19,6 +19,8 @@ import { devDenyMessage, devDenyReason } from "./core/DevAccess";
 import { applyDevLoadout } from "./simulation/DevLoadout";
 import { MultiplayerClient } from "./network/MultiplayerClient";
 import {
+  broadcastDashFx,
+  broadcastMeleeFx,
   broadcastSkillFx,
   buildCombatStatsSnapshot,
   drawnWeaponId,
@@ -26,6 +28,7 @@ import {
   processPvpAttacks,
 } from "./network/PvpCombat";
 import { MultiplayerUI } from "./ui/MultiplayerUI";
+import { connectMultiplayerOrWait, defaultMultiplayerUrl } from "./ui/ConnectGate";
 import { TradeUI } from "./ui/TradeUI";
 import { canUseTeleport, TELEPORT_MAX_DISTANCE_M } from "./simulation/TeleportSystem";
 
@@ -332,9 +335,13 @@ async function main() {
   // (InputManager.ts의 우클릭-드래그 카메라 회전은 건드리지 않고, 별도로 판정합니다)
   const tradeUI = new TradeUI(appEl, multiplayer, simulation.state, renderer);
   const env = typeof import.meta !== "undefined" ? (import.meta as { env?: Record<string, string> }).env : undefined;
-  if (!devMode && env?.VITE_MULTIPLAYER_AUTOCONNECT && env?.VITE_MULTIPLAYER_URL) {
-    const autoName = (user?.name?.trim() || "여행자").slice(0, 12);
-    multiplayer.connect(env.VITE_MULTIPLAYER_URL, autoName);
+  const autoName = (user?.name?.trim() || "여행자").slice(0, 12);
+  if (!devMode) {
+    // 빠른/그냥 모드는 무조건 멀티플레이 서버 연결이 필요합니다(사용자 요청) —
+    // 연결될 때까지 화면을 덮는 게이트가 여기서 게임 루프 시작을 막습니다.
+    // (개발자 모드는 지금까지와 똑같이 절대 connect()를 호출하지 않습니다.)
+    const url = env?.VITE_MULTIPLAYER_URL || defaultMultiplayerUrl();
+    await connectMultiplayerOrWait(multiplayer, url, autoName);
   }
 
   const hud = new Hud(appEl, {
@@ -471,7 +478,11 @@ async function main() {
           const ground = renderer.raycastTerrainDownAt(clampedX, clampedZ);
           dest = ground ?? { x: clampedX, y: p.y + dy * scale, z: clampedZ };
         }
-        simulation.teleportPlayerTo({ x: dest.x, y: dest.y + 1, z: dest.z });
+        const teleportDest = { x: dest.x, y: dest.y + 1, z: dest.z };
+        simulation.teleportPlayerTo(teleportDest);
+        // 순간이동은 순수 연출용 알림으로도 보내서, 같은 방의 다른 사람 화면에도
+        // 도착 지점에 이펙트가 뜨고(내 위치는 어차피 다음 state 동기화로 알려짐).
+        multiplayer.sendTeleportFx(teleportDest.x, teleportDest.z, teleportDest.y);
       } else {
         simulation.state.player.events.push({ type: "teleport_failed" });
       }
@@ -482,6 +493,8 @@ async function main() {
     // 여전히 몬스터만 알기 때문에 이 확인은 시뮬레이션 바깥, 여기서 합니다.
     processPvpAttacks(simulation.state, multiplayer);
     broadcastSkillFx(simulation.state, multiplayer);
+    broadcastMeleeFx(simulation.state, multiplayer);
+    broadcastDashFx(simulation.state, multiplayer);
     // 뇌광 질주(번개 열매 X) — 변신 중이면 접촉 반경 안 다른 플레이어에게 지속 피해 요청
     processLightningForm(simulation.state, multiplayer, Date.now());
 
@@ -499,6 +512,9 @@ async function main() {
       multiplayer.enemyGhosts,
       multiplayer.players,
       multiplayer.drainSkillFx(),
+      multiplayer.drainMeleeFx(),
+      multiplayer.drainDashFx(),
+      multiplayer.drainTeleportFx(),
     );
     renderer.render();
     hud.update(simulation.state, panels.isBlocking());

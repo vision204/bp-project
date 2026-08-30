@@ -206,6 +206,23 @@ export type ClientMessage =
    * 다른 사람 화면에 내 스킬 이펙트(부채꼴/직선/원형 베기 등)가 보이게 합니다.
    */
   | { type: "skill_fx"; slot: number; weaponId: string | null; position: Vec3Like; aimYaw: number }
+  /**
+   * 기본 근접 공격(좌클릭)이 나갈 때마다 순수 연출용으로 보내는 알림 — skill_fx와
+   * 같은 이유로 PvP 후보 유무·PvP 켬/끔과 무관하게 항상 보냅니다. 위치/방향은
+   * 이미 주기적인 state 동기화로 알고 있으므로 따로 싣지 않습니다.
+   */
+  | { type: "melee_fx" }
+  /**
+   * Q 대쉬가 나갈 때마다 순수 연출용으로 보내는 알림 — 다른 사람 화면에도
+   * 바람 이펙트가 보이도록 방향(dx, dz)만 함께 보냅니다.
+   */
+  | { type: "dash_fx"; dx: number; dz: number }
+  /**
+   * R 순간이동이 실제로 일어날 때마다 순수 연출용으로 보내는 알림 — 도착 지점을
+   * 실어 보내서, 받는 쪽이 그 자리에 이펙트를 띄우고 그 플레이어의 렌더 위치를
+   * (부드러운 보간 없이) 그 자리로 즉시 맞출 수 있게 합니다.
+   */
+  | { type: "teleport_fx"; position: Vec3Like }
   | { type: "enemy_states"; enemies: EnemySyncEntry[] }
   // --- 거래 / 선물 ---------------------------------------------------------
   /** 거래를 신청합니다 — 곧바로 거래창이 열리지 않고, 상대에게 "초대"만 갑니다. */
@@ -251,6 +268,12 @@ export type ServerMessage =
   | { type: "pvp_freeze"; durationSec: number }
   /** 같은 방의 다른 사람이 스킬을 썼다는 순수 연출용 중계 — 그대로 이펙트만 재생합니다. */
   | { type: "player_skill_fx"; fromId: string; slot: number; weaponId: string | null; position: Vec3Like; aimYaw: number }
+  /** 같은 방의 다른 사람이 기본 근접 공격을 냈다는 순수 연출용 중계. */
+  | { type: "player_melee_fx"; fromId: string }
+  /** 같은 방의 다른 사람이 Q 대쉬를 썼다는 순수 연출용 중계 — dx/dz는 대쉬 방향. */
+  | { type: "player_dash_fx"; fromId: string; dx: number; dz: number }
+  /** 같은 방의 다른 사람이 R 순간이동을 했다는 순수 연출용 중계 — 도착 지점. */
+  | { type: "player_teleport_fx"; fromId: string; position: Vec3Like }
   // --- 거래 / 선물 ---------------------------------------------------------
   /** 거래 신청이 상대에게 도착했을 때 — 상대만 받습니다 (수락/거절 버튼을 보여줌). */
   | { type: "trade_invite"; fromId: string; fromName: string }

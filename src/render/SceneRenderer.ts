@@ -10,7 +10,14 @@ import { skillsForWeapon } from "../simulation/weaponSkills";
 import { skillsForFruit, withCharge, type SkillDef } from "../simulation/skills";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
-import type { RemoteEnemyGhost, RemotePlayerView, RemoteSkillFx } from "../network/MultiplayerClient";
+import type {
+  RemoteDashFx,
+  RemoteEnemyGhost,
+  RemoteMeleeFx,
+  RemotePlayerView,
+  RemoteSkillFx,
+  RemoteTeleportFx,
+} from "../network/MultiplayerClient";
 import { dist2D, skillOrigin } from "../simulation/ShapeMath";
 import {
   buildEmberOverlayGroup,
@@ -258,6 +265,54 @@ function buildBlockyCharacter(color: number): THREE.Group {
 }
 
 /**
+ * 원격(다른 플레이어) 캐릭터에 붙일 무기 모델 인스턴스를 새로 만듭니다.
+ * registerWeaponVisual(로컬 전용)이 하나의 THREE.Object3D를 만들어 그대로
+ * playerVisual에 붙이는 것과 달리, 원격 플레이어는 여러 명이 동시에 같은
+ * 무기를 들 수 있어 Object3D를 공유할 수 없으므로(부모가 하나뿐) 호출할
+ * 때마다 새 지오메트리/머티리얼로 다시 빌드합니다 — 위치·회전·크기는
+ * 로컬 등록부(constructor의 registerWeaponVisual 호출들)와 정확히 맞춥니다.
+ */
+function buildWeaponVisualInstance(id: string): THREE.Group | null {
+  switch (id) {
+    case "sword_yoru": {
+      const g = buildYoru();
+      g.scale.setScalar(0.6);
+      g.position.set(-0.7, 0.78, 0.05);
+      g.rotation.set(0.22, 0, 0.5);
+      return g;
+    }
+    case "sword_wood": {
+      const g = buildWoodenSword();
+      g.scale.setScalar(0.6);
+      g.position.set(-0.7, 0.78, 0.05);
+      g.rotation.set(0.22, 0, 0.5);
+      return g;
+    }
+    case "sword_santoryu": {
+      const g = buildSantoryu();
+      g.scale.setScalar(0.62);
+      return g;
+    }
+    case "sword_enma": {
+      const g = buildEnma();
+      g.scale.setScalar(0.6);
+      g.position.set(-0.7, 0.78, 0.05);
+      g.rotation.set(0.22, 0, 0.5);
+      return g;
+    }
+    case "gun_slingshot": {
+      const g = buildSlingshot();
+      g.scale.setScalar(0.75);
+      g.position.set(-0.7, 0.78, 0.05);
+      g.rotation.set(0.22, 0, 0.5);
+      return g;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
  * 흑도 "요루" — 등에 메지 않고 손에 든 상태로 표현합니다.
  * 숫자키로 뽑았을 때만 보이도록 visible을 토글해 씁니다.
  */
@@ -491,6 +546,27 @@ function buildWindTrailGroup(): THREE.Group {
   return group;
 }
 
+/**
+ * R 순간이동 플래시 — 출발/도착 지점에 잠깐 뜨는 확장하며 옅어지는 고리.
+ * SceneRenderer.sync()가 이 그룹의 스케일/투명도를 ~0.3초에 걸쳐 갱신하고 지웁니다.
+ */
+function buildTeleportFlashGroup(): THREE.Group {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xbfe9ff,
+    transparent: true,
+    opacity: 0.85,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.5, 24), mat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.1;
+  group.add(ring);
+  return group;
+}
+
 /** 부두에 정박하는 작은 배 (플레이스홀더 지오메트리) */
 interface BoatVisual {
   group: THREE.Group;
@@ -638,6 +714,12 @@ interface RemotePlayerVisual {
   group: THREE.Group;
   nameTag: ReturnType<typeof buildCanvasSprite>;
   lastLabel: string;
+  /** 걷기/스윙 애니메이션용 팔다리 피벗 — 로컬 플레이어(playerParts)와 같은 구조. */
+  parts: BlockyCharacter;
+  /** 지금 이 원격 플레이어의 손에 붙어 있는 무기 모델의 id(없으면 null). */
+  weaponId: string | null;
+  /** weaponId에 대응하는 실제로 붙어 있는 무기 인스턴스(없으면 null). */
+  weaponVisual: THREE.Group | null;
 }
 
 /** 다른 플레이어의 색은 진영으로 정합니다 — 몬스터·NPC와는 다른 배색이라 한눈에 구분됩니다. */
@@ -728,6 +810,12 @@ export class SceneRenderer {
 
   // ── Q 대쉬 바람 이펙트 ──────────────────────────────────────────────────
   private dashTrails: { group: THREE.Group; startedAtMs: number }[] = [];
+
+  // ── 다른 플레이어의 PvP 시각 동기화 ────────────────────────────────────────
+  /** 다른 플레이어가 기본 공격을 낸 시각(performance.now() 기준) — 팔 스윙 애니메이션에 씁니다. */
+  private remoteAttackSwingAtMs = new Map<string, number>();
+  /** R 순간이동 순간에 뜨는, 출발/도착 지점의 짧은 링 플래시. */
+  private teleportFlashes: { group: THREE.Group; startedAtMs: number }[] = [];
 
   // ── 기본 공격(좌클릭) 검 휘두르기 모션 ────────────────────────────────────
   /** 각 무기 모델의 "쥐고 있을 때" 기본 회전값 — 휘두르는 동안 여기서부터 튀어나갔다 돌아옵니다 */
@@ -1154,7 +1242,12 @@ export class SceneRenderer {
   private ensureRemotePlayerVisual(id: string, faction: string): RemotePlayerVisual {
     let visual = this.remotePlayerVisuals.get(id);
     if (!visual) {
-      const group = buildBlockyCharacter(REMOTE_FACTION_COLORS[faction] ?? 0xcccccc);
+      // buildBlockyCharacter(간편 버전) 대신 buildBlockyCharacterParts를 써서
+      // 로컬 플레이어와 동일하게 팔다리 피벗을 갖게 합니다 — 걷기 모션과
+      // 무기 부착, 기본 공격 스윙 애니메이션을 다른 사람 화면에도 재생하려면
+      // 이 피벗들이 필요합니다 (playerParts와 같은 구조).
+      const parts = buildBlockyCharacterParts(REMOTE_FACTION_COLORS[faction] ?? 0xcccccc);
+      const group = parts.group;
       // 거래하려고 마우스로 이 플레이어를 가리켰는지 판정할 때, 레이캐스트가 맞힌
       // 메시에서 그룹까지 부모를 타고 올라가며 이 id를 찾습니다.
       group.traverse((obj) => {
@@ -1164,7 +1257,7 @@ export class SceneRenderer {
       nameTag.sprite.position.y = 2.7;
       group.add(nameTag.sprite);
       this.scene.add(group);
-      visual = { group, nameTag, lastLabel: "" };
+      visual = { group, nameTag, lastLabel: "", parts, weaponId: null, weaponVisual: null };
       this.remotePlayerVisuals.set(id, visual);
     }
     return visual;
@@ -1177,12 +1270,40 @@ export class SceneRenderer {
    */
   syncRemotePlayers(remotePlayers: RemotePlayerView[]) {
     const seen = new Set<string>();
+    const nowMs = performance.now();
     for (const r of remotePlayers) {
       seen.add(r.snapshot.id);
       const visual = this.ensureRemotePlayerVisual(r.snapshot.id, r.snapshot.faction);
       visual.group.visible = true;
       visual.group.position.set(r.renderX, r.renderY, r.renderZ);
       visual.group.rotation.y = r.renderYaw;
+
+      // 손에 든 무기 — drawnWeaponId가 바뀌었을 때만 떼고 새로 답니다.
+      if (r.snapshot.drawnWeaponId !== visual.weaponId) {
+        if (visual.weaponVisual) {
+          visual.group.remove(visual.weaponVisual);
+          visual.weaponVisual.traverse((obj) => {
+            if (obj instanceof THREE.Mesh) {
+              obj.geometry.dispose();
+              (obj.material as THREE.Material).dispose();
+            }
+          });
+        }
+        visual.weaponId = r.snapshot.drawnWeaponId;
+        visual.weaponVisual = visual.weaponId ? buildWeaponVisualInstance(visual.weaponId) : null;
+        if (visual.weaponVisual) visual.group.add(visual.weaponVisual);
+      }
+
+      // 기본 공격(좌클릭) 휘두르기 — player_melee_fx를 받은 시각부터 로컬과
+      // 같은 커브(사인 곡선)로 오른팔/무기를 튀어나갔다 되돌아오게 합니다.
+      const swingAt = this.remoteAttackSwingAtMs.get(r.snapshot.id) ?? -Infinity;
+      const swingT = (nowMs - swingAt) / ATTACK_SWING_DURATION_MS;
+      const swingArc = swingT >= 0 && swingT < 1 ? Math.sin(swingT * Math.PI) : 0;
+      visual.parts.rightArmPivot.rotation.x = -swingArc * ATTACK_SWING_ARM_AMPLITUDE;
+      if (visual.weaponVisual) {
+        const baseRotX = visual.weaponId ? this.weaponBaseRotationX.get(visual.weaponId) ?? 0 : 0;
+        visual.weaponVisual.rotation.x = baseRotX - swingArc * ATTACK_SWING_WEAPON_AMPLITUDE;
+      }
 
       const icon = r.snapshot.faction === "marine" ? "⚓" : "🏴‍☠️";
       const pvpTag = r.snapshot.pvpEnabled ? " ⚔️" : "";
@@ -1207,6 +1328,7 @@ export class SceneRenderer {
       if (seen.has(id)) continue;
       this.scene.remove(visual.group);
       this.remotePlayerVisuals.delete(id);
+      this.remoteAttackSwingAtMs.delete(id);
       if (this.hoverOutlineId === id) this.setHoverOutline(null);
     }
   }
@@ -1321,6 +1443,9 @@ export class SceneRenderer {
     enemyGhosts?: ReadonlyMap<string, RemoteEnemyGhost>,
     remotePlayers?: RemotePlayerView[],
     remoteSkillFx?: RemoteSkillFx[],
+    remoteMeleeFx?: RemoteMeleeFx[],
+    remoteDashFx?: RemoteDashFx[],
+    remoteTeleportFx?: RemoteTeleportFx[],
   ) {
     // 조명과 안개 — 태양은 플레이어를 따라다니고(어느 바다에서든 그림자가 나오도록),
     // 하늘·안개는 지금 있는 바다의 것을 씁니다.
@@ -1476,6 +1601,62 @@ export class SceneRenderer {
         }
       });
       trail.group.scale.setScalar(1 + t * 0.6);
+    }
+
+    // 다른 플레이어의 기본 공격 — 팔/무기 스윙 애니메이션은 syncRemotePlayers()가
+    // remoteAttackSwingAtMs를 읽어서 재생하므로, 여기서는 그 시각만 기록해둡니다.
+    if (remoteMeleeFx) {
+      for (const fx of remoteMeleeFx) {
+        this.remoteAttackSwingAtMs.set(fx.fromId, nowMs);
+      }
+    }
+
+    // 다른 플레이어의 Q 대쉬 — 그 사람의 지금 렌더 위치에 같은 바람 이펙트를 띄웁니다.
+    if (remoteDashFx && remotePlayers) {
+      for (const fx of remoteDashFx) {
+        const view = remotePlayers.find((r) => r.snapshot.id === fx.fromId);
+        if (!view) continue;
+        const trail = buildWindTrailGroup();
+        trail.position.set(view.renderX, view.renderY + 1.0, view.renderZ);
+        trail.rotation.y = Math.atan2(fx.dx, fx.dz);
+        this.scene.add(trail);
+        this.dashTrails.push({ group: trail, startedAtMs: nowMs });
+      }
+    }
+
+    // 다른 플레이어의 R 순간이동 — 출발/도착 지점 둘 다에 짧은 링 플래시를 띄웁니다.
+    // 렌더 위치 자체는 MultiplayerClient.RemotePlayerView.snapTo()가 이미
+    // 보간 없이 즉시 옮겨뒀으므로, 여기서는 시각 효과만 담당합니다.
+    if (remoteTeleportFx) {
+      for (const fx of remoteTeleportFx) {
+        for (const point of [fx.from, fx.to]) {
+          const flash = buildTeleportFlashGroup();
+          flash.position.set(point.x, point.y + 0.05, point.z);
+          this.scene.add(flash);
+          this.teleportFlashes.push({ group: flash, startedAtMs: nowMs });
+        }
+      }
+    }
+    for (let i = this.teleportFlashes.length - 1; i >= 0; i--) {
+      const flash = this.teleportFlashes[i];
+      const t = (nowMs - flash.startedAtMs) / 300;
+      if (t >= 1) {
+        this.scene.remove(flash.group);
+        flash.group.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            (obj.material as THREE.Material).dispose();
+          }
+        });
+        this.teleportFlashes.splice(i, 1);
+        continue;
+      }
+      flash.group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.material instanceof THREE.MeshBasicMaterial) {
+          obj.material.opacity = 0.85 * (1 - t);
+        }
+      });
+      flash.group.scale.setScalar(1 + t * 2.5);
     }
 
     // 요루/삼도류/엔마 스킬 이펙트 — 내가 이번 프레임에 스킬을 썼으면 지금

@@ -50,6 +50,28 @@ export interface RemoteSkillFx {
   aimYaw: number;
 }
 
+/** 다른 플레이어가 기본 근접 공격을 냈다고 서버가 알려준 것 — 순수 연출용입니다. */
+export interface RemoteMeleeFx {
+  fromId: string;
+}
+
+/** 다른 플레이어가 Q 대쉬를 썼다고 서버가 알려준 것 — 순수 연출용입니다. */
+export interface RemoteDashFx {
+  fromId: string;
+  dx: number;
+  dz: number;
+}
+
+/**
+ * 다른 플레이어가 R 순간이동을 했다고 서버가 알려준 것. from은 순간이동 직전
+ * 렌더 위치(보간 중이던 자리), to는 도착 지점 — 양쪽 다 이펙트를 띄우는 데 씁니다.
+ */
+export interface RemoteTeleportFx {
+  fromId: string;
+  from: Vec3Like;
+  to: Vec3Like;
+}
+
 /** 지금 진행 중인 거래창 상태 — TradeUI가 그대로 읽어서 그립니다. */
 export interface TradeSession {
   partnerId: string;
@@ -128,6 +150,19 @@ export class RemotePlayerView {
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     this.renderYaw += dy * t;
   }
+
+  /**
+   * R 순간이동 알림을 받았을 때 씁니다 — 평소의 지수 보간(step)을 건너뛰고
+   * 렌더 위치와 스냅샷 위치를 동시에 목적지로 그대로 옮깁니다. snapshot만
+   * 옮기면 다음 step()이 이전 렌더 위치에서부터 다시 부드럽게 미끄러져 와서
+   * "순간이동인데 스르륵 이동"하는 것처럼 보이므로, 렌더 좌표도 함께 맞춥니다.
+   */
+  snapTo(x: number, y: number, z: number) {
+    this.renderX = x;
+    this.renderY = y;
+    this.renderZ = z;
+    this.snapshot = { ...this.snapshot, position: { x, y, z } };
+  }
 }
 
 export type MultiplayerStatus = "disconnected" | "connecting" | "connected";
@@ -154,6 +189,12 @@ export class MultiplayerClient {
   private _outgoingTradeInvite: OutgoingTradeInvite | null = null;
   /** 아직 렌더러가 소비하지 않은, 다른 사람의 스킬 이펙트 알림 — 매 프레임 drainSkillFx()로 비웁니다. */
   private _pendingSkillFx: RemoteSkillFx[] = [];
+  /** 아직 렌더러가 소비하지 않은, 다른 사람의 근접 공격 알림 — 매 프레임 drainMeleeFx()로 비웁니다. */
+  private _pendingMeleeFx: RemoteMeleeFx[] = [];
+  /** 아직 렌더러가 소비하지 않은, 다른 사람의 Q 대쉬 알림 — 매 프레임 drainDashFx()로 비웁니다. */
+  private _pendingDashFx: RemoteDashFx[] = [];
+  /** 아직 렌더러가 소비하지 않은, 다른 사람의 R 순간이동 알림 — 매 프레임 drainTeleportFx()로 비웁니다. */
+  private _pendingTeleportFx: RemoteTeleportFx[] = [];
   /** 같은 방 현상금 랭킹 — 서버가 보내주는 대로 그대로 들고 있다가 랭킹 패널이 읽습니다. */
   private _bountyEntries: BountyEntry[] = [];
   /** 이 브라우저(캐릭터)의 영구 id — 재접속해도 같은 사단원으로 인식되도록 hello에 실어 보냅니다. */
@@ -250,6 +291,9 @@ export class MultiplayerClient {
       this._incomingTradeInvite = null;
       this._outgoingTradeInvite = null;
       this._pendingSkillFx = [];
+      this._pendingMeleeFx = [];
+      this._pendingDashFx = [];
+      this._pendingTeleportFx = [];
       this._bountyEntries = [];
       this._myCrew = null;
       this._crewList = [];
@@ -281,6 +325,9 @@ export class MultiplayerClient {
     this._incomingTradeInvite = null;
     this._outgoingTradeInvite = null;
     this._pendingSkillFx = [];
+    this._pendingMeleeFx = [];
+    this._pendingDashFx = [];
+    this._pendingTeleportFx = [];
     this._bountyEntries = [];
     this._myCrew = null;
     this._crewList = [];
@@ -370,6 +417,28 @@ export class MultiplayerClient {
           });
         }
         break;
+
+      case "player_melee_fx":
+        if (msg.fromId !== this.myId) {
+          this._pendingMeleeFx.push({ fromId: msg.fromId });
+        }
+        break;
+
+      case "player_dash_fx":
+        if (msg.fromId !== this.myId) {
+          this._pendingDashFx.push({ fromId: msg.fromId, dx: msg.dx, dz: msg.dz });
+        }
+        break;
+
+      case "player_teleport_fx": {
+        if (msg.fromId !== this.myId) {
+          const view = this.remotePlayers.get(msg.fromId);
+          const from: Vec3Like = view ? { x: view.renderX, y: view.renderY, z: view.renderZ } : msg.position;
+          if (view) view.snapTo(msg.position.x, msg.position.y, msg.position.z);
+          this._pendingTeleportFx.push({ fromId: msg.fromId, from, to: msg.position });
+        }
+        break;
+      }
 
       case "enemy_states": {
         const now = Date.now();
@@ -636,6 +705,45 @@ export class MultiplayerClient {
     if (this._pendingSkillFx.length === 0) return this._pendingSkillFx;
     const out = this._pendingSkillFx;
     this._pendingSkillFx = [];
+    return out;
+  }
+
+  /** 기본 근접 공격을 낼 때마다(전투 후보 유무·PvP 여부와 무관하게) 순수 연출용으로 알립니다. */
+  sendMeleeFx() {
+    this.send({ type: "melee_fx" });
+  }
+
+  /** 아직 화면에 반영하지 않은 다른 사람의 근접 공격 알림을 꺼내고 비웁니다 — 매 프레임 한 번씩. */
+  drainMeleeFx(): RemoteMeleeFx[] {
+    if (this._pendingMeleeFx.length === 0) return this._pendingMeleeFx;
+    const out = this._pendingMeleeFx;
+    this._pendingMeleeFx = [];
+    return out;
+  }
+
+  /** Q 대쉬가 나갈 때마다 순수 연출용으로 알립니다. */
+  sendDashFx(dx: number, dz: number) {
+    this.send({ type: "dash_fx", dx, dz });
+  }
+
+  /** 아직 화면에 반영하지 않은 다른 사람의 Q 대쉬 알림을 꺼내고 비웁니다 — 매 프레임 한 번씩. */
+  drainDashFx(): RemoteDashFx[] {
+    if (this._pendingDashFx.length === 0) return this._pendingDashFx;
+    const out = this._pendingDashFx;
+    this._pendingDashFx = [];
+    return out;
+  }
+
+  /** R 순간이동이 실제로 일어날 때마다 순수 연출용으로 알립니다. */
+  sendTeleportFx(x: number, z: number, y = 0) {
+    this.send({ type: "teleport_fx", position: { x, y, z } });
+  }
+
+  /** 아직 화면에 반영하지 않은 다른 사람의 순간이동 알림을 꺼내고 비웁니다 — 매 프레임 한 번씩. */
+  drainTeleportFx(): RemoteTeleportFx[] {
+    if (this._pendingTeleportFx.length === 0) return this._pendingTeleportFx;
+    const out = this._pendingTeleportFx;
+    this._pendingTeleportFx = [];
     return out;
   }
 

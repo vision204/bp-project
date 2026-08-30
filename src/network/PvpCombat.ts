@@ -155,3 +155,31 @@ export function broadcastSkillFx(state: GameState, mp: MultiplayerClient) {
     }
   }
 }
+
+/**
+ * 기본 근접 공격(좌클릭)을 쓸 때마다(전투 후보 유무·PvP 켬/끔과 무관하게) 같은
+ * 방의 다른 사람 화면에도 휘두르는 모션이 보이도록 순수 연출용 알림을 보냅니다.
+ * broadcastSkillFx와 같은 이유로 processPvpAttacks(데미지 판정, pvpEnabled 가드)와
+ * 분리해뒀습니다.
+ */
+export function broadcastMeleeFx(state: GameState, mp: MultiplayerClient) {
+  if (!mp.connected) return;
+  for (const ev of state.player.events) {
+    if (ev.type === "melee_attack_fired") {
+      mp.sendMeleeFx();
+    }
+  }
+}
+
+/**
+ * Q 대쉬가 나갈 때마다(전투 후보 유무·PvP 켬/끔과 무관하게) 같은 방의 다른 사람
+ * 화면에도 바람 이펙트가 보이도록 순수 연출용 알림을 보냅니다.
+ */
+export function broadcastDashFx(state: GameState, mp: MultiplayerClient) {
+  if (!mp.connected) return;
+  for (const ev of state.player.events) {
+    if (ev.type === "player_dashed") {
+      mp.sendDashFx(ev.dx, ev.dz);
+    }
+  }
+}

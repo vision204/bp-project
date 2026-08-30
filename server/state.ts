@@ -601,6 +601,28 @@ export class World {
         break;
       }
 
+      case "melee_fx":
+        // 순수 연출 중계 — 데미지 판정이 아니므로 검증 없이 그대로 뿌립니다.
+        this.broadcastRoom(conn.roomId, { type: "player_melee_fx", fromId: conn.id }, conn.id);
+        break;
+
+      case "dash_fx": {
+        const dx = clampFinite(msg.dx, -1, 1, 0);
+        const dz = clampFinite(msg.dz, -1, 1, 0);
+        this.broadcastRoom(conn.roomId, { type: "player_dash_fx", fromId: conn.id, dx, dz }, conn.id);
+        break;
+      }
+
+      case "teleport_fx": {
+        const position = {
+          x: clampFinite(msg.position?.x, -20000, 20000, conn.position.x),
+          y: clampFinite(msg.position?.y, -500, 2000, conn.position.y),
+          z: clampFinite(msg.position?.z, -20000, 20000, conn.position.z),
+        };
+        this.broadcastRoom(conn.roomId, { type: "player_teleport_fx", fromId: conn.id, position }, conn.id);
+        break;
+      }
+
       case "enemy_states": {
         const enemies = clampEnemySyncEntries(msg.enemies);
         if (enemies.length > 0) {
