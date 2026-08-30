@@ -620,7 +620,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 1.3,
       manaCost: 7,
       damage: 17,
-      shape: { kind: "line", range: 12, width: 1.4 },
+      // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 12→24로 확장했습니다.
+      shape: { kind: "line", range: 24, width: 1.4 },
       originAtMouse: true,
       description: "빛을 압축해 쏘아내는 빠른 탄환. 짧은 쿨다운으로 자주 견제할 수 있습니다.",
     },
@@ -632,7 +633,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 3.5,
       manaCost: 15,
       damage: 26,
-      shape: { kind: "line", range: 9, width: 1.8 },
+      // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 9→18로 확장했습니다.
+      shape: { kind: "line", range: 18, width: 1.8 },
       originAtMouse: true,
       description: "빛으로 벼려낸 검을 던져 전방을 꿰뚫습니다.",
     },
@@ -674,7 +676,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 1.5,
       manaCost: 8,
       damage: 18,
-      shape: { kind: "line", range: 8, width: 1.6 },
+      // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 8→16으로 확장했습니다.
+      shape: { kind: "line", range: 16, width: 1.6 },
       originAtMouse: true,
       description: "용의 발톱으로 전방을 할퀴어 베어냅니다.",
     },
@@ -686,7 +689,9 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 6,
       manaCost: 20,
       damage: 30,
-      shape: { kind: "cone", range: 10, halfAngleDeg: 35 },
+      // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 10→20으로 확장했습니다
+      // (halfAngleDeg는 요청 범위 밖이라 그대로 뒀습니다).
+      shape: { kind: "cone", range: 20, halfAngleDeg: 35 },
       originAtMouse: true,
       description: "용의 포효로 충격파를 일으켜 넓은 전방을 밀어붙입니다.",
     },
@@ -698,7 +703,9 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 9,
       manaCost: 28,
       damage: 46,
-      shape: { kind: "cone", range: 11, halfAngleDeg: 20 },
+      // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 11→22로 확장했습니다
+      // (halfAngleDeg는 요청 범위 밖이라 그대로 뒀습니다).
+      shape: { kind: "cone", range: 22, halfAngleDeg: 20 },
       originAtMouse: true,
       description: "용의 브레스로 좁고 강한 화염을 길게 내뿜습니다.",
     },

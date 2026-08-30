@@ -3,7 +3,7 @@ import type { BountyEntry } from "../network/protocol";
 import { MAX_LEVEL } from "../core/ExpCurve";
 import { formatBuffTime } from "../simulation/BuffSystem";
 import { SEA_LABELS, getIsland } from "../world/islands";
-import { SLOT_KEYS, isSlotUnlocked, skillsForFruit } from "../simulation/skills";
+import { DRAGON_FLIGHT_SKILL, LIGHT_FLIGHT_SKILL, SLOT_KEYS, isSlotUnlocked, skillsForFruit } from "../simulation/skills";
 import { isWeaponSlotUnlocked, skillsForWeapon } from "../simulation/weaponSkills";
 import { weaponMasteryLevel } from "../simulation/WeaponLeveling";
 import { drawnWeapon, weaponFor } from "../simulation/WeaponSystem";
@@ -420,14 +420,28 @@ export class Hud {
           ? isWeaponSlotUnlocked(slot, masteryLevel)
           : false;
 
+    // 빛빛/용용의 F 특수 능력(빛의 비행/용의 비행) — 일반 Z/X/C/V 4슬롯 시스템
+    // 밖의 예외라 skillsForFruit()에는 없지만(slot: -1, skills.ts 참고),
+    // 사용자 요청으로 V 슬롯 바로 다음에 5번째 아이콘으로 보여줍니다. 열매를
+    // 뽑아 든 동안에만(다른 4개 슬롯과 같은 조건) 보이고, F 스킬 정의(unlockFruitLevel)
+    // 로 잠금 여부도 똑같이 표시합니다.
+    const fSkill =
+      activeMode === "fruit" && p.equippedFruit === "light_light"
+        ? LIGHT_FLIGHT_SKILL
+        : activeMode === "fruit" && p.equippedFruit === "dragon_dragon"
+          ? DRAGON_FLIGHT_SKILL
+          : null;
+    const fUnlocked = fSkill ? p.fruitLevel >= fSkill.unlockFruitLevel : false;
+
     const structureSig = [
       activeMode,
       activeMode === "fruit" ? p.equippedFruit : activeMode === "weapon" ? heldWeapon!.id : "",
       skills.map((_, i) => (isUnlocked(i) ? 1 : 0)).join(""),
+      fSkill ? (fUnlocked ? "F1" : "F0") : "",
     ].join("|");
     if (structureSig !== this.skillRowSignature) {
       this.skillRowSignature = structureSig;
-      this.skillRow.innerHTML =
+      const slotsHtml =
         activeMode === "none"
           ? ""
           : skills
@@ -442,6 +456,16 @@ export class Hud {
                 return `<div class="skill-slot ${unlocked ? "" : "locked"}">${body}<div class="skill-key">${SLOT_KEYS[slot]}</div></div>`;
               })
               .join("");
+      const fHtml = fSkill
+        ? (() => {
+            const body = fUnlocked
+              ? `<div class="skill-body"><div class="skill-name">${fSkill.name}</div><div class="skill-cost">${fSkill.manaCost} MP</div></div>` +
+                `<div class="cooldown-overlay" hidden></div>`
+              : `<div class="skill-body"><div class="skill-lock">🔒</div><div class="skill-lock-req">열매 Lv.${fSkill.unlockFruitLevel}</div></div>`;
+            return `<div class="skill-slot ${fUnlocked ? "" : "locked"}" data-f-skill="1">${body}<div class="skill-key">F</div></div>`;
+          })()
+        : "";
+      this.skillRow.innerHTML = slotsHtml + fHtml;
     }
 
     const slotEls = this.skillRow.querySelectorAll<HTMLDivElement>(".skill-slot");
@@ -457,6 +481,21 @@ export class Hud {
       }
       el.classList.toggle("no-mana", unlocked && cd <= 0 && p.mana < skill.manaCost);
     });
+
+    // F 슬롯의 쿨다운 숫자만 따로 갱신합니다(구조는 위에서 이미 만들었으므로).
+    if (fSkill) {
+      const fEl = this.skillRow.querySelector<HTMLDivElement>('.skill-slot[data-f-skill="1"]');
+      if (fEl) {
+        const cd =
+          p.equippedFruit === "light_light" ? p.lightFlightCooldownRemainingSec : p.dragonFlightCooldownRemainingSec;
+        const overlay = fEl.querySelector<HTMLDivElement>(".cooldown-overlay");
+        if (overlay) {
+          overlay.hidden = cd <= 0;
+          if (cd > 0) overlay.textContent = cd.toFixed(1);
+        }
+        fEl.classList.toggle("no-mana", fUnlocked && cd <= 0 && p.mana < fSkill.manaCost);
+      }
+    }
 
     // 퀘스트 진행 상황 트래커 (활성 상태인 퀘스트가 있을 때만 표시)
     const activeQuest = state.quests.find((q) => q.status === "active");

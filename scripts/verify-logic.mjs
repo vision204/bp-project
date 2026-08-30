@@ -1709,8 +1709,11 @@ section("빛빛/용용 열매 — 카탈로그·Z/X/C(/V) 스킬 정의");
   const light = skillsForFruit("light_light");
   assert(light.length === 4, `빛빛은 Z/X/C/V 4개 스킬 (실제 ${light.length}개)`);
   assert(light[0].id === "light_z" && light[0].damage === 17 && light[0].cooldownSec === 1.3 && light[0].manaCost === 7, "빛의 탄환 수치");
-  assert(light[0].shape.kind === "line" && light[0].shape.range === 12 && light[0].originAtMouse === true, "빛의 탄환: 직선 판정 + 마우스 방향 발사");
+  // 사용자 요청으로 빛의 탄환 사정거리를 두 배로 늘렸습니다 (12 → 24).
+  assert(light[0].shape.kind === "line" && light[0].shape.range === 24 && light[0].originAtMouse === true, `빛의 탄환: 사정거리 2배 확장(24m) + 마우스 방향 발사 (실제 ${light[0].shape.range}m)`);
   assert(light[1].id === "light_x" && light[1].damage === 26 && light[1].unlockFruitLevel === 25, "빛의 검 수치");
+  // 사용자 요청으로 빛의 검 사정거리를 두 배로 늘렸습니다 (9 → 18).
+  assert(light[1].shape.kind === "line" && light[1].shape.range === 18, `빛의 검: 사정거리 2배 확장(18m) (실제 ${light[1].shape.range}m)`);
   assert(light[2].id === "light_c" && light[2].shape.kind === "radial" && light[2].originAtMouse === true && light[2].originAtAim === true, "빛의 포격: 마우스 지점 radial 낙하형(originAtMouse+originAtAim)");
   assert(light[3].id === "light_v" && light[3].damage === 62 && light[3].unlockFruitLevel === 75, "광속 일격 수치");
 
@@ -1721,8 +1724,14 @@ section("빛빛/용용 열매 — 카탈로그·Z/X/C(/V) 스킬 정의");
   // 넣지 않고 배열을 3개로 짧게 뒀습니다.
   assert(dragon.length === 3, `용용은 이번 범위에서 Z/X/C 3개만 구현(V는 추후 별도 작업) (실제 ${dragon.length}개)`);
   assert(dragon[0].id === "dragon_z" && dragon[0].damage === 18 && dragon[0].shape.kind === "line", "용의 발톱: 직선 판정");
+  // 사용자 요청으로 용의 발톱 사정거리를 두 배로 늘렸습니다 (8 → 16).
+  assert(dragon[0].shape.range === 16, `용의 발톱: 사정거리 2배 확장(16m) (실제 ${dragon[0].shape.range}m)`);
   assert(dragon[1].id === "dragon_x" && dragon[1].damage === 30 && dragon[1].shape.kind === "cone", "용의 포효: 부채꼴 판정");
+  // 사용자 요청으로 용의 포효 사정거리를 두 배로 늘렸습니다 (10 → 20). halfAngleDeg는 그대로.
+  assert(dragon[1].shape.range === 20 && dragon[1].shape.halfAngleDeg === 35, `용의 포효: 사정거리 2배 확장(20m), 각도 유지(35도) (실제 ${dragon[1].shape.range}m / ${dragon[1].shape.halfAngleDeg}도)`);
   assert(dragon[2].id === "dragon_c" && dragon[2].damage === 46 && dragon[2].shape.kind === "cone", "용의 화염: 부채꼴 판정");
+  // 사용자 요청으로 용의 화염 사정거리를 두 배로 늘렸습니다 (11 → 22). halfAngleDeg는 그대로.
+  assert(dragon[2].shape.range === 22 && dragon[2].shape.halfAngleDeg === 20, `용의 화염: 사정거리 2배 확장(22m), 각도 유지(20도) (실제 ${dragon[2].shape.range}m / ${dragon[2].shape.halfAngleDeg}도)`);
   assert(dragon.every((sk) => sk.originAtMouse === true), "용용의 모든 공격 스킬이 마우스 방향으로 발사됨");
 }
 

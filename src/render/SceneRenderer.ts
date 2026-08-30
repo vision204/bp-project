@@ -92,6 +92,17 @@ const SKY_FALL_SKILL_IDS = new Set(["light_c", "light_v"]);
  */
 const SKILL_MODEL_YAW_OFFSET: Record<string, number> = {
   ice_z: Math.PI / 2,
+  // 사용자 피드백: 빛의 탄환/빛의 검/용의 발톱/용의 포효/용의 화염 모델도
+  // 뾰족한/날카로운 끝이 진행 방향을 보지 않고 옆을 보고 있다고 함 —
+  // 기존에 확인된 유일한 실제 원인(ice_z)이 90도(Math.PI/2) 어긋남이었으므로,
+  // 같은 보정을 우선 적용합니다. 시각 확인이 불가능한 최선의 추정치이며,
+  // "여전히 반대/90도 더 틀어짐" 피드백을 받으면 부호를 바꾸거나 값을
+  // 조정해야 할 수 있습니다.
+  light_z: Math.PI / 2,
+  light_x: Math.PI / 2,
+  dragon_z: Math.PI / 2,
+  dragon_x: Math.PI / 2,
+  dragon_c: Math.PI / 2,
 };
 
 /**
@@ -122,6 +133,41 @@ const SKILL_MODEL_SCALE = NPC_HEIGHT_APPROX * 3.6;
  * 사용자 피드백(ㅋㅋㅋ)에 따라 "손에 든 큰 검" 정도의 크기로 줄였습니다.
  */
 const SAND_BLADE_SCALE = NPC_HEIGHT_APPROX * 1.15;
+
+// ── 용의 비행(dragon_dragon, F 능력) 전용 — 실제 몸 전체를 용 모델로 바꿔치기 ──
+// 사용자 피드백: 기존 dragon_f 오라(몸을 감싸는 연출)는 "날아다니는 자세"가
+// 아니라 그냥 공중에 뜬 모습이었다고 함. public/models/skills/dragon_v.glb
+// (원래는 "V: 용으로 변신" 능력용으로 만들어졌지만 그 능력 자체는 이번
+// 작업 범위 밖 — skills.ts의 dragon_dragon 배열이 여전히 3개인 이유 참고)을
+// 재사용해서, 비행 중에는 캐릭터를 완전히 숨기고 이 GLB를 몸 대신 직접
+// 씬에 띄워 "몸을 쭉 펴고 하늘을 헤엄치는" 모습을 냅니다.
+const DRAGON_FLIGHT_MODEL_PATH = "models/skills/dragon_v.glb";
+/**
+ * dragon_v.glb의 로컬 바운딩 박스를 실제로 재보니(스크립트로 GLB의 JSON
+ * 청크 accessor min/max를 직접 파싱) X≈0.89, Y≈0.98(가장 긴 축), Z≈0.47
+ * (가장 얇은 축)이었습니다 — "가만히 떠 있는" 자세로 만들어진 모델답게
+ * Y(위아래)가 키, Z(앞뒤)가 가장 얇은 두께입니다. 스켈레톤/애니메이션은
+ * 없는 정적 메시(스크립트로 skins/animations 필드가 비어 있음을 확인) —
+ * 그래서 뼈대 애니메이션이 아니라 그룹 전체를 절차적으로 회전/이동시키는
+ * 방식이 유일하게 가능한 접근입니다.
+ *
+ * "몸을 눕혀 쭉 펴고 코가 진행 방향을 보게" 하려면 모델의 +Y(머리 쪽 위)
+ * 축이 이동 방향(+Z, 이 코드베이스의 전방 축)을 향하도록 로컬 X축 기준으로
+ * +90도(Math.PI/2) 돌려야 합니다 — 직접 미리보기가 불가능한 상태에서의
+ * 최선의 추정치이며, "몸통이 위아래가 뒤집혀 보인다"거나 "거꾸로 난다"는
+ * 피드백을 받으면 부호를 반대로(-Math.PI/2) 바꿔야 할 수 있습니다.
+ */
+const DRAGON_FLIGHT_BASE_PITCH = Math.PI / 2;
+/** 캐릭터를 완전히 대신하는 몸이므로, 기존 오라들과 같은 "만화처럼 거대한" 스케일을 그대로 씁니다. */
+const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE;
+/** 헤엄치듯 상하로 일렁이는 피치 진동 진폭(라디안) — 사용자 요청 범위(8~12도) 중간값. */
+const DRAGON_SWIM_PITCH_AMPLITUDE = (10 * Math.PI) / 180;
+/** 피치 진동 주파수(Hz) — 사용자 요청 범위(1.2~1.8Hz) 중간값. */
+const DRAGON_SWIM_FREQUENCY_HZ = 1.5;
+/** 살짝 위아래로 출렁이는 수직 이동(m) — 사용자 요청 범위(0.15~0.3m) 중간값. */
+const DRAGON_SWIM_BOB_AMPLITUDE = 0.22;
+/** 수직 이동을 피치 진동과 살짝 어긋나게(1/4 주기) 둬서 "일렁이는 헤엄" 느낌을 냅니다. */
+const DRAGON_SWIM_BOB_PHASE_OFFSET = Math.PI / 2;
 
 /**
  * 로드된 GLB는 크기와 원점이 제각각이라(모델러/AI 생성 파이프라인이 서로
@@ -810,6 +856,13 @@ export class SceneRenderer {
    * 붙어 있다가 해당 상태가 켜져 있는 동안만 보이는 인스턴스입니다.
    */
   private skillAuraVisuals = new Map<string, THREE.Group>();
+  /**
+   * 용의 비행(dragon_v.glb) 전용 — 다른 스킬 오라들과 달리 playerVisual의
+   * 자식이 아니라 씬에 직접 붙입니다. 캐릭터 몸 전체를 "대신"해야 하므로
+   * (playerVisual은 비행 중 통째로 숨김), 자체적으로 매 프레임 위치·회전을
+   * 계산해서 따라다니게 합니다(sync() 참고).
+   */
+  private dragonFlightVisual: THREE.Group | null = null;
   private readonly gltfLoader: GLTFLoader;
   private enemyVisuals = new Map<string, EnemyVisual>();
   private npcVisuals = new Map<string, NpcVisual>();
@@ -946,6 +999,7 @@ export class SceneRenderer {
     for (const skillId of SKILL_MODEL_IDS) {
       this.loadSkillModel(skillId);
     }
+    this.loadDragonFlightVisual();
 
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -1028,6 +1082,31 @@ export class SceneRenderer {
       undefined,
       (err) => {
         console.warn(`스킬 이펙트 모델을 불러오지 못했습니다 (${skillId}):`, err);
+      },
+    );
+  }
+
+  /**
+   * 용의 비행 전용 dragon_v.glb를 불러와 씬에 직접(playerVisual의 자식이
+   * 아니라) 추가합니다. skillAuraVisuals와 달리 이 모델은 캐릭터를 완전히
+   * "대신"해야 해서, 걷기 애니메이션 등 playerVisual에 걸린 다른 자식
+   * 트랜스폼과 얽히지 않도록 독립된 그룹으로 둡니다. 로드 전까지는
+   * dragonFlightVisual이 null이라 sync()가 조용히 건너뜁니다.
+   */
+  private loadDragonFlightVisual() {
+    const url = `${import.meta.env.BASE_URL}${DRAGON_FLIGHT_MODEL_PATH}`;
+    this.gltfLoader.load(
+      url,
+      (gltf) => {
+        const normalized = normalizeAndCenterModel(gltf.scene, 1);
+        normalized.scale.setScalar(DRAGON_FLIGHT_MODEL_SCALE);
+        normalized.visible = false;
+        this.scene.add(normalized);
+        this.dragonFlightVisual = normalized;
+      },
+      undefined,
+      (err) => {
+        console.warn("용의 비행 모델을 불러오지 못했습니다 (dragon_v):", err);
       },
     );
   }
@@ -1915,8 +1994,12 @@ export class SceneRenderer {
         // 빛의 비행 — 순간 돌진 직후 lightFormRemainingSec 동안만 잠깐 보입니다.
         aura.visible = state.player.lightFormRemainingSec > 0 && state.player.fruitDrawn;
       } else if (skillId === "dragon_f") {
-        // 용의 비행 — 날고 있는 동안 내내 보입니다.
-        aura.visible = state.player.dragonFlightActive && state.player.fruitDrawn;
+        // 용의 비행 — 사용자 피드백으로 "몸을 감싸는 오라"가 아니라
+        // dragon_v.glb를 몸 대신 직접 보여주는 방식(아래 dragonFlightVisual)
+        // 으로 완전히 대체됐습니다. dragon_f 자체는 다른 용도가 없어서(활성화
+        // 순간의 별도 버스트 연출 없음) 이제 항상 숨깁니다 — GLB 로딩/등록은
+        // 그대로 둬서(파일 삭제·참조 제거는 안 함) 다른 곳에 영향이 없게 합니다.
+        aura.visible = false;
       }
     }
 
@@ -1946,7 +2029,37 @@ export class SceneRenderer {
 
     // 1인칭: 내 캐릭터가 시야를 가리지 않도록 숨깁니다.
     const firstPerson = !riding && zoom <= FIRST_PERSON_THRESHOLD;
-    this.playerVisual.visible = !firstPerson;
+    // 용의 비행 중에는 평소 블록형 캐릭터 대신 dragon_v.glb를 몸으로 보여주므로,
+    // 평소 캐릭터는 통째로 숨깁니다(예전 dragon_f 오라 방식은 캐릭터를 숨기지
+    // 않고 위에 덧씌우기만 했지만, "실제 몸을 대신"하라는 요청에 따라 바꿨습니다).
+    const dragonFlying = state.player.dragonFlightActive && state.player.fruitDrawn;
+    this.playerVisual.visible = !firstPerson && !dragonFlying;
+    if (this.dragonFlightVisual) {
+      this.dragonFlightVisual.visible = dragonFlying && !firstPerson;
+      if (dragonFlying) {
+        // 헤엄치듯 몸을 일렁이게 하는 절차적 애니메이션 — 뼈대가 없는 정적
+        // 메시라 그룹 전체의 회전/위치만 사인파로 흔듭니다(피치 진동 + 살짝
+        // 어긋난 위상의 수직 bob). 기본자세(DRAGON_FLIGHT_BASE_PITCH)에 이
+        // 진동을 더해 "쭉 뻗은 채 위아래로 굽이치며 나는" 느낌을 냅니다.
+        const phase = (nowMs / 1000) * DRAGON_SWIM_FREQUENCY_HZ * Math.PI * 2;
+        const oscPitch = DRAGON_SWIM_PITCH_AMPLITUDE * Math.sin(phase);
+        const bobY = DRAGON_SWIM_BOB_AMPLITUDE * Math.sin(phase + DRAGON_SWIM_BOB_PHASE_OFFSET);
+        const pitchQuat = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0),
+          DRAGON_FLIGHT_BASE_PITCH + oscPitch,
+        );
+        const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), state.player.yaw);
+        // 로컬(모델 좌표계) 피치를 먼저 적용하고, 그 결과를 월드 Y축 기준
+        // 진행 방향(yaw)으로 돌립니다 — 자식(피치)이 부모(요)를 따라가는
+        // 합성 순서라 쿼터니언 곱셈은 yaw * pitch 순서여야 합니다.
+        this.dragonFlightVisual.quaternion.copy(yawQuat).multiply(pitchQuat);
+        this.dragonFlightVisual.position.set(
+          state.player.position.x,
+          state.player.position.y + NPC_HEIGHT_APPROX / 2 + bobY,
+          state.player.position.z,
+        );
+      }
+    }
     const yaw = playerController.camYaw;
     const pitch = playerController.camPitch;
     // 카메라를 눈높이보다 조금 더 올려주는 보정은 거리에 비례하게 둡니다.
