@@ -33,9 +33,10 @@ const { ISLANDS, WATER_ENTER_Y, islandAt, islandArrivalPosition, boatPosition, w
   await import("../src/world/islands.ts");
 const { QUEST_KILL_TARGET, QUEST_REWARD_PERCENT_OF_LEVEL, applyKillsToQuests, questRewardExp, stepInteraction,
         acceptQuest } = await import("../src/simulation/QuestSystem.ts");
-const { SLOT_KEYS, SLOT_UNLOCK_LEVELS, allSkills, skillsForFruit, isSlotUnlocked } =
+const { SLOT_KEYS, SLOT_UNLOCK_LEVELS, allSkills, skillsForFruit, isSlotUnlocked,
+        LIGHT_FLIGHT_SKILL, DRAGON_FLIGHT_SKILL } =
   await import("../src/simulation/skills.ts");
-const { stepCombat, stepEnemyStatuses, skillDamage, weaponSkillDamage, canMeleeAttack } =
+const { stepCombat, stepEnemyStatuses, skillDamage, weaponSkillDamage, canMeleeAttack, stepFruitSpecialAbility } =
   await import("../src/simulation/CombatSystem.ts");
 const { fruitExpRequiredForLevel, fruitLevelDamageMultiplier, MAX_FRUIT_LEVEL } =
   await import("../src/simulation/FruitLeveling.ts");
@@ -673,7 +674,7 @@ assert(
 );
 
 section("악마의 열매 — 구매하면 인벤토리로, 장착은 별도로");
-assert(FRUIT_CATALOG.length === 5, `상점에 열매 5종 등록`);
+assert(FRUIT_CATALOG.length === 7, `상점에 열매 7종 등록`);
 player.money = 10;
 const cheapest = [...FRUIT_CATALOG].sort((a, b) => a.price - b.price)[0];
 assert(buyFruit(player, cheapest.id, player.events) === false, "코인 부족하면 구매 실패");
@@ -1236,9 +1237,12 @@ stepInteraction(flow, makeInput({ interactPressed: true })); // 재수락
 applyKillsToQuests(flow, kills("pirate_start", 7));
 assert(fp.level > 30, `버프 중엔 90% x2 = 180%라 레벨업 발생 (Lv.${fp.level})`);
 
-section("스킬 카탈로그 (열매 6종 × Z/X/C/V = 24개)");
+section("스킬 카탈로그 (기존 열매 6종 × Z/X/C/V = 24개 + 빛빛 4개 + 용용 3개(V 제외) = 31개)");
 const skills = allSkills();
-assert(skills.length === 24, `총 스킬 ${skills.length}개`);
+// 빛빛/용용의 F 전용 능력(LIGHT_FLIGHT_SKILL/DRAGON_FLIGHT_SKILL)은 slot: -1로
+// 일반 4슬롯 시스템 밖에 있으므로 FRUIT_SKILLS(따라서 allSkills())에 포함되지
+// 않습니다 — 별도로 export되어 있고, 위 섹션에서 이미 따로 검증했습니다.
+assert(skills.length === 31, `총 스킬 ${skills.length}개`);
 const fruitIds = ["magma_fist", "ice_lance", "thunder_strike", "dark_wave", "rubber_barrage", "sand_storm"];
 for (const fid of fruitIds) {
   const fs = skillsForFruit(fid);
@@ -1249,8 +1253,14 @@ for (const fid of fruitIds) {
     `${fid}: 해금 레벨 1/25/50/100`,
   );
 }
-assert(new Set(skills.map((sk) => sk.id)).size === 24, "스킬 id가 모두 고유함");
-assert(new Set(skills.map((sk) => sk.name)).size === 24, "스킬 이름이 모두 고유함");
+// 빛빛/용용은 자체 밸런스 수치(unlockFruitLevel 1/25/50/75, 1/25/50)를 쓰므로
+// 위 6종 전용 루프(해금 레벨 1/25/50/100 고정)와 별도로 슬롯 순서만 확인합니다.
+for (const fid of ["light_light", "dragon_dragon"]) {
+  const fs = skillsForFruit(fid);
+  assert(fs.every((sk, i) => sk.slot === i), `${fid}: 슬롯이 Z/X/C(/V) 순서대로`);
+}
+assert(new Set(skills.map((sk) => sk.id)).size === 31, "스킬 id가 모두 고유함");
+assert(new Set(skills.map((sk) => sk.name)).size === 31, "스킬 이름이 모두 고유함");
 assert(JSON.stringify(SLOT_UNLOCK_LEVELS) === JSON.stringify([1, 25, 50, 100]), `해금 레벨 상수 ${SLOT_UNLOCK_LEVELS}`);
 assert(JSON.stringify(SLOT_KEYS) === JSON.stringify(["Z", "X", "C", "V"]), "키 배치 Z/X/C/V");
 // 슬롯이 뒤로 갈수록 강해지는지 (자기강화형 V는 damage 0이라 제외)
@@ -1685,6 +1695,136 @@ section("밸런스 — 사막의 대검 (모래 열매 V, 쿨다운 없이 토�
   pSand.mana = 999;
   tapSkill(0.016, pSand, [], 3);
   assert(pSand.sandBladeActive === true, "해제 직후에도 쿨다운 없이 바로 다시 장착 가능");
+}
+
+section("빛빛/용용 열매 — 카탈로그·Z/X/C(/V) 스킬 정의");
+{
+  const lightEntry = FRUIT_CATALOG.find((f) => f.id === "light_light");
+  assert(!!lightEntry, "빛빛 열매가 상점 카탈로그에 등록됨");
+  assert(lightEntry.name === "빛빛 열매", `이름 확인 (실제 "${lightEntry.name}")`);
+  const dragonEntry = FRUIT_CATALOG.find((f) => f.id === "dragon_dragon");
+  assert(!!dragonEntry, "용용 열매가 상점 카탈로그에 등록됨");
+  assert(dragonEntry.name === "용용 열매", `이름 확인 (실제 "${dragonEntry.name}")`);
+
+  const light = skillsForFruit("light_light");
+  assert(light.length === 4, `빛빛은 Z/X/C/V 4개 스킬 (실제 ${light.length}개)`);
+  assert(light[0].id === "light_z" && light[0].damage === 17 && light[0].cooldownSec === 1.3 && light[0].manaCost === 7, "빛의 탄환 수치");
+  assert(light[0].shape.kind === "line" && light[0].shape.range === 12 && light[0].originAtMouse === true, "빛의 탄환: 직선 판정 + 마우스 방향 발사");
+  assert(light[1].id === "light_x" && light[1].damage === 26 && light[1].unlockFruitLevel === 25, "빛의 검 수치");
+  assert(light[2].id === "light_c" && light[2].shape.kind === "radial" && light[2].originAtMouse === true && light[2].originAtAim === true, "빛의 포격: 마우스 지점 radial 낙하형(originAtMouse+originAtAim)");
+  assert(light[3].id === "light_v" && light[3].damage === 62 && light[3].unlockFruitLevel === 75, "광속 일격 수치");
+
+  const dragon = skillsForFruit("dragon_dragon");
+  // 사용자 요청으로 V(용으로 변신)는 이번 범위에서 제외 — skillsForFruit()/HUD/
+  // CombatSystem 모두 undefined 슬롯을 그냥 건너뛰도록 이미 짜여 있음을 확인했으므로
+  // (배열 길이가 항상 4여야 한다는 가정이 코드 어디에도 없음), 가짜 "잠긴 V" placeholder를
+  // 넣지 않고 배열을 3개로 짧게 뒀습니다.
+  assert(dragon.length === 3, `용용은 이번 범위에서 Z/X/C 3개만 구현(V는 추후 별도 작업) (실제 ${dragon.length}개)`);
+  assert(dragon[0].id === "dragon_z" && dragon[0].damage === 18 && dragon[0].shape.kind === "line", "용의 발톱: 직선 판정");
+  assert(dragon[1].id === "dragon_x" && dragon[1].damage === 30 && dragon[1].shape.kind === "cone", "용의 포효: 부채꼴 판정");
+  assert(dragon[2].id === "dragon_c" && dragon[2].damage === 46 && dragon[2].shape.kind === "cone", "용의 화염: 부채꼴 판정");
+  assert(dragon.every((sk) => sk.originAtMouse === true), "용용의 모든 공격 스킬이 마우스 방향으로 발사됨");
+}
+
+section("빛빛/용용 F 특수 능력 — 일반 4슬롯 시스템과 무관한 독립 필드");
+{
+  // F 전용 SkillDef 자체가 slot: -1(0~3 슬롯 시스템 밖)로 표시돼 있고, 데미지 없는
+  // 순수 기동기임을 확인합니다.
+  assert(LIGHT_FLIGHT_SKILL.slot === -1, "빛의 비행은 일반 슬롯(0~3) 밖에 있음(slot=-1)");
+  assert(LIGHT_FLIGHT_SKILL.damage === 0, "빛의 비행은 피해 없는 순수 기동기");
+  assert(LIGHT_FLIGHT_SKILL.dashDistance === 50, `빛의 비행 돌진 거리 50m (실제 ${LIGHT_FLIGHT_SKILL.dashDistance}m)`);
+  assert(DRAGON_FLIGHT_SKILL.slot === -1, "용의 비행은 일반 슬롯(0~3) 밖에 있음(slot=-1)");
+  assert(DRAGON_FLIGHT_SKILL.damage === 0, "용의 비행은 피해 없는 순수 기동기");
+  assert(DRAGON_FLIGHT_SKILL.flightManaDrainPerSec > 0, "용의 비행은 비행 중 마나를 지속 소모함");
+
+  // (1) 빛의 비행 — F를 누른 순간의 조준 방향으로 딱 한 번 pendingDash가 생기고,
+  //     짧은 변신 타이머(lightFormRemainingSec)가 세팅됩니다.
+  const pLight = freshPlayer();
+  pLight.equippedFruit = "light_light";
+  pLight.fruitLevel = 40; // F 해금(unlockFruitLevel)
+  pLight.aimYaw = 0; // 정면(+Z)
+  pLight.mana = 999;
+  pLight.events = [];
+  const manaBeforeLight = pLight.mana;
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pLight, Date.now());
+  assert(pLight.pendingDash !== null, "빛의 비행: F를 누르면 즉시 pendingDash가 생성됨");
+  assert(Math.abs(pLight.pendingDash.z - 50) < 0.001, `빛의 비행: 정면(+Z)으로 50m 돌진 (z=${pLight.pendingDash.z.toFixed(2)})`);
+  assert(Math.abs(pLight.pendingDash.x) < 0.001, "빛의 비행: x축 돌진량은 거의 0(정면만 봤으므로)");
+  assert(pLight.mana === manaBeforeLight - LIGHT_FLIGHT_SKILL.manaCost, `빛의 비행: 마나 ${LIGHT_FLIGHT_SKILL.manaCost} 소모`);
+  assert(pLight.lightFlightCooldownRemainingSec === LIGHT_FLIGHT_SKILL.cooldownSec, "빛의 비행: 쿨다운 설정됨");
+  assert(pLight.lightFormRemainingSec > 0, "빛의 비행: 변신 시각 타이머(lightFormRemainingSec)가 설정됨");
+
+  // 쿨다운 중에는 다시 눌러도 발동하지 않음(마나도 더 안 듦, 돌진도 새로 안 생김)
+  pLight.pendingDash = null;
+  const manaDuringCooldown = pLight.mana;
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pLight, Date.now());
+  assert(pLight.pendingDash === null, "빛의 비행: 쿨다운 중에는 다시 발동하지 않음");
+  assert(pLight.mana === manaDuringCooldown, "빛의 비행: 쿨다운 중에는 마나도 소모되지 않음");
+
+  // 일반 쿨다운 배열과 같은 원칙 — 다른 열매를 장착 중이어도 매 프레임 계속 흘러감
+  pLight.equippedFruit = "magma_fist";
+  const cdBefore = pLight.lightFlightCooldownRemainingSec;
+  stepFruitSpecialAbility(1, input(), pLight, Date.now());
+  assert(pLight.lightFlightCooldownRemainingSec < cdBefore, "빛의 비행: 다른 열매를 장착 중이어도 쿨다운은 계속 흘러감");
+
+  // 손에 안 먹은 열매를 든 상태(heldFruitCandidate)에서는 F가 아예 무시됨
+  const pHeld = freshPlayer();
+  pHeld.equippedFruit = "light_light";
+  pHeld.fruitLevel = 40;
+  pHeld.heldFruitCandidate = "magma_fist";
+  pHeld.mana = 999;
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pHeld, Date.now());
+  assert(pHeld.pendingDash === null, "빛의 비행: heldFruitCandidate가 있으면 F가 무시됨");
+
+  // 레벨이 안 되면(unlockFruitLevel 미달) 발동하지 않고 skill_locked만 뜸
+  const pLowLvl = freshPlayer();
+  pLowLvl.equippedFruit = "light_light";
+  pLowLvl.fruitLevel = 1;
+  pLowLvl.mana = 999;
+  pLowLvl.events = [];
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pLowLvl, Date.now());
+  assert(pLowLvl.pendingDash === null, "빛의 비행: 열매 레벨 미달이면 발동하지 않음");
+  assert(pLowLvl.events.some((e) => e.type === "skill_locked"), "빛의 비행: 레벨 미달 시 skill_locked 이벤트");
+
+  // (2) 용의 비행 — F로 켜지고(activation 시 마나만 소모, 쿨다운 없음), 날고 있는
+  //     동안 매초 마나가 계속 깎이며, 다시 F를 누르면 착지하고 그때부터 쿨다운이 돕니다.
+  const pDragon = freshPlayer();
+  pDragon.equippedFruit = "dragon_dragon";
+  pDragon.fruitLevel = 40;
+  pDragon.mana = 999;
+  pDragon.events = [];
+  assert(pDragon.dragonFlightActive === false, "평소엔 비행 중이 아님");
+  const manaBeforeFly = pDragon.mana;
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pDragon, Date.now());
+  assert(pDragon.dragonFlightActive === true, "용의 비행: F로 비행 시작됨");
+  assert(pDragon.mana === manaBeforeFly - DRAGON_FLIGHT_SKILL.manaCost, `용의 비행: 활성화 마나 ${DRAGON_FLIGHT_SKILL.manaCost} 소모`);
+  assert(pDragon.dragonFlightCooldownRemainingSec === 0, "용의 비행: 활성화 자체엔 쿨다운이 없음(착지해야 돎)");
+
+  // 날고 있는 동안(F를 안 눌러도) 매 프레임 마나가 계속 소모됨
+  const manaBeforeDrainTick = pDragon.mana;
+  stepFruitSpecialAbility(1, input(), pDragon, Date.now());
+  assert(pDragon.mana < manaBeforeDrainTick, "용의 비행: 날고 있는 동안 매초 마나가 계속 소모됨");
+  assert(pDragon.dragonFlightActive === true, "용의 비행: 마나가 남아있으면 계속 비행 중");
+
+  // 다시 F — 착지. 그 순간부터 쿨다운이 시작됨(사용자 요청: "착지 시점부터" 쿨다운)
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pDragon, Date.now());
+  assert(pDragon.dragonFlightActive === false, "용의 비행: 다시 F를 누르면 착지");
+  assert(pDragon.dragonFlightCooldownRemainingSec === DRAGON_FLIGHT_SKILL.cooldownSec, "용의 비행: 착지 시점부터 쿨다운 시작");
+
+  // 착지 직후에는(쿨다운 중) 다시 F를 눌러도 못 뜸
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pDragon, Date.now());
+  assert(pDragon.dragonFlightActive === false, "용의 비행: 착지 직후 쿨다운 중에는 다시 뜰 수 없음");
+
+  // 마나가 바닥나면 자동으로 착지함("정지 불가"와 별개인 안전장치)
+  const pDrain = freshPlayer();
+  pDrain.equippedFruit = "dragon_dragon";
+  pDrain.fruitLevel = 40;
+  pDrain.mana = DRAGON_FLIGHT_SKILL.flightManaDrainPerSec / 2; // 1초 지속 소모량의 절반만 남겨둬서 확실히 바닥나게
+  pDrain.dragonFlightActive = true;
+  stepFruitSpecialAbility(1, input(), pDrain, Date.now());
+  assert(pDrain.mana === 0, "용의 비행: 마나가 바닥까지 깎임(음수로 내려가지 않음)");
+  assert(pDrain.dragonFlightActive === false, "용의 비행: 마나가 0이 되면 자동으로 착지함");
+  assert(pDrain.dragonFlightCooldownRemainingSec === DRAGON_FLIGHT_SKILL.cooldownSec, "용의 비행: 마나 고갈 착지도 쿨다운을 시작시킴");
 }
 
 section("돌진 / 자기 강화");

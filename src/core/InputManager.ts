@@ -41,6 +41,13 @@ export interface InputSnapshot {
   flyDownHeld: boolean;
   /** F — 비행 켜기/끄기 (개발자 모드에서만 의미 있음) */
   toggleFlyPressed: boolean;
+  /**
+   * F — 빛빛/용용 열매의 F 전용 특수 능력(빛의 비행/용의 비행) 발동.
+   * toggleFlyPressed와 물리 키(KeyF)를 공유하지만 별개의 엣지 트리거 필드입니다 —
+   * 개발자 모드 비행 토글과 이 두 열매의 F 능력은 서로 다른 로직(Simulation.ts의
+   * devMode 분기, CombatSystem.ts의 stepFruitSpecialAbility)이 각자 소비합니다.
+   */
+  flySkillPressed: boolean;
   /** P — 개발자 패널 열기/닫기 */
   toggleDevPanelPressed: boolean;
   /** R — 순간이동 (마우스가 가리키는 지점으로). 배우지 않았으면 무시됩니다 */
@@ -191,6 +198,7 @@ export class InputManager {
       flyUpHeld: this.keys.has("Space"),
       flyDownHeld: this.keys.has("ControlLeft") || this.keys.has("ControlRight"),
       toggleFlyPressed: this.justPressed.has("KeyF"),
+      flySkillPressed: this.justPressed.has("KeyF"),
       toggleDevPanelPressed: this.justPressed.has("KeyP"),
       teleportPressed: this.justPressed.has("KeyR"),
       mouseClientX: this.lastMouseClientX,

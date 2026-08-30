@@ -23,7 +23,9 @@ export type FruitAbilityId =
   | "thunder_strike"
   | "dark_wave"
   | "rubber_barrage"
-  | "sand_storm";
+  | "sand_storm"
+  | "light_light"
+  | "dragon_dragon";
 
 /** 몬스터에게 걸린 상태이상 (열매 스킬로 부여) */
 export interface EnemyStatus {
@@ -379,6 +381,19 @@ export interface PlayerState {
   /** 뇌광 질주(X)로 번개 그 자체가 되어 있는 남은 시간(초). 0보다 크면 스쳐 지나가는 대상에게 지속 피해를 줍니다 */
   lightningFormRemainingSec: number;
 
+  // --- 빛빛/용용 F 특수 능력 -------------------------------------------------
+  // 사용자 요청으로 이 두 열매에만 존재하는 예외적인 F키 능력입니다. **일반
+  // Z/X/C/V 4슬롯(weaponSkillCooldowns/fruitSkillCooldowns)과 완전히 무관하게**
+  // 별도 필드로 관리합니다 — CombatSystem.ts의 stepFruitSpecialAbility 참고.
+  /** 빛의 비행(F) 남은 쿨다운(초) — light_light 전용, 다른 열매를 장착해도 계속 흐릅니다 */
+  lightFlightCooldownRemainingSec: number;
+  /** 빛의 비행(F)으로 변신한 모습을 보여줄 남은 시간(초) — 순간 돌진 직후 잠깐만 켜지는 시각 전용 타이머(피해·판정과 무관) */
+  lightFormRemainingSec: number;
+  /** 용의 비행(F)으로 지금 날고 있는 중인지 — 켜져 있는 동안 PlayerController가 정지 불가·조종만 가능한 지속 비행으로 이동을 대체합니다. F를 다시 누르면 꺼집니다(착지) */
+  dragonFlightActive: boolean;
+  /** 용의 비행이 착지한 뒤부터 다시 쓸 수 있을 때까지 남은 쿨다운(초) — dragon_dragon 전용 */
+  dragonFlightCooldownRemainingSec: number;
+
   /**
    * 두 번째 바다를 한 번이라도 연 적이 있는지.
    * 첫 항해에만 Lv.1100이 필요하고, 그 뒤로는 레벨과 상관없이 왕복할 수 있게
@@ -628,6 +643,10 @@ export function createInitialGameState(
       iceWalkActive: false,
       iceWalkCenter: null,
       lightningFormRemainingSec: 0,
+      lightFlightCooldownRemainingSec: 0,
+      lightFormRemainingSec: 0,
+      dragonFlightActive: false,
+      dragonFlightCooldownRemainingSec: 0,
       events: [],
     },
     enemies: [],

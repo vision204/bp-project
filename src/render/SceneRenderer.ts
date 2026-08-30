@@ -39,6 +39,8 @@ const FRUIT_MODEL_PATHS: Record<FruitAbilityId, string> = {
   dark_wave: "models/fruits/dark_wave.glb",
   rubber_barrage: "models/fruits/rubber_barrage.glb",
   sand_storm: "models/fruits/sand_storm.glb",
+  light_light: "models/fruits/light_light.glb",
+  dragon_dragon: "models/fruits/dragon_dragon.glb",
 };
 
 // ── 열매 스킬 이펙트 3D 모델 (GLB) ────────────────────────────────────────
@@ -54,6 +56,12 @@ const SKILL_MODEL_IDS = [
   "dark_z", "dark_x", "dark_c", "dark_v",
   "rubber_z", "rubber_x", "rubber_c", "rubber_v",
   "sand_z", "sand_x", "sand_c", "sand_v",
+  // 빛빛(Z/X/C/V + F 특수 능력)·용용(Z/X/C + F 특수 능력, V는 아직 미구현) —
+  // light_f/dragon_f는 일반 슬롯 스킬이 아니지만(skills.ts의 slot: -1 참고),
+  // 이펙트/변신 GLB 로딩은 다른 스킬 GLB와 완전히 같은 방식(스킬 id로 파일명
+  // 결정)이라 이 목록에 함께 둡니다.
+  "light_z", "light_x", "light_c", "light_v", "light_f",
+  "dragon_z", "dragon_x", "dragon_c", "dragon_f",
 ] as const;
 function skillModelPath(skillId: string): string {
   return `models/skills/${skillId}.glb`;
@@ -64,7 +72,16 @@ function skillModelPath(skillId: string): string {
  * 사막의 대검(손에 든 대검). 나머지 21개는 순간적으로 스폰했다 사라지는
  * 1회성 이펙트로만 씁니다.
  */
-const SKILL_AURA_IDS = new Set(["ice_x", "thunder_x", "sand_v"]);
+// light_f/dragon_f도 "발동 중인 동안 캐릭터에 계속 붙어 있어야 하는" 변신형
+// 능력이라 같은 오라 메커니즘을 씁니다 — 빛의 비행은 아주 잠깐(순간 돌진 직후
+// lightFormRemainingSec 동안만), 용의 비행은 dragonFlightActive인 동안 내내.
+const SKILL_AURA_IDS = new Set(["ice_x", "thunder_x", "sand_v", "light_f", "dragon_f"]);
+
+// 빛의 포격(light_c)·광속 일격(light_v) — 사용자 요청: "하늘에서 빛이 마우스
+// 위치로 떨어지는" 연출. 기존 radial 이펙트(그 자리에서 부풀었다 사라짐) 대신
+// 높은 곳에서 착지 지점까지 낙하하는 travel을 씁니다(투사체형과 같은
+// travel 메커니즘을 재사용 — spawnSkillModelEffect 참고).
+const SKY_FALL_SKILL_IDS = new Set(["light_c", "light_v"]);
 
 /**
  * 일부 GLB는 모델러가 "뾰족한 앞부분"을 로컬 Z축이 아니라 X축(또는 반대
@@ -1188,6 +1205,23 @@ export class SceneRenderer {
         baseScale: SKILL_MODEL_SCALE,
         travel: { from, to },
       });
+    } else if (SKY_FALL_SKILL_IDS.has(skill.id)) {
+      // 하늘에서 마우스 지점으로 빛이 떨어지는 낙하형 — thunder_c와 같은
+      // radial 판정이지만, 그 자리에서 바로 나타나는 대신 높은 곳에서
+      // 착지 지점까지 travel로 떨어집니다(앞 70% 구간 동안 낙하).
+      const FALL_HEIGHT = 42;
+      const from = new THREE.Vector3(x, y + FALL_HEIGHT, z);
+      const to = new THREE.Vector3(x, y + 0.05, z);
+      clone.position.copy(from);
+      this.scene.add(clone);
+      this.skillEffects.push({
+        group: clone,
+        startedAtMs: nowMs,
+        durationMs: 950,
+        growTo: 0.25,
+        baseScale: SKILL_MODEL_SCALE,
+        travel: { from, to },
+      });
     } else {
       // 제자리형(radial/self) — 판정 지점에서 이미 거대한 크기로 나타나
       // 살짝 더 부풀었다가(growTo) 여운을 남기며 사라집니다.
@@ -1877,6 +1911,12 @@ export class SceneRenderer {
         aura.visible = state.player.lightningFormRemainingSec > 0;
       } else if (skillId === "sand_v") {
         aura.visible = state.player.sandBladeActive && state.player.fruitDrawn;
+      } else if (skillId === "light_f") {
+        // 빛의 비행 — 순간 돌진 직후 lightFormRemainingSec 동안만 잠깐 보입니다.
+        aura.visible = state.player.lightFormRemainingSec > 0 && state.player.fruitDrawn;
+      } else if (skillId === "dragon_f") {
+        // 용의 비행 — 날고 있는 동안 내내 보입니다.
+        aura.visible = state.player.dragonFlightActive && state.player.fruitDrawn;
       }
     }
 

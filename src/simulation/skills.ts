@@ -134,6 +134,19 @@ export interface SkillDef {
    */
   meleeFormMultiplier?: number;
 
+  /**
+   * (빛의 비행 전용) 순간 돌진 직후 잠깐 손에 든 변신 모습(light_f.glb)을
+   * 보여줄 시간(초) — 판정과 무관한 순수 시각 타이머. player.lightFormRemainingSec가
+   * 이 값으로 세팅됩니다(CombatSystem.ts의 stepFruitSpecialAbility).
+   */
+  transformDurationSec?: number;
+
+  /**
+   * (용의 비행 전용) 비행 중 매초 소모되는 마나. 활성화 자체의 manaCost와는
+   * 별개로, 날고 있는 동안 계속 깎이다가 0이 되면 자동으로 착지합니다.
+   */
+  flightManaDrainPerSec?: number;
+
   description: string;
 }
 
@@ -596,6 +609,152 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
         "사막의 정수를 응축해 손에 거대한 사막의 대검을 소환합니다. 소환과 동시에 일대를 갈아버리고, 장착돼 있는 동안은 그 대검으로 기본 공격이 요루에 살짝 못 미치는 위력을 냅니다. 쿨다운 없이 V를 다시 누르면 언제든 손에서 내려놓을 수 있습니다. 오래 모을수록 소환 일격이 더 넓게 갈아버립니다.",
     },
   ],
+
+  // ── 빛: 빠른 직선 견제 + 하늘에서 쏟아지는 광역 마무리 ─────────────────────
+  light_light: [
+    {
+      id: "light_z",
+      name: "빛의 탄환",
+      slot: 0,
+      unlockFruitLevel: 1,
+      cooldownSec: 1.3,
+      manaCost: 7,
+      damage: 17,
+      shape: { kind: "line", range: 12, width: 1.4 },
+      originAtMouse: true,
+      description: "빛을 압축해 쏘아내는 빠른 탄환. 짧은 쿨다운으로 자주 견제할 수 있습니다.",
+    },
+    {
+      id: "light_x",
+      name: "빛의 검",
+      slot: 1,
+      unlockFruitLevel: 25,
+      cooldownSec: 3.5,
+      manaCost: 15,
+      damage: 26,
+      shape: { kind: "line", range: 9, width: 1.8 },
+      originAtMouse: true,
+      description: "빛으로 벼려낸 검을 던져 전방을 꿰뚫습니다.",
+    },
+    {
+      id: "light_c",
+      name: "빛의 포격",
+      slot: 2,
+      unlockFruitLevel: 50,
+      cooldownSec: 9,
+      manaCost: 27,
+      damage: 44,
+      shape: { kind: "radial", radius: 5 },
+      originAtMouse: true,
+      originAtAim: true,
+      description: "마우스가 가리키는 지점으로 하늘 높이 빛의 포격이 쏟아져 내립니다.",
+    },
+    {
+      id: "light_v",
+      name: "광속 일격",
+      slot: 3,
+      unlockFruitLevel: 75,
+      cooldownSec: 16,
+      manaCost: 34,
+      damage: 62,
+      shape: { kind: "radial", radius: 6 },
+      originAtMouse: true,
+      originAtAim: true,
+      description: "마우스가 가리키는 지점에 빛의 속도로 내리꽂히는 결정타. 오래 모으지 않아도 묵직하게 터집니다.",
+    },
+  ],
+
+  // ── 용: 넓은 브레스 공격 + 지속 비행 기동 ──────────────────────────────
+  dragon_dragon: [
+    {
+      id: "dragon_z",
+      name: "용의 발톱",
+      slot: 0,
+      unlockFruitLevel: 1,
+      cooldownSec: 1.5,
+      manaCost: 8,
+      damage: 18,
+      shape: { kind: "line", range: 8, width: 1.6 },
+      originAtMouse: true,
+      description: "용의 발톱으로 전방을 할퀴어 베어냅니다.",
+    },
+    {
+      id: "dragon_x",
+      name: "용의 포효",
+      slot: 1,
+      unlockFruitLevel: 25,
+      cooldownSec: 6,
+      manaCost: 20,
+      damage: 30,
+      shape: { kind: "cone", range: 10, halfAngleDeg: 35 },
+      originAtMouse: true,
+      description: "용의 포효로 충격파를 일으켜 넓은 전방을 밀어붙입니다.",
+    },
+    {
+      id: "dragon_c",
+      name: "용의 화염",
+      slot: 2,
+      unlockFruitLevel: 50,
+      cooldownSec: 9,
+      manaCost: 28,
+      damage: 46,
+      shape: { kind: "cone", range: 11, halfAngleDeg: 20 },
+      originAtMouse: true,
+      description: "용의 브레스로 좁고 강한 화염을 길게 내뿜습니다.",
+    },
+    // 슬롯 3(V, 용으로 변신)은 사용자 요청으로 이번 작업 범위에서 제외했습니다
+    // (추후 별도 작업으로 구현 예정). skillsForFruit()/HUD/CombatSystem 모두
+    // skills[slot]이 undefined면 그냥 건너뛰도록 이미 짜여 있어서(4개가 꽉
+    // 차 있어야 한다는 가정이 코드 어디에도 없음을 확인했습니다), 여기서는
+    // "잠긴 슬롯" 가짜 placeholder를 넣지 않고 배열을 3개로 짧게 둡니다.
+  ],
+};
+
+// ---------------------------------------------------------------------------
+// F 전용 특수 능력 — 빛빛(빛의 비행)·용용(용의 비행).
+//
+// 사용자 요청으로 이 두 열매에만 존재하는 예외이며, **일반 Z/X/C/V 4슬롯
+// 시스템에는 절대 속하지 않습니다** — FRUIT_SKILLS 배열에 넣지 않고 여기서
+// 독립적으로 export합니다. slot: -1은 "0~3 슬롯 시스템 밖"이라는 표시일 뿐,
+// 실제로 어디서도 인덱스로 쓰이지 않습니다. CombatSystem.ts의
+// stepFruitSpecialAbility가 이 SkillDef를 유일한 출처로 삼아 쿨다운·마나·
+// 돌진거리 등을 읽습니다(뇌광 질주가 LIGHTNING_FORM_SKILL을 참조하는 것과
+// 같은 패턴).
+// ---------------------------------------------------------------------------
+
+export const LIGHT_FLIGHT_SKILL: SkillDef = {
+  id: "light_f",
+  name: "빛의 비행",
+  slot: -1,
+  unlockFruitLevel: 40,
+  cooldownSec: 12,
+  manaCost: 28,
+  damage: 0,
+  // shape는 실제 판정에는 쓰이지 않습니다(순수 기동기, damage: 0) — originAtMouse
+  // 방향 재조준 계산(skillOrigin)에 "line"이 필요해서 형태만 갖춰뒀습니다.
+  shape: { kind: "line", range: 1, width: 1 },
+  originAtMouse: true,
+  // 방향은 선택할 수 없고, F를 처음 누른 그 순간의 조준 방향으로 딱 한 번만
+  // 정해집니다(사용자 요청) — 기존 dashDistance/pendingDash 메커니즘을 그대로
+  // 재사용하되 다른 대쉬들보다 훨씬 긴 거리를 씁니다.
+  dashDistance: 50,
+  transformDurationSec: 0.5,
+  description: "F를 누른 순간 조준한 방향으로 빛으로 변해 아주 빠르게 돌진합니다. 날아가는 동안은 방향을 바꿀 수 없습니다.",
+};
+
+export const DRAGON_FLIGHT_SKILL: SkillDef = {
+  id: "dragon_f",
+  name: "용의 비행",
+  slot: -1,
+  unlockFruitLevel: 40,
+  cooldownSec: 20,
+  manaCost: 15,
+  damage: 0,
+  shape: { kind: "self" },
+  // 비행 중 매초 추가로 소모되는 마나 — 0이 되면 자동 착지합니다.
+  flightManaDrainPerSec: 8,
+  description:
+    "F를 누르면 용으로 변해 하늘로 날아오릅니다. 나는 동안은 멈추거나 제자리에 뜰 수 없고 방향만 조종할 수 있으며, F를 다시 누르면 착지합니다.",
 };
 
 export function skillsForFruit(fruitId: FruitAbilityId): SkillDef[] {

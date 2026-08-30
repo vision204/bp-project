@@ -5,7 +5,7 @@ import { grantExp } from "./Leveling";
 import { effectiveMeleeDamage, HAKI_DAMAGE_MULTIPLIER } from "./HakiSystem";
 import { fruitExpFromEnemy, fruitLevelDamageMultiplier, grantFruitExp } from "./FruitLeveling";
 import { weaponExpFromEnemy, weaponLevelDamageMultiplier, weaponMasteryLevel, grantWeaponExp } from "./WeaponLeveling";
-import { isSlotUnlocked, skillsForFruit, withCharge, type SkillDef } from "./skills";
+import { DRAGON_FLIGHT_SKILL, LIGHT_FLIGHT_SKILL, isSlotUnlocked, skillsForFruit, withCharge, type SkillDef } from "./skills";
 import { isWeaponSlotUnlocked, skillsForWeapon } from "./weaponSkills";
 import {
   drawnWeapon,
@@ -321,6 +321,94 @@ export function stepLightningForm(player: PlayerState, enemies: EnemyState[], dt
     if (!enemy.alive) continue;
     if (dist2D(player.position.x, player.position.z, enemy.position.x, enemy.position.z) > radius) continue;
     dealDamage(player, enemy, tickDamage, "fruit", events);
+  }
+}
+
+/**
+ * 빛빛(F: 빛의 비행)·용용(F: 용의 비행) 전용 특수 능력.
+ *
+ * **일반 Z/X/C/V 4슬롯 시스템(weaponSkillCooldowns/fruitSkillCooldowns 배열과
+ * stepCombat의 슬롯 순회 루프)과 완전히 별개입니다** — F는 이 두 열매에만
+ * 존재하는 예외라, 전용 PlayerState 필드(lightFlightCooldownRemainingSec 등)로
+ * 독립적으로 관리합니다. 다른 어떤 무기/열매에도 F 슬롯은 없습니다.
+ *
+ * Simulation.step()이 PlayerController.step()보다 먼저 이 함수를 호출해야
+ * player.dragonFlightActive가 이번 프레임 안에 바로 반영되어(같은 프레임에
+ * 날기 시작) PlayerController가 그걸 보고 비행 이동으로 분기할 수 있습니다.
+ */
+export function stepFruitSpecialAbility(dt: number, input: InputSnapshot, player: PlayerState, nowMs: number) {
+  // 쿨다운은 지금 어느 열매를 장착했는지와 무관하게 항상 흘러갑니다 —
+  // weaponSkillCooldowns/fruitSkillCooldowns와 같은 원칙입니다. 다만 용의
+  // 비행은 "착지한 뒤부터" 쿨다운이 도는 능력이라, 날고 있는 동안에는 흐르지
+  // 않습니다(활성화 자체엔 쿨다운이 없고, 착지할 때 세팅됩니다).
+  player.lightFlightCooldownRemainingSec = Math.max(0, player.lightFlightCooldownRemainingSec - dt);
+  if (!player.dragonFlightActive) {
+    player.dragonFlightCooldownRemainingSec = Math.max(0, player.dragonFlightCooldownRemainingSec - dt);
+  }
+  if (player.lightFormRemainingSec > 0) {
+    player.lightFormRemainingSec = Math.max(0, player.lightFormRemainingSec - dt);
+  }
+
+  // 용의 비행 — 날고 있는 동안 매초 마나를 계속 소모하고, 다 떨어지면
+  // 자동으로 착지합니다(사용자 요청 범위 밖의 안전장치: 마나 없이 무한 비행 방지).
+  if (player.dragonFlightActive) {
+    const drain = (DRAGON_FLIGHT_SKILL.flightManaDrainPerSec ?? 0) * dt;
+    if (drain > 0) {
+      player.mana = Math.max(0, player.mana - drain);
+      player.lastManaSpentAtMs = nowMs;
+    }
+    if (player.mana <= 0) {
+      player.dragonFlightActive = false;
+      player.dragonFlightCooldownRemainingSec = DRAGON_FLIGHT_SKILL.cooldownSec;
+    }
+  }
+
+  // F는 다른 스킬들과 같은 규칙 — 열매를 실제로 뽑아 든 상태여야 하고,
+  // 아직 안 먹은 열매를 손에 든(heldFruitCandidate) 동안은 동작하지 않습니다.
+  if (!input.flySkillPressed || !player.fruitDrawn || player.heldFruitCandidate) return;
+
+  if (player.equippedFruit === "light_light") {
+    const skill = LIGHT_FLIGHT_SKILL;
+    if (player.fruitLevel < skill.unlockFruitLevel) {
+      player.events.push({ type: "skill_locked", skillName: skill.name, requiredFruitLevel: skill.unlockFruitLevel });
+      return;
+    }
+    if (player.lightFlightCooldownRemainingSec > 0) return;
+    if (player.mana < skill.manaCost) return;
+
+    // F를 처음 누른 그 순간의 조준 방향(마우스 지점이 있으면 그 지점 방향, 없으면
+    // 카메라 방향)으로 딱 한 번만 벡터를 계산합니다 — 이후 비행 중에는 방향을
+    // 다시 바꿀 수 없습니다(사용자 요청). 기존 dashDistance/pendingDash 메커니즘
+    // (originAtMouse 스킬들의 방향 재조준과 정확히 같은 함수)을 그대로 재사용합니다.
+    const origin = skillOrigin(player.position, player.aimYaw, skill, player.aimGroundPoint);
+    player.pendingDash = {
+      x: Math.sin(origin.aimYaw) * (skill.dashDistance ?? 0),
+      z: Math.cos(origin.aimYaw) * (skill.dashDistance ?? 0),
+    };
+    player.mana -= skill.manaCost;
+    player.lastManaSpentAtMs = nowMs;
+    player.lightFlightCooldownRemainingSec = skill.cooldownSec;
+    player.lightFormRemainingSec = skill.transformDurationSec ?? 0.5;
+  } else if (player.equippedFruit === "dragon_dragon") {
+    const skill = DRAGON_FLIGHT_SKILL;
+    if (player.dragonFlightActive) {
+      // 이미 날고 있으면 F를 다시 누르는 건 "착지" — dragonFlightActive를
+      // 끄기만 하면, 다음 PlayerController.step()이 자연히 평소 중력/충돌
+      // 물리로 넘어갑니다(별도 착지 연출 없음 — stepFlight()의 전례와 동일).
+      player.dragonFlightActive = false;
+      player.dragonFlightCooldownRemainingSec = skill.cooldownSec;
+      return;
+    }
+    if (player.fruitLevel < skill.unlockFruitLevel) {
+      player.events.push({ type: "skill_locked", skillName: skill.name, requiredFruitLevel: skill.unlockFruitLevel });
+      return;
+    }
+    if (player.dragonFlightCooldownRemainingSec > 0) return;
+    if (player.mana < skill.manaCost) return;
+
+    player.mana -= skill.manaCost;
+    player.lastManaSpentAtMs = nowMs;
+    player.dragonFlightActive = true;
   }
 }
 

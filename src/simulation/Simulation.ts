@@ -12,7 +12,7 @@ import type { InputSnapshot } from "../core/InputManager";
 import { PlayerController } from "./PlayerController";
 import { createInitialEnemies, stepEnemies } from "./EnemyManager";
 import { stepEnemyAI } from "./EnemyAI";
-import { stepCombat, stepEnemyStatuses } from "./CombatSystem";
+import { stepCombat, stepEnemyStatuses, stepFruitSpecialAbility } from "./CombatSystem";
 import { acceptQuest, createNpcs, createQuests, stepInteraction, applyKillsToQuests } from "./QuestSystem";
 import { stepMana } from "./ManaSystem";
 import { stepHp } from "./HpSystem";
@@ -136,6 +136,11 @@ export class Simulation {
     if (input.hotbarPressed !== null) {
       activateHotbarSlot(player, input.hotbarPressed);
     }
+
+    // 빛빛/용용 F 특수 능력 — 일반 Z/X/C/V 4슬롯 시스템과 완전히 별개입니다
+    // (CombatSystem.ts의 stepFruitSpecialAbility 주석 참고). PlayerController.step()보다
+    // 먼저 호출해야 F로 용의 비행을 켠 바로 그 프레임부터 비행 이동으로 분기합니다.
+    stepFruitSpecialAbility(dt, input, player, nowMs);
 
     if (this.state.boat.riding) {
       // 배를 타고 있는 동안에는 걷지 않고 배를 조종합니다.
@@ -366,6 +371,8 @@ export class Simulation {
     player.iceWalkCenter = null;
     player.lightningFormRemainingSec = 0;
     player.sandBladeActive = false;
+    player.dragonFlightActive = false;
+    player.lightFormRemainingSec = 0;
     this.state.boat.riding = false;
     player.position = { ...arrival };
     this.playerController.teleport(arrival);

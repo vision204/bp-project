@@ -35,6 +35,16 @@ export const FLY_BOOST = 3;
 /** 너무 높이 올라가면 아무것도 안 보이므로 고도 상한 */
 export const FLY_CEILING = 400;
 
+// ── 용의 비행 (용용 열매 F) ─────────────────────────────────────────────────
+/**
+ * 지속 비행 순항 속도(m/s). 질주(14)보다는 확실히 빠르지만, 개발자 모드
+ * 자유비행(FLY_SPEED=60)에는 한참 못 미치는 "그냥 빠른" 수준으로 잡았습니다
+ * (사용자 요청: 빛의 비행처럼 극단적으로 빠르지는 않게). 빛의 비행은 한 번에
+ * 50m를 순간 돌진하는 버스트라 체감상 더 빠르지만, 이쪽은 지속적으로 나는
+ * 대신 순항 속도 자체는 더 낮습니다.
+ */
+export const DRAGON_FLIGHT_SPEED = 24;
+
 function applyZoom(current: number, zoomDelta: number) {
   if (zoomDelta === 0) return current;
   // 멀리 있을수록 한 칸당 더 크게 움직여야 체감이 균일합니다.
@@ -149,6 +159,52 @@ export class PlayerController {
     player.velocity = { x: mx, y: my, z: mz };
   }
 
+  /**
+   * 용의 비행(용용 열매 F) — devMode의 stepFlight()처럼 캐릭터 컨트롤러
+   * (충돌 판정)를 건너뛰고 위치를 직접 옮기지만, 결정적으로 다릅니다:
+   * **절대 정지할 수 없습니다.** 이동 키를 하나도 안 눌러도 지금 보는
+   * 방향으로 계속 나아가고, A/D와 마우스 좌우 회전으로 방향만 바꿀 수
+   * 있습니다(사용자 요청: "정지 불가, 방향 조종만 가능"). 착지(F를 다시
+   * 누름)는 CombatSystem.stepFruitSpecialAbility가 dragonFlightActive를
+   * false로 내리기만 하면 되고, 그 즉시 다음 프레임부터 이 메서드 대신
+   * 평소 step()의 중력/충돌 물리가 자연히 이어받습니다(별도 착지 처리 없음).
+   */
+  private stepDragonFlight(dt: number, input: InputSnapshot, player: PlayerState) {
+    // 카메라가 보는 수평 방향(피치 제외)이 기본 전진 방향입니다. A/D는 이
+    // 전진 방향에 옆 방향 성분을 살짝 섞어 "조종간을 옆으로 기울이는" 느낌을
+    // 내되, 전진 성분은 항상 남겨둬서 절대 속도가 0이 되지 않게 합니다.
+    const look = { x: Math.sin(this.camYaw), z: Math.cos(this.camYaw) };
+    const right = { x: -Math.cos(this.camYaw), z: Math.sin(this.camYaw) };
+
+    let mx = look.x;
+    let mz = look.z;
+    if (input.moveRight) { mx += right.x * 0.6; mz += right.z * 0.6; }
+    if (input.moveLeft) { mx -= right.x * 0.6; mz -= right.z * 0.6; }
+    // moveBackward(뒤로 가기)는 무시합니다 — 후진·정지가 없으므로 방향은
+    // 카메라를 돌리는 것으로만 바꿉니다.
+
+    const len = Math.hypot(mx, mz) || 1;
+    mx = (mx / len) * DRAGON_FLIGHT_SPEED;
+    mz = (mz / len) * DRAGON_FLIGHT_SPEED;
+    player.yaw = Math.atan2(mx, mz);
+
+    // 카메라 피치를 약하게 반영해 위아래로도 살짝 조종할 수 있게 합니다
+    // (완전 수평 고정보다 자연스러운 비행감). 이 역시 정지가 아니라 각도만
+    // 바꿀 뿐, 수평 전진 성분(mx, mz)은 항상 유지됩니다.
+    const my = Math.sin(this.camPitch) * DRAGON_FLIGHT_SPEED * 0.5;
+
+    const pos = this.body.translation();
+    const next = { x: pos.x + mx * dt, y: pos.y + my * dt, z: pos.z + mz * dt };
+    next.y = Math.max(2, Math.min(FLY_CEILING, next.y));
+
+    this.body.setNextKinematicTranslation(next);
+    this.verticalVelocity = 0;
+    this.jumpsUsed = 0;
+    player.position = next;
+    player.grounded = false;
+    player.velocity = { x: mx, y: my, z: mz };
+  }
+
   step(dt: number, input: InputSnapshot, player: PlayerState, nowMs: number = Date.now()) {
     this.camYaw -= input.mouseDeltaX * MOUSE_SENSITIVITY;
     this.camPitch -= input.mouseDeltaY * MOUSE_SENSITIVITY;
@@ -161,6 +217,15 @@ export class PlayerController {
     // 개발자 모드 비행은 물리를 통째로 건너뜁니다.
     if (player.devMode && player.flying) {
       this.stepFlight(dt, input, player);
+      return;
+    }
+
+    // 용의 비행(F) — 날고 있는 동안은 정지 불가·조종만 가능한 지속 비행으로
+    // 완전히 대체됩니다(사용자 요청). CombatSystem.stepFruitSpecialAbility가
+    // Simulation.step()에서 이 step()보다 먼저 호출되므로, F를 누른 바로 그
+    // 프레임부터 여기로 분기합니다.
+    if (player.dragonFlightActive) {
+      this.stepDragonFlight(dt, input, player);
       return;
     }
 

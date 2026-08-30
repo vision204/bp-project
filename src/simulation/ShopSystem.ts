@@ -30,7 +30,7 @@ export const CASH_PAYMENT_NOTICE =
   "결제 시스템 준비 중입니다 (PG사 연동 예정) — 중앙 교역섬의 열매 상인에게 코인으로 살 수 있어요";
 
 /**
- * 상점에서 판매하는 악마의 열매 5종.
+ * 상점에서 판매하는 악마의 열매 7종.
  * **악마의 열매는 한 번에 하나만** 먹을 수 있습니다.
  * 새 열매를 사면 기존에 먹은 열매 능력이 사라지고 새 것으로 교체됩니다.
  */
@@ -79,6 +79,24 @@ export const FRUIT_CATALOG: FruitCatalogEntry[] = [
     price: 70,
     cashPrice: 3400,
     style: "넓은 범위와 지속 피해. 다수 상대에 유리합니다.",
+  },
+  {
+    id: "light_light",
+    name: "빛빛 열매",
+    description: "빛의 탄환 — 빠르고 사거리 긴 빛의 견제 사격.",
+    icon: "✨",
+    price: 180,
+    cashPrice: 9900,
+    style: "빠른 원거리 견제 + F 순간 돌진 기동 + 하늘에서 쏟아지는 강력한 포격 마무리.",
+  },
+  {
+    id: "dragon_dragon",
+    name: "용용 열매",
+    description: "용의 발톱 — 용의 힘으로 넓게 후려치고 브레스를 내뿜습니다.",
+    icon: "🐉",
+    price: 200,
+    cashPrice: 11900,
+    style: "넓은 브레스형 공격 + F로 변신해 지속 비행하는 강력한 기동력.",
   },
 ];
 
