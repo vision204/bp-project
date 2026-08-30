@@ -42,7 +42,7 @@ function escapeHtml(text: string): string {
 }
 
 const STAT_LABELS: Record<StatKey, string> = {
-  attack: "공격", // 마나 + 공격력을 합친 스텟 — 최대마나와 근접 데미지 둘 다 올립니다
+  attack: "공격", // 최대마나만 올리는 스텟입니다 (근접 공격력에는 영향을 주지 않습니다)
   defense: "방어", // 예전 "체력" 스텟과 같은 역할(최대체력)
   sword: "검", // 도검류(요루·삼도류·엔마) 데미지 배율
   gun: "총", // 새총 등 원거리 무기 데미지 배율
@@ -484,9 +484,10 @@ export class PanelManager {
       ${rows}
       <div class="stats-derived">
         <div>최대 체력 (방어): ${p.maxHp}</div>
-        <div>최대 마나 / 근접 공격력 (공격): ${p.maxMana} / ${p.meleeDamage}${p.hakiActive ? ` → <b style="color:#d1c4e9">${Math.round(effectiveMeleeDamage(p))}</b>` : ""}</div>
-        <div>검 데미지 배율: x${p.swordDamageMultiplier.toFixed(2)}</div>
-        <div>총 데미지 배율: x${p.gunDamageMultiplier.toFixed(2)}</div>
+        <div>최대 마나 (공격): ${p.maxMana}</div>
+        <div>맨손 공격력 (고정값, 스텟 영향 없음): ${p.meleeDamage}${p.hakiActive ? ` → <b style="color:#d1c4e9">${Math.round(effectiveMeleeDamage(p))}</b>` : ""}</div>
+        <div>검 기준 공격력: ${p.swordDamageMultiplier.toFixed(1)} (검 스텟 1당 +0.5, 무기 배율 별도 적용)</div>
+        <div>총 기준 공격력: ${p.gunDamageMultiplier.toFixed(1)} (총 스텟 1당 +0.5, 무기 배율 별도 적용)</div>
         <div>열매 능력 배율: x${p.abilityDamageMultiplier.toFixed(2)}</div>
         <div>무장색: ${p.hakiLearned ? (p.hakiActive ? "발동 중 (J)" : "습득함 (J로 발동)") : "미습득"}</div>
         <div>열매 레벨: Lv.${p.fruitLevel} (${p.fruitExp}/${p.fruitExpToNext})</div>

@@ -597,6 +597,7 @@ export class MultiplayerClient {
         level: p.level,
         sea: this.state.sea,
         animState: animStateFor(this.state),
+        boatTier: this.state.boat.riding ? this.state.boat.tier : null,
         hakiActive: p.hakiActive,
         drawnWeaponId,
       });

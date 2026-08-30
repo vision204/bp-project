@@ -131,14 +131,18 @@ export function drawnWeapon(player: PlayerState): WeaponDef | null {
 }
 
 /**
- * 손에 든 무기의 데미지 배율 = 무기 자체 배율 × 스텟에서 파생된 배율.
+ * 손에 든 무기의 최종 데미지 = 무기 자체 배율 × 스텟에서 파생된 기준 공격력.
  * 도검류는 검(sword) 스텟, 새총 같은 원거리 무기는 총(gun) 스텟을 봅니다.
+ * player.swordDamageMultiplier/gunDamageMultiplier는 이제 "1+stat*0.06" 같은
+ * 배율이 아니라 statAttackPower(stat)로 계산된 절대 공격력(기본 10, 스텟
+ * 1당 +0.5)입니다 — 이름은 그대로지만 실제로는 무기 배율에 곱해지는 "기준
+ * 데미지"라고 보는 게 맞습니다 (StatSystem.ts 참고).
  */
 export function weaponDamageMultiplier(player: PlayerState) {
   const weapon = drawnWeapon(player);
   if (!weapon) return 1;
-  const statMultiplier = weapon.weaponType === "gun" ? player.gunDamageMultiplier : player.swordDamageMultiplier;
-  return weapon.damageMultiplier * statMultiplier;
+  const statAttackPower = weapon.weaponType === "gun" ? player.gunDamageMultiplier : player.swordDamageMultiplier;
+  return weapon.damageMultiplier * statAttackPower;
 }
 
 export function weaponBonusRange(player: PlayerState) {

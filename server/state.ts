@@ -29,7 +29,7 @@
 // ---------------------------------------------------------------------------
 
 import type { WebSocket } from "ws";
-import type { ItemId, PlayerState } from "../src/core/GameState";
+import type { BoatTierId, ItemId, PlayerState } from "../src/core/GameState";
 import type { Faction } from "../src/world/islands";
 import {
   totalMeleeCooldown,
@@ -79,6 +79,14 @@ const LIGHTNING_FORM_SKILL = skillsForFruit("thunder_strike")[1];
 const MAX_DAMAGE_PER_HIT = 20000;
 const MAX_MELEE_DAMAGE = 20000;
 const MAX_ABILITY_MULTIPLIER = 50;
+/**
+ * sword/gunDamageMultiplier는 더 이상 "1+stat*0.06" 같은 배율(대략 1~수십)이
+ * 아니라 statAttackPower(stat) = 10 + stat*0.5 로 계산되는 절대 공격력입니다
+ * (StatSystem.ts 참고). 만렙(2056)에 스텟 하나에 전부 몰아도(6165포인트)
+ * 약 3,093에 그치므로, 정상적인 최고 수준 플레이를 잘못 잘라내지 않을 만큼
+ * 여유 있게(그러면서도 조작값은 확실히 걸러지게) 넉넉히 잡았습니다.
+ */
+const MAX_ATTACK_POWER = 5000;
 const MAX_FRUIT_BUFF_MULTIPLIER = 2; // 카탈로그 최댓값(기어 세컨드 1.8배)보다 여유
 const MAX_MELEE_RANGE = 30;
 const MAX_WEAPON_MASTERY_LEVEL = 150;
@@ -128,8 +136,8 @@ function clampStats(raw: CombatStatsSnapshot): CombatStatsSnapshot {
         : null,
     hotbar: Array.isArray(raw.hotbar) ? raw.hotbar.slice(0, 8).map((x) => (typeof x === "string" ? x : null)) : [],
     abilityDamageMultiplier: clampFinite(raw.abilityDamageMultiplier, 0, MAX_ABILITY_MULTIPLIER, 1),
-    swordDamageMultiplier: clampFinite(raw.swordDamageMultiplier, 0, MAX_ABILITY_MULTIPLIER, 1),
-    gunDamageMultiplier: clampFinite(raw.gunDamageMultiplier, 0, MAX_ABILITY_MULTIPLIER, 1),
+    swordDamageMultiplier: clampFinite(raw.swordDamageMultiplier, 0, MAX_ATTACK_POWER, 10),
+    gunDamageMultiplier: clampFinite(raw.gunDamageMultiplier, 0, MAX_ATTACK_POWER, 10),
     fruitLevel: clampFinite(raw.fruitLevel, 1, 150, 1),
     fruitBuffMultiplier: clampFinite(raw.fruitBuffMultiplier, 1, MAX_FRUIT_BUFF_MULTIPLIER, 1),
     equippedFruit: typeof raw.equippedFruit === "string" ? raw.equippedFruit : "magma_fist",
@@ -236,6 +244,8 @@ export interface Connection {
   level: number;
   sea: 1 | 2;
   animState: AnimState;
+  /** animState === "boat"일 때만 탄 배의 등급, 아니면 null */
+  boatTier: BoatTierId | null;
   hakiActive: boolean;
   drawnWeaponId: string | null;
   pvpEnabled: boolean;
@@ -273,6 +283,7 @@ function snapshotOf(conn: Connection): RemotePlayerSnapshot {
     level: conn.level,
     sea: conn.sea,
     animState: conn.animState,
+    boatTier: conn.boatTier,
     hakiActive: conn.hakiActive,
     drawnWeaponId: conn.drawnWeaponId,
     pvpEnabled: conn.pvpEnabled,
@@ -352,6 +363,7 @@ export class World {
       level: 1,
       sea: 1,
       animState: "idle",
+      boatTier: null,
       hakiActive: false,
       drawnWeaponId: null,
       pvpEnabled: true,
@@ -365,8 +377,8 @@ export class World {
         activeHotbarSlot: null,
         hotbar: [],
         abilityDamageMultiplier: 1,
-        swordDamageMultiplier: 1,
-        gunDamageMultiplier: 1,
+        swordDamageMultiplier: 10, // BASE_ATTACK_POWER(StatSystem.ts)와 같은 값 — 접속 직후(스텟 0)의 기준 공격력
+        gunDamageMultiplier: 10,
         fruitLevel: 1,
         fruitBuffMultiplier: 1,
         equippedFruit: "magma_fist",
@@ -559,6 +571,11 @@ export class World {
         conn.animState = (["idle", "move", "swim", "boat"] as const).includes(msg.animState as AnimState)
           ? (msg.animState as AnimState)
           : "idle";
+        conn.boatTier =
+          conn.animState === "boat" &&
+          (["dinghy", "clipper", "galewind"] as const).includes(msg.boatTier as BoatTierId)
+            ? (msg.boatTier as BoatTierId)
+            : null;
         conn.hakiActive = msg.hakiActive === true;
         conn.drawnWeaponId = typeof msg.drawnWeaponId === "string" ? msg.drawnWeaponId : null;
         conn.alive = conn.hp > 0;

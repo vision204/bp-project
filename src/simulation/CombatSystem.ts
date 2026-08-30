@@ -2,7 +2,7 @@ import type { EnemyState, GameEvent, ItemId, PlayerState } from "../core/GameSta
 import type { InputSnapshot } from "../core/InputManager";
 import { damageEnemy } from "./EnemyManager";
 import { grantExp } from "./Leveling";
-import { effectiveMeleeDamage } from "./HakiSystem";
+import { effectiveMeleeDamage, HAKI_DAMAGE_MULTIPLIER } from "./HakiSystem";
 import { fruitExpFromEnemy, fruitLevelDamageMultiplier, grantFruitExp } from "./FruitLeveling";
 import { weaponExpFromEnemy, weaponLevelDamageMultiplier, weaponMasteryLevel, grantWeaponExp } from "./WeaponLeveling";
 import { isSlotUnlocked, skillsForFruit, withCharge, type SkillDef } from "./skills";
@@ -57,10 +57,10 @@ export function skillDamage(player: PlayerState, skill: SkillDef) {
 }
 
 /**
- * 무기 스킬의 최종 데미지 = 기본값 × (공격 스텟 비율) × 무기 배율 × 무기숙련 배율.
+ * 무기 스킬의 최종 데미지 = 기본값 × (근접 데미지 비율) × 무기 배율 × 무기숙련 배율.
  * 열매의 abilityDamageMultiplier(열매 스텟에서 파생)에 대응해, 여기서는
- * 공격 스텟에서 파생된 근접 데미지(player.meleeDamage, 기본값 8)를 기준으로
- * 스케일합니다.
+ * 고정값인 근접 데미지(player.meleeDamage, 기본값 8 — 스텟 배분과 무관)를
+ * 기준으로 스케일합니다.
  */
 export function weaponSkillDamage(player: PlayerState, skill: SkillDef, weaponId: ItemId) {
   return (
@@ -187,19 +187,30 @@ function applySkill(
 /**
  * 무장색과 손에 든 무기까지 반영한 최종 근접 데미지.
  *
+ * 검/총을 실제로 손에 든 상태(또는 사막의 대검으로 검처럼 취급되는 상태)라면
+ * meleeDamage(맨손 고정값)는 전혀 관여하지 않습니다 — player.swordDamageMultiplier /
+ * gunDamageMultiplier 자체가 이미 statAttackPower(그 무기가 보는 스텟)로 계산된
+ * "기준 공격력"이라서, 여기에 무기의 damageMultiplier만 곱하면 됩니다
+ * (StatSystem.recomputeDerivedStats 참고). 진짜로 맨손일 때만(무기도 대검도
+ * 없을 때) meleeDamage(+무장색 배율)를 씁니다 — 다만 canMeleeAttack이 이 경우
+ * 애초에 공격 자체를 막으므로, 실전에서는 HUD 미리보기 정도에만 쓰입니다.
+ *
  * 사막의 대검(모래 열매 V)이 장착돼 있는 동안은(sandBladeActive — 쿨다운 없이
  * V로 장착/해제하는 토글) 손에 진짜 무기가 없어도(열매를 뽑은 채로) 대검을 든
  * 것처럼 취급합니다 — 무기 배율 대신 그 스킬의 meleeFormMultiplier(요루보다
- * 살짝 낮음)를 쓰고, 검 스텟(swordDamageMultiplier)도 실제 검처럼 그대로
- * 곱합니다. 이미 진짜 무기를 뽑은 상태라면(=fruitDrawn이 false) 이 조건은
- * 성립하지 않으므로 실제 무기 배율이 그대로 쓰입니다.
+ * 살짝 낮음)를 쓰고, 검 스텟 기준 공격력(swordDamageMultiplier)도 실제 검처럼
+ * 그대로 곱합니다. 이미 진짜 무기를 뽑은 상태라면(=fruitDrawn이 false) 이
+ * 조건은 성립하지 않으므로 실제 무기 배율이 그대로 쓰입니다.
  */
 export function totalMeleeDamage(player: PlayerState) {
   if (player.fruitDrawn && player.sandBladeActive) {
     const mult = SAND_BLADE_SKILL?.meleeFormMultiplier ?? 1;
-    return effectiveMeleeDamage(player) * mult * player.swordDamageMultiplier;
+    const base = mult * player.swordDamageMultiplier;
+    return player.hakiActive ? base * HAKI_DAMAGE_MULTIPLIER : base;
   }
-  return effectiveMeleeDamage(player) * weaponDamageMultiplier(player);
+  if (!drawnWeapon(player)) return effectiveMeleeDamage(player);
+  const base = weaponDamageMultiplier(player);
+  return player.hakiActive ? base * HAKI_DAMAGE_MULTIPLIER : base;
 }
 
 /** 손에 든 무기까지 반영한 근접 사거리 (큰 검일수록 멀리 닿습니다) */

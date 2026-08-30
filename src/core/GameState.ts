@@ -39,7 +39,7 @@ export interface EnemyStatus {
 
 /**
  * 레벨업으로 얻는 포인트를 배분하는 5가지 스텟.
- *   · attack — 근접(맨손) 공격력 + 최대 마나 (예전의 "마나"와 "공격력"을 하나로 합쳤습니다)
+ *   · attack — 최대 마나만 올립니다 (근접(맨손) 공격력에는 영향을 주지 않습니다 — meleeDamage는 고정값)
  *   · defense — 최대 체력 (예전의 "체력" 스텟과 완전히 같은 역할, 이름만 바뀌었습니다)
  *   · sword — 도검류(요루·삼도류·엔마) 데미지 배율
  *   · gun — 새총 등 원거리 무기 데미지 배율
@@ -176,15 +176,21 @@ export interface PlayerState {
 
   stats: StatBlock;
   unspentStatPoints: number;
-  abilityDamageMultiplier: number; // stats.fruit로부터 파생
-  /** 도검류(요루·삼도류·엔마)에만 곱해지는 배율 — stats.sword로부터 파생 */
+  abilityDamageMultiplier: number; // stats.fruit로부터 파생 (statAttackPower(fruit)/BASE_ATTACK_POWER — stat=0에서 1.0)
+  /**
+   * 도검류(요루·삼도류·엔마)를 든 채 내는 근접 데미지의 기준 공격력 —
+   * stats.sword로부터 statAttackPower()로 파생됩니다. 예전엔 "1+stat*0.06"
+   * 배율(1.0 근처)이었지만 지금은 절대 수치(기본 10, 스텟 1당 +0.5)이고,
+   * meleeDamage 위에 곱해지는 게 아니라 이 값 자체가 무기의 damageMultiplier에
+   * 곱해집니다 (CombatSystem.totalMeleeDamage 참고).
+   */
   swordDamageMultiplier: number;
-  /** 새총 등 원거리 무기에만 곱해지는 배율 — stats.gun으로부터 파생 */
+  /** 새총 등 원거리 무기의 기준 공격력 — stats.gun으로부터 파생. swordDamageMultiplier와 동일한 방식(statAttackPower) */
   gunDamageMultiplier: number;
 
   meleeCooldownSec: number;
   meleeRemainingCooldownSec: number;
-  meleeDamage: number; // stats.attack으로부터 파생 (마나와 합쳐진 스텟입니다)
+  meleeDamage: number; // 고정값(맨손 기준치) — 스텟 배분에 영향받지 않습니다. 무기를 든 상태의 검/총 데미지 계산에는 더 이상 쓰이지 않습니다(맨손일 때만 사용)
   meleeRange: number;
 
   /**
@@ -543,8 +549,8 @@ export function createInitialGameState(
       stats: { attack: 0, defense: 0, sword: 0, gun: 0, fruit: 0 },
       unspentStatPoints: 0,
       abilityDamageMultiplier: 1,
-      swordDamageMultiplier: 1,
-      gunDamageMultiplier: 1,
+      swordDamageMultiplier: 10, // BASE_ATTACK_POWER(StatSystem.ts)와 같은 값 — 스텟 0일 때의 기준 공격력
+      gunDamageMultiplier: 10,
 
       meleeCooldownSec: 0.5,
       meleeRemainingCooldownSec: 0,

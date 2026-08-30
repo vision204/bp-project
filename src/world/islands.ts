@@ -116,12 +116,15 @@ interface SpeciesSeed {
   scale?: number;
   count?: number;
   /**
-   * 이 종족 하나만 따로 체력을 더 곱해주고 싶을 때 (기본 1 = 곱하지 않음).
-   * 섬 전체의 base hp를 올리면 같은 섬의 다른 종족까지 같이 세져버리므로,
-   * "이 한 종족만 유난히 세다"를 표현하려면 이 필드를 씁니다.
-   * (예: 대저택의 최종 보스 "저택의 주인")
+   * 이 종족의 최종 hp를 곡선/원콤방지바닥값/1.3배 버프 계산을 전부 건너뛰고
+   * 정확히 이 값으로 고정합니다 (사용자가 넘겨준 참고 자료(다른 게임의 섬별
+   * 몬스터 체력 표)를 그대로 옮겨 적은 값들 — buildSpecies의 일반 공식으로
+   * 재현되는 수치가 아니라 리터럴 목표값입니다). 지정하지 않은 종족은 기존
+   * 그대로 base.hp × HP_STEP^k와 원콤방지 바닥값 중 큰 쪽에 1.3배를 곱해 씁니다.
+   * count/contactDamage/exp/money/level 등 다른 필드는 이 종족도 여전히 기존
+   * 공식(트리밍 후 남은 인덱스 k 기준)으로 계산됩니다 — hp만 고정됩니다.
    */
-  hpMultiplier?: number;
+  hpOverride?: number;
 }
 
 export interface IslandDef {
@@ -187,8 +190,7 @@ const MONEY_STEP = 1.35;
  * world/islands.ts가 새로 import하게 만들고 싶지 않아서입니다.
  */
 const STAT_POINTS_PER_LEVEL = 3; // Leveling.ts와 같은 값
-const BASE_MELEE_DAMAGE = 8; // StatSystem.ts와 같은 값
-const ATTACK_DMG_PER_POINT = 2; // StatSystem.ts와 같은 값
+const BASE_MELEE_DAMAGE = 8; // StatSystem.ts와 같은 값 (attack 스텟은 근접 데미지에 영향을 주지 않으므로 고정값)
 const SWORD_DMG_MULT_PER_POINT = 0.06; // StatSystem.ts와 같은 값
 const YORU_DAMAGE_MULTIPLIER = 2.6; // WeaponSystem.ts의 sword_yoru(가장 흔한 검)와 같은 값
 /** 원콤 방지 바닥값에 주는 여유 — 예상 한 대 데미지의 1.3배는 넘도록 */
@@ -202,9 +204,8 @@ const NO_ONESHOT_SAFETY_MARGIN = 1.3;
 function estimatedMeleeHitAtLevel(level: number): number {
   const totalPoints = Math.max(0, level - 1) * STAT_POINTS_PER_LEVEL;
   const perStatPoints = Math.floor(totalPoints / 5); // 공격/방어/검/총/열매에 고르게 분배
-  const meleeDamage = BASE_MELEE_DAMAGE + perStatPoints * ATTACK_DMG_PER_POINT;
   const swordMultiplier = 1 + perStatPoints * SWORD_DMG_MULT_PER_POINT;
-  return meleeDamage * YORU_DAMAGE_MULTIPLIER * swordMultiplier;
+  return BASE_MELEE_DAMAGE * YORU_DAMAGE_MULTIPLIER * swordMultiplier;
 }
 
 /** 체력과 함께 접촉 데미지도 살짝 더 세게 — "몬스터를 더 강하게"라는 요청 그대로 반영 */
@@ -213,10 +214,9 @@ const GENERAL_CONTACT_BUFF = 1.25;
 /**
  * 사용자 추가 요청: "몬스터들 hp만, 공격력은 바꾸지 말고 hp만 1.3배 늘려줘 —
  * 모든 몬스터들." 공격력(접촉 데미지, GENERAL_CONTACT_BUFF)은 건드리지 않고
- * 체력에만 곱합니다. "저택의 주인"처럼 seed.hpMultiplier로 정확한 수치를 이미
- * 맞춰둔 보스는 이전 요청("만렙 요루 무장색 4대에 죽어야 함")으로 이미 정밀
- * 튜닝돼 있으므로 이 배율의 대상에서 제외합니다(원콤 방지 바닥값과 같은 예외
- * 처리 방식).
+ * 체력에만 곱합니다. seed.hpOverride로 리터럴 목표값이 지정된 종족(사용자가
+ * 넘겨준 참고 자료 기반 — 아래 ISLANDS 정의 참고)은 이 배율을 포함한 곡선
+ * 계산 전체를 건너뛰므로 이 상수의 대상이 아닙니다.
  */
 const MONSTER_HP_BUFF = 1.3;
 
@@ -248,14 +248,13 @@ function buildSpecies(
       scale: seed.scale ?? 1 + k * 0.09,
       tierLevel,
       count: densityScaledCount(rawCount, seeds.length),
-      // "저택의 주인"처럼 특정 수치로 이미 맞춰둔 보스는 seed.hpMultiplier를 직접
-      // 지정해뒀으므로 그 값을 그대로 쓰고(원콤 방지 바닥값 적용 안 함) — 그래서
-      // 기존 보스 밸런스 테스트(정확히 4대에 죽어야 함)는 그대로 통과합니다.
+      // seed.hpOverride가 있으면(사용자가 넘겨준 참고 자료의 리터럴 목표값)
+      // 곡선/원콤방지바닥값/1.3배 버프 계산을 전부 건너뛰고 그 값을 그대로 씁니다.
       // 그 외의 모든 종족은, 원래 곡선(HP_STEP 성장)과 "이 레벨에서 원콤 방지에
-      // 필요한 최소 체력" 중 더 큰 값을 씁니다.
+      // 필요한 최소 체력" 중 더 큰 값에 1.3배를 곱합니다.
       hp:
-        seed.hpMultiplier !== undefined
-          ? Math.round(base.hp * Math.pow(HP_STEP, k) * seed.hpMultiplier)
+        seed.hpOverride !== undefined
+          ? seed.hpOverride
           : Math.round(
               Math.max(
                 Math.round(base.hp * Math.pow(HP_STEP, k)),
@@ -364,7 +363,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 51,
     requiredLevel: 25,
     enemy: { count: 7, hp: 90, exp: 70, money: 18, contactDamage: 12 },
-    speciesSeeds: [{ name: "정글 도적", color: 0x5aa469 }],
+    speciesSeeds: [{ name: "정글 도적", color: 0x5aa469, hpOverride: 40 }],
   }),
   withDock({
     id: "desert",
@@ -374,7 +373,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 51,
     requiredLevel: 50,
     enemy: { count: 7, hp: 240, exp: 260, money: 45, contactDamage: 20 },
-    speciesSeeds: [{ name: "사막 도적", color: 0xd6a34f }],
+    speciesSeeds: [{ name: "사막 도적", color: 0xd6a34f, hpOverride: 115 }],
   }),
   withDock({
     id: "ice",
@@ -384,7 +383,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 51,
     requiredLevel: 125,
     enemy: { count: 8, hp: 700, exp: 900, money: 110, contactDamage: 32 },
-    speciesSeeds: [{ name: "설원 늑대", color: 0x7fb8d8 }],
+    speciesSeeds: [{ name: "설원 늑대", color: 0x7fb8d8, hpOverride: 230 }],
   }),
   withDock({
     id: "volcano",
@@ -394,7 +393,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 51,
     requiredLevel: 200,
     enemy: { count: 8, hp: 1600, exp: 2600, money: 260, contactDamage: 48 },
-    speciesSeeds: [{ name: "용암 병사", color: 0xe0623a }],
+    speciesSeeds: [{ name: "용암 병사", color: 0xe0623a, hpOverride: 410 }],
   }),
   withDock({
     id: "storm",
@@ -404,7 +403,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 51,
     requiredLevel: 235,
     enemy: { count: 9, hp: 3200, exp: 6000, money: 520, contactDamage: 65 },
-    speciesSeeds: [{ name: "폭풍 해적", color: 0x6d7fc4 }],
+    speciesSeeds: [{ name: "폭풍 해적", color: 0x6d7fc4, hpOverride: 560 }],
   }),
 
   // ── 바깥 고리 (Lv.300 ~ 900) ────────────────────────────────────────────
@@ -418,10 +417,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 62,
     requiredLevel: 300,
     enemy: { count: 9, hp: 3500, exp: 6900, money: 600, contactDamage: 85 },
-    speciesSeeds: [
-      { name: "안개 유령", color: 0x9aa7b5 },
-      { name: "저주받은 선장", color: 0x6f5b9e },
-    ],
+    speciesSeeds: [{ name: "안개 유령", color: 0x9aa7b5, hpOverride: 815 }],
   }),
   withDock({
     id: "crystal",
@@ -432,9 +428,8 @@ export const ISLANDS: IslandDef[] = [
     requiredLevel: 400,
     enemy: { count: 9, hp: 5500, exp: 10900, money: 900, contactDamage: 110 },
     speciesSeeds: [
-      { name: "수정 골렘", color: 0x74d4e8 },
-      { name: "수정 파수꾼", color: 0x4f8fd8 },
-      { name: "수정 군주", color: 0xb98cf0 },
+      { name: "수정 골렘", color: 0x74d4e8, hpOverride: 1035 },
+      { name: "수정 군주", color: 0xb98cf0, hpOverride: 5500 },
     ],
   }),
   withDock({
@@ -445,11 +440,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 76,
     requiredLevel: 550,
     enemy: { count: 10, hp: 9000, exp: 18200, money: 1500, contactDamage: 145 },
-    speciesSeeds: [
-      { name: "심연 촉수", color: 0x2f6f6a },
-      { name: "심연 사냥꾼", color: 0x1f8f7a },
-      { name: "심연 포식자", color: 0x7be0c0 },
-    ],
+    speciesSeeds: [{ name: "심연 촉수", color: 0x2f6f6a, hpOverride: 1850 }],
   }),
   withDock({
     id: "sky",
@@ -459,12 +450,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 86,
     requiredLevel: 700,
     enemy: { count: 10, hp: 13500, exp: 26800, money: 2200, contactDamage: 185 },
-    speciesSeeds: [
-      { name: "천공 사제", color: 0xf2e6c9 },
-      { name: "천공 기사", color: 0xd8c26a },
-      { name: "천공 대장", color: 0xf0a83c },
-      { name: "천공 수호신", color: 0xfff0a0 },
-    ],
+    speciesSeeds: [{ name: "천공 사제", color: 0xf2e6c9, hpOverride: 2450 }],
   }),
   withDock({
     id: "dragon",
@@ -475,10 +461,8 @@ export const ISLANDS: IslandDef[] = [
     requiredLevel: 900,
     enemy: { count: 11, hp: 20000, exp: 40000, money: 3300, contactDamage: 240 },
     speciesSeeds: [
-      { name: "새끼 드래곤", color: 0x7fbf5f },
-      { name: "화염 드래곤", color: 0xe04b2a },
-      { name: "폭풍 드래곤", color: 0x5f7fe0 },
-      { name: "고룡", color: 0xf0d24b },
+      { name: "새끼 드래곤", color: 0x7fbf5f, hpOverride: 4150 },
+      { name: "고룡", color: 0xf0d24b, hpOverride: 15500 },
     ],
   }),
 
@@ -517,10 +501,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 48,
     requiredLevel: 1100,
     enemy: { count: 10, hp: 26000, exp: 55300, money: 4200, contactDamage: 280 },
-    speciesSeeds: [
-      { name: "장미 기사", color: 0xd45a7a },
-      { name: "장미 근위대장", color: 0xa03050 },
-    ],
+    speciesSeeds: [{ name: "장미 기사", color: 0xd45a7a, hpOverride: 27500 }],
   }),
   withDock({
     id: "green_zone",
@@ -532,8 +513,8 @@ export const ISLANDS: IslandDef[] = [
     requiredLevel: 1200,
     enemy: { count: 10, hp: 30000, exp: 63400, money: 4800, contactDamage: 310 },
     speciesSeeds: [
-      { name: "초원 사냥꾼", color: 0x6fbf5a },
-      { name: "초원 족장", color: 0x3f8f3a },
+      { name: "초원 사냥꾼", color: 0x6fbf5a, hpOverride: 7400 },
+      { name: "초원 족장", color: 0x3f8f3a, hpOverride: 43000 },
     ],
   }),
   withDock({
@@ -545,10 +526,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 48,
     requiredLevel: 1300,
     enemy: { count: 11, hp: 35000, exp: 72000, money: 5500, contactDamage: 345 },
-    speciesSeeds: [
-      { name: "무덤지기", color: 0x7a8b7f },
-      { name: "망자의 사제", color: 0x4d5f52 },
-    ],
+    speciesSeeds: [{ name: "무덤지기", color: 0x7a8b7f, hpOverride: 10400 }],
   }),
   withDock({
     id: "snow_mountain",
@@ -559,10 +537,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 48,
     requiredLevel: 1400,
     enemy: { count: 11, hp: 41000, exp: 81100, money: 6300, contactDamage: 385 },
-    speciesSeeds: [
-      { name: "설산 산적", color: 0xcfe4f2 },
-      { name: "설산 두목", color: 0x8fb4cc },
-    ],
+    speciesSeeds: [{ name: "설산 산적", color: 0xcfe4f2, hpOverride: 11800 }],
   }),
 
   // ── 바깥 고리 (Lv.1500 ~ 1900) ─────────────────────────────────────────
@@ -575,10 +550,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 52,
     requiredLevel: 1500,
     enemy: { count: 11, hp: 48000, exp: 90600, money: 7200, contactDamage: 425 },
-    speciesSeeds: [
-      { name: "불꽃 야수", color: 0xf06a2a },
-      { name: "서리 야수", color: 0x5ac8f0 },
-    ],
+    speciesSeeds: [{ name: "불꽃 야수", color: 0xf06a2a, hpOverride: 13000 }],
   }),
   withDock({
     id: "cursed_ship",
@@ -589,10 +561,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 56,
     requiredLevel: 1600,
     enemy: { count: 12, hp: 56000, exp: 100500, money: 8200, contactDamage: 470 },
-    speciesSeeds: [
-      { name: "유령 선원", color: 0x6f7f8f },
-      { name: "유령 선장", color: 0x9f6fd0 },
-    ],
+    speciesSeeds: [{ name: "유령 선원", color: 0x6f7f8f, hpOverride: 15400 }],
   }),
   withDock({
     id: "ice_castle",
@@ -603,10 +572,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 62,
     requiredLevel: 1700,
     enemy: { count: 12, hp: 65000, exp: 110700, money: 9400, contactDamage: 520 },
-    speciesSeeds: [
-      { name: "성벽 파수병", color: 0xa8dcf0 },
-      { name: "서리 여왕의 기사", color: 0x5f9fd8 },
-    ],
+    speciesSeeds: [{ name: "성벽 파수병", color: 0xa8dcf0, hpOverride: 19800 }],
   }),
   withDock({
     id: "forgotten",
@@ -617,10 +583,7 @@ export const ISLANDS: IslandDef[] = [
     radius: 66,
     requiredLevel: 1800,
     enemy: { count: 12, hp: 76000, exp: 121400, money: 10700, contactDamage: 575 },
-    speciesSeeds: [
-      { name: "잊혀진 전사", color: 0x8f8a6a },
-      { name: "잊혀진 수호자", color: 0xc0b070 },
-    ],
+    speciesSeeds: [{ name: "잊혀진 전사", color: 0x8f8a6a, hpOverride: 22000 }],
   }),
   withDock({
     id: "mansion",
@@ -632,14 +595,12 @@ export const ISLANDS: IslandDef[] = [
     requiredLevel: 1900,
     enemy: { count: 13, hp: 88000, exp: 132500, money: 12200, contactDamage: 640 },
     speciesSeeds: [
-      { name: "저택 하인", color: 0x8d6e63 },
-      { name: "저택 경비대장", color: 0x5d4037 },
-      { name: "가면의 귀족", color: 0xb08cd0 },
-      // 만렙(2056)에 스탯을 5개 균등 분배한(=DevLoadout.ts 기준 "다 해본 캐릭터") 플레이어가
-      // 무장색을 켠 채 요루 기본 공격만으로 정확히 4대를 때려야 죽도록 맞춘 배율입니다.
-      // (계산 근거: 그 조건에서 한 대 데미지 ≈ 675,222 → 3대(2,025,666)로는 못 죽고
-      //  4대(2,700,888) 안에는 반드시 죽어야 하므로, hp를 그 사이인 ~2,491,417로 맞춥니다)
-      { name: "저택의 주인", color: 0xf0c060, hpMultiplier: 13.5 },
+      { name: "저택 하인", color: 0x8d6e63, hpOverride: 24500 },
+      // 참고 자료(다른 게임의 섬별 몬스터 체력 표) 기준 최종 보스 리터럴 목표값.
+      // 예전에는 "만렙 요루 무장색 정확히 4대"를 맞추는 특수 배율(hpMultiplier)로
+      // 튜닝돼 있었지만, 이번 리밸런스로 그 특수 처리는 제거되고 다른 모든 종족과
+      // 똑같이 hpOverride 하나로만 정해집니다.
+      { name: "저택의 주인", color: 0xf0c060, hpOverride: 107000 },
     ],
   }),
 ];

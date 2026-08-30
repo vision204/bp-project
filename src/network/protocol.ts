@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Faction } from "../world/islands";
+import type { BoatTierId } from "../core/GameState";
 
 /** 서버 프로세스 하나 = 여러 방(room). 방 하나가 이 인원으로 꽉 차면 다음 방을 만듭니다. */
 export const DEFAULT_MULTIPLAYER_PORT = 8787;
@@ -87,6 +88,8 @@ export interface RemotePlayerSnapshot {
   level: number;
   sea: 1 | 2;
   animState: AnimState;
+  /** animState === "boat"일 때만 탄 배의 등급, 아니면 null — 다른 사람에게 배를 보여줄 때 씀 */
+  boatTier: BoatTierId | null;
   hakiActive: boolean;
   drawnWeaponId: string | null;
   pvpEnabled: boolean;
@@ -193,6 +196,8 @@ export type ClientMessage =
       level: number;
       sea: 1 | 2;
       animState: AnimState;
+      /** animState === "boat"일 때만 탄 배의 등급, 아니면 null */
+      boatTier: BoatTierId | null;
       hakiActive: boolean;
       drawnWeaponId: string | null;
     }

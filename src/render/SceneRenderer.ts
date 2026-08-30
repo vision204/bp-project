@@ -4,7 +4,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import type { EnemyState, FruitAbilityId, GameState, ItemId, NpcKind } from "../core/GameState";
 import { FIRST_PERSON_THRESHOLD, type PlayerController } from "../simulation/PlayerController";
 import { maxWorldRadius } from "../world/islands";
-import { boatTier } from "../simulation/BoatSystem";
+import { BOAT_DECK_Y, boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import { skillsForWeapon } from "../simulation/weaponSkills";
 import { skillsForFruit, withCharge, type SkillDef } from "../simulation/skills";
@@ -720,6 +720,10 @@ interface RemotePlayerVisual {
   weaponId: string | null;
   /** weaponId에 대응하는 실제로 붙어 있는 무기 인스턴스(없으면 null). */
   weaponVisual: THREE.Group | null;
+  /** 이 원격 플레이어가 배를 타고 있을 때만 만들어지는 배 모델(없으면 null, buildBoat()로 지연 생성). */
+  boat: BoatVisual | null;
+  /** boat를 마지막으로 어느 등급 색으로 칠했는지 — 등급이 바뀔 때만 다시 칠합니다. */
+  lastBoatTier: string;
 }
 
 /** 다른 플레이어의 색은 진영으로 정합니다 — 몬스터·NPC와는 다른 배색이라 한눈에 구분됩니다. */
@@ -1257,7 +1261,7 @@ export class SceneRenderer {
       nameTag.sprite.position.y = 2.7;
       group.add(nameTag.sprite);
       this.scene.add(group);
-      visual = { group, nameTag, lastLabel: "", parts, weaponId: null, weaponVisual: null };
+      visual = { group, nameTag, lastLabel: "", parts, weaponId: null, weaponVisual: null, boat: null, lastBoatTier: "" };
       this.remotePlayerVisuals.set(id, visual);
     }
     return visual;
@@ -1277,6 +1281,28 @@ export class SceneRenderer {
       visual.group.visible = true;
       visual.group.position.set(r.renderX, r.renderY, r.renderZ);
       visual.group.rotation.y = r.renderYaw;
+
+      // 배를 타고 있으면 캐릭터 발밑에 배 모델을 붙입니다. 캐릭터 자체는 이미
+      // (서버가 그대로 중계하는) 배 갑판 위치/방향으로 렌더링되고 있으므로,
+      // 로컬 boatVisual과 똑같은 상대 오프셋으로 캐릭터 그룹의 자식으로 붙여두면
+      // 별도 위치 계산 없이 캐릭터를 따라 자동으로 움직입니다.
+      if (r.snapshot.boatTier) {
+        if (!visual.boat) {
+          visual.boat = buildBoat();
+          visual.boat.group.position.set(0, -BOAT_DECK_Y, 0);
+          visual.boat.group.rotation.y = -Math.PI / 2;
+          visual.group.add(visual.boat.group);
+        }
+        if (r.snapshot.boatTier !== visual.lastBoatTier) {
+          visual.lastBoatTier = r.snapshot.boatTier;
+          const tier = boatTier(r.snapshot.boatTier);
+          visual.boat.hullMat.color.setHex(tier.hullColor);
+          visual.boat.sailMat.color.setHex(tier.sailColor);
+        }
+        visual.boat.group.visible = true;
+      } else if (visual.boat) {
+        visual.boat.group.visible = false;
+      }
 
       // 손에 든 무기 — drawnWeaponId가 바뀌었을 때만 떼고 새로 답니다.
       if (r.snapshot.drawnWeaponId !== visual.weaponId) {
@@ -1326,7 +1352,15 @@ export class SceneRenderer {
     // 접속이 끊긴 플레이어는 지웁니다.
     for (const [id, visual] of this.remotePlayerVisuals) {
       if (seen.has(id)) continue;
-      this.scene.remove(visual.group);
+      if (visual.boat) {
+        visual.boat.group.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            (obj.material as THREE.Material).dispose();
+          }
+        });
+      }
+      this.scene.remove(visual.group); // visual.group의 자식(배 모델 포함)도 함께 씬에서 빠집니다.
       this.remotePlayerVisuals.delete(id);
       this.remoteAttackSwingAtMs.delete(id);
       if (this.hoverOutlineId === id) this.setHoverOutline(null);
