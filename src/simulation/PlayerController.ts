@@ -224,15 +224,21 @@ export class PlayerController {
       player.yaw = Math.atan2(moveX, moveZ);
     }
 
-    // Q 대쉬 — 바라보는 방향으로 순간 이동. 쿨다운은 없고 마나를 소모해서,
-    // 마나가 있는 한 연속으로 계속 쓸 수 있습니다 (다 떨어지면 자연 회복까지 대기).
-    // 비용은 고정값이 아니라 최대 마나의 DASH_MANA_COST_PERCENT(2%) — 밸런스 패치.
+    // Q 대쉬 — 캐릭터가 바라보는 방향(player.yaw, 몸통이 실제로 돌아가 있는
+    // 방향)으로 순간 이동합니다. 사용자 피드백: 예전엔 카메라 방향(camYaw)을
+    // 썼는데, 카메라를 옆으로 돌려둔 채 이동할 때처럼 카메라와 캐릭터 몸통이
+    // 다른 방향을 볼 때 "무조건 카메라가 보는 앞쪽"으로만 튀어서 캐릭터가
+    // 실제로 보는 방향과 어긋나 보였습니다 — 이제 캐릭터 모델이 실제로 회전해
+    // 있는 방향(SceneRenderer.ts가 playerVisual.rotation.y로 쓰는 값과 동일)
+    // 그대로 대쉬합니다. 쿨다운은 없고 마나를 소모해서, 마나가 있는 한
+    // 연속으로 계속 쓸 수 있습니다 (다 떨어지면 자연 회복까지 대기). 비용은
+    // 고정값이 아니라 최대 마나의 DASH_MANA_COST_PERCENT(2%) — 밸런스 패치.
     const dashManaCost = player.maxMana * DASH_MANA_COST_PERCENT;
     if (input.dashPressed && player.mana >= dashManaCost) {
       player.mana -= dashManaCost;
       player.lastManaSpentAtMs = nowMs;
-      const dx = Math.sin(this.camYaw) * DASH_DISTANCE;
-      const dz = Math.cos(this.camYaw) * DASH_DISTANCE;
+      const dx = Math.sin(player.yaw) * DASH_DISTANCE;
+      const dz = Math.cos(player.yaw) * DASH_DISTANCE;
       player.pendingDash = { x: dx, z: dz };
       player.events.push({ type: "player_dashed", dx, dz });
     }
