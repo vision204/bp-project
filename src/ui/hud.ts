@@ -449,7 +449,7 @@ export class Hud {
       const el = slotEls[slot];
       if (!el) return;
       const unlocked = isUnlocked(slot);
-      const cd = p.skillCooldowns[slot];
+      const cd = activeMode === "fruit" ? p.fruitSkillCooldowns[slot] : p.weaponSkillCooldowns[slot];
       const overlay = el.querySelector<HTMLDivElement>(".cooldown-overlay");
       if (overlay) {
         overlay.hidden = cd <= 0;

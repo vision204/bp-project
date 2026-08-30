@@ -411,7 +411,28 @@ async function main() {
 
   let lastTime = performance.now();
 
+  // 게임 도중에 멀티플레이 연결이 끊기면(서버 재시작, 네트워크 문제 등) 시작 때와
+  // 똑같이 전체 화면을 덮는 게이트를 다시 띄우고, 재접속될 때까지 시뮬레이션·
+  // 렌더링·입력 전부를 멈춥니다 — "시작할 때만 막고 도중엔 그냥 계속된다"를
+  // 막기 위한 사용자 요청입니다. 개발자 모드는 애초에 connect()를 호출하지
+  // 않으므로(devMode 분기) 여기서도 완전히 영향이 없습니다.
+  let disconnectGateActive = false;
+  const midGameUrl = env?.VITE_MULTIPLAYER_URL || defaultMultiplayerUrl();
+
   function tick() {
+    if (!devMode && !multiplayer.connected) {
+      if (!disconnectGateActive) {
+        disconnectGateActive = true;
+        void connectMultiplayerOrWait(multiplayer, midGameUrl, autoName).then(() => {
+          disconnectGateActive = false;
+        });
+      }
+      // 게이트가 떠 있는 동안은 이번 프레임의 시뮬레이션·입력·렌더링을 전부
+      // 건너뛰고, 루프만 계속 돌려서(다음 프레임에) 재접속 여부를 계속 확인합니다.
+      requestAnimationFrame(tick);
+      return;
+    }
+
     const now = performance.now();
     const dt = Math.min(0.05, (now - lastTime) / 1000); // 탭 전환 등으로 인한 큰 dt 스파이크 방지
     lastTime = now;

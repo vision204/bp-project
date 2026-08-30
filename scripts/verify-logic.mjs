@@ -802,7 +802,8 @@ assert(GACHA_COST_RATIO === 0.3, "참가비는 전 재산의 30%");
   assert(first.ok === true, `뽑기 성공 (${first.fruitName})`);
   assert(g.money === 700, `참가비 300 차감 (1000 → ${g.money})`);
   assert(g.fruitInventory.includes(first.fruitId), "뽑은 열매는 인벤토리로 들어감(자동 장착 X)");
-  assert(g.skillCooldowns.length === 4, "스킬은 여전히 4개");
+  assert(g.weaponSkillCooldowns.length === 4, "검 스킬은 여전히 4개");
+  assert(g.fruitSkillCooldowns.length === 4, "열매 스킬은 여전히 4개");
   assert(g.lastGachaAtMs === t0, "뽑은 시각이 기록됨");
 
   const before = g.money;
@@ -1362,7 +1363,7 @@ pMix.events = [];
 stepCombat(0.016, input({ attackPressed: true }), pMix, eMix);
 assert(eMix[0].alive && eMix[0].hp < 25, `근접으로 체력만 깎음 (${eMix[0].hp})`);
 assert(pMix.fruitExp === 0, "아직 열매 경험치 없음");
-pMix.skillCooldowns = [0, 0, 0, 0];
+pMix.fruitSkillCooldowns = [0, 0, 0, 0];
 tapSkill(0.016, pMix, eMix, 0);
 assert(!eMix[0].alive, "열매 스킬로 마무리");
 assert(pMix.fruitExp > 0, `막타가 열매라서 열매 경험치 획득 (${pMix.fruitExp})`);
@@ -1544,11 +1545,11 @@ section("requireMouseInRange — 용암 지대·대분화는 마우스가 너무
   // (1) 마우스 지점 자체가 없음(레이캐스트 실패) — 발동이 막혀야 함
   pFar.aimGroundPoint = null;
   const manaBefore = pFar.mana;
-  const cdBefore = pFar.skillCooldowns[2];
+  const cdBefore = pFar.fruitSkillCooldowns[2];
   pFar.events = [];
   tapSkill(0.016, pFar, [], 2);
   assert(pFar.mana === manaBefore, "용암 지대: 마우스 지점이 없으면 마나를 쓰지 않고 무산됨");
-  assert(pFar.skillCooldowns[2] === cdBefore, "용암 지대: 마우스 지점이 없으면 쿨다운도 걸리지 않음");
+  assert(pFar.fruitSkillCooldowns[2] === cdBefore, "용암 지대: 마우스 지점이 없으면 쿨다운도 걸리지 않음");
   assert(
     pFar.events.some((e) => e.type === "skill_target_too_far" && e.skillName === magmaC.name),
     "용암 지대: skill_target_too_far 이벤트가 뜸",
@@ -1841,6 +1842,53 @@ section("무기 스킬(ZXCV) — 무기를 뽑았을 때만, 숙련도로 해금
   assert(
     Math.abs(weaponLevelDamageMultiplier(50) - (1 + 49 * 0.02)) < 1e-9,
     `무기 레벨 배율 공식도 열매와 동일 (레벨당 +2%): x${weaponLevelDamageMultiplier(50).toFixed(2)}`,
+  );
+}
+
+section("검 ZXCV와 열매 ZXCV 쿨다운은 완전히 독립적임 (같은 슬롯이어도 서로 안 겹침)");
+{
+  // sword_yoru의 Z(슬롯0)와 magma_fist(기본 장착 열매)의 Z(슬롯0)를 같은
+  // 플레이어로 번갈아 써서, 한쪽 쿨다운이 다른 쪽에 전혀 영향을 주지 않는지 확인합니다.
+  const pXfer = freshPlayer();
+  pXfer.hotbar[0] = "sword_yoru";
+  pXfer.weaponMastery["sword_yoru"] = { level: 100, exp: 0, expToNext: weaponExpRequiredForLevel(100) };
+  pXfer.equippedFruit = "magma_fist";
+  pXfer.fruitLevel = 100; // 모든 슬롯 해금
+
+  const yoruZ = skillsForWeapon("sword_yoru")[0];
+  const magmaZ = skillsForFruit("magma_fist")[0];
+  assert(yoruZ.cooldownSec > 0, "요루 Z는 쿨다운이 있는 스킬");
+  assert(magmaZ.cooldownSec > 0, "마그마 Z는 쿨다운이 있는 스킬");
+
+  // 1) 검을 뽑고 Z를 발동 — 검 쿨다운만 걸리고, 열매 쿨다운은 그대로 0
+  pXfer.fruitDrawn = false;
+  toggleDrawn(pXfer, 0);
+  pXfer.events = [];
+  tapSkill(0.016, pXfer, [], 0);
+  assert(pXfer.weaponSkillCooldowns[0] > 0, `검 Z 사용 → weaponSkillCooldowns[0]에 쿨다운 걸림 (${pXfer.weaponSkillCooldowns[0].toFixed(1)})`);
+  assert(pXfer.fruitSkillCooldowns[0] === 0, "검 Z를 썼다고 열매 쪽 쿨다운은 전혀 걸리지 않음");
+
+  // 2) 검을 넣고 열매를 뽑아서 같은 슬롯(Z)을 발동 — 검 쿨다운이 남아있어도
+  //    막히지 않고 바로 나가야 함(서로 다른 배열이므로)
+  pXfer.hotbar[0] = null; // 검을 손에서 완전히 치움
+  pXfer.activeHotbarSlot = null;
+  pXfer.fruitDrawn = true;
+  pXfer.events = [];
+  const eXfer = [makeEnemy("xfer1", 10, 10000)];
+  tapSkill(0.016, pXfer, eXfer, 0);
+  assert(
+    pXfer.events.some((e) => e.type === "skill_fired" && e.slot === 0),
+    "검 Z가 아직 쿨다운 중이어도, 같은 슬롯의 열매 Z는 막히지 않고 바로 발동함",
+  );
+  assert(pXfer.fruitSkillCooldowns[0] > 0, "열매 Z를 쓴 뒤에는 fruitSkillCooldowns[0]에 쿨다운이 걸림");
+  assert(pXfer.weaponSkillCooldowns[0] > 0, "그동안 weaponSkillCooldowns[0]은 검을 안 썼다고 리셋되지 않고 계속 흐르고 있었음(0보다 큼)");
+
+  // 3) 검으로 다시 돌아가면 방금 건 열매 쿨다운은 검 슬롯에 아무 영향이 없음(별개 배열)
+  //    — 열매 Z가 막 걸렸어도 검 슬롯은 그 시점까지의 자기 자신의 쿨다운만 봄.
+  const weaponCdAfterFruitUse = pXfer.weaponSkillCooldowns[0];
+  assert(
+    Math.abs(weaponCdAfterFruitUse - (yoruZ.cooldownSec - 0.016 * 4)) < 0.05,
+    `검 쿨다운은 열매 사용과 무관하게 자기 페이스로만 줄어듦 (남음: ${weaponCdAfterFruitUse.toFixed(2)})`,
   );
 }
 

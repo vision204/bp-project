@@ -99,7 +99,7 @@ export function equipFruitFromInventory(
   player.fruitInventory.splice(idx, 1);
   player.equippedFruit = fruitId;
   loadFruitMasteryCache(player, fruitId);
-  player.skillCooldowns = [0, 0, 0, 0];
+  player.fruitSkillCooldowns = [0, 0, 0, 0];
   player.chargingSkillSlot = null;
 
   events.push({
@@ -157,7 +157,7 @@ export function confirmHeldFruitEquip(player: PlayerState, events: GameEvent[]):
   player.heldFruitCandidate = null;
   player.equippedFruit = fruitId;
   loadFruitMasteryCache(player, fruitId);
-  player.skillCooldowns = [0, 0, 0, 0];
+  player.fruitSkillCooldowns = [0, 0, 0, 0];
   player.chargingSkillSlot = null;
 
   events.push({

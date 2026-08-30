@@ -213,8 +213,17 @@ export interface PlayerState {
    * (=먹고) 다시 원래처럼 스킬을 쓸 수 있는 상태가 됩니다.
    */
   heldFruitCandidate: FruitAbilityId | null;
-  /** Z/X/C/V 4개 슬롯의 남은 쿨다운(초) */
-  skillCooldowns: number[];
+  /**
+   * 검 Z/X/C/V 4개 슬롯의 남은 쿨다운(초) — 무기 스킬 전용. 열매 스킬과는
+   * 완전히 독립적으로 흐릅니다(같은 슬롯 번호라도 서로 다른 스킬이므로
+   * 쿨다운을 공유하면 안 됩니다 — 사용자 요청).
+   */
+  weaponSkillCooldowns: number[];
+  /**
+   * 열매 Z/X/C/V 4개 슬롯의 남은 쿨다운(초) — 열매 스킬 전용. 검 스킬과
+   * 완전히 독립적으로 흐릅니다.
+   */
+  fruitSkillCooldowns: number[];
 
   /**
    * 지금 "누르고 있는 중"인 차지 스킬(고무 피스톨 등)의 슬롯 — 없으면 null.
@@ -560,7 +569,8 @@ export function createInitialGameState(
       equippedFruit: "magma_fist",
       fruitInventory: [],
       heldFruitCandidate: null,
-      skillCooldowns: [0, 0, 0, 0],
+      weaponSkillCooldowns: [0, 0, 0, 0],
+      fruitSkillCooldowns: [0, 0, 0, 0],
       chargingSkillSlot: null,
       chargingSkillStartedAtMs: 0,
 

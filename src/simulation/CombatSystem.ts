@@ -333,8 +333,15 @@ export function stepCombat(
 ) {
   // 쿨다운 진행
   player.meleeRemainingCooldownSec = Math.max(0, player.meleeRemainingCooldownSec - dt);
-  for (let i = 0; i < player.skillCooldowns.length; i++) {
-    player.skillCooldowns[i] = Math.max(0, player.skillCooldowns[i] - dt);
+  // 검 스킬과 열매 스킬 쿨다운은 완전히 독립적입니다 — 지금 어느 쪽을 손에
+  // 들고 있는지와 상관없이 둘 다 매 프레임 흘러갑니다(예: 검 스킬을 쓰고
+  // 열매로 바꿔도 검 쿨다운은 실제 경과 시간만큼 계속 줄어들어야, 나중에
+  // 다시 검으로 돌아왔을 때 남은 쿨다운이 맞습니다).
+  for (let i = 0; i < player.weaponSkillCooldowns.length; i++) {
+    player.weaponSkillCooldowns[i] = Math.max(0, player.weaponSkillCooldowns[i] - dt);
+  }
+  for (let i = 0; i < player.fruitSkillCooldowns.length; i++) {
+    player.fruitSkillCooldowns[i] = Math.max(0, player.fruitSkillCooldowns[i] - dt);
   }
 
   // 자기 강화 버프 타이머
@@ -411,7 +418,7 @@ export function stepCombat(
           continue;
         }
 
-        if (player.skillCooldowns[slot] > 0) continue;
+        if (player.fruitSkillCooldowns[slot] > 0) continue;
         if (player.mana < skill.manaCost) continue;
 
         // 용암 지대·대분화(requireMouseInRange)는 마우스 지점이 물리적으로
@@ -450,7 +457,7 @@ export function stepCombat(
         if (player.mana < skill.manaCost) continue;
       }
 
-      player.skillCooldowns[slot] = skill.cooldownSec;
+      player.fruitSkillCooldowns[slot] = skill.cooldownSec;
       player.mana -= skill.manaCost;
       player.lastManaSpentAtMs = nowMs;
       const firedSkill = skill.chargeable ? withCharge(skill, chargeFrac) : skill;
@@ -477,10 +484,10 @@ export function stepCombat(
         });
         continue;
       }
-      if (player.skillCooldowns[slot] > 0) continue;
+      if (player.weaponSkillCooldowns[slot] > 0) continue;
       if (player.mana < skill.manaCost) continue;
 
-      player.skillCooldowns[slot] = skill.cooldownSec;
+      player.weaponSkillCooldowns[slot] = skill.cooldownSec;
       player.mana -= skill.manaCost;
       player.lastManaSpentAtMs = nowMs;
       applySkill(player, enemies, skill, "weapon", weaponSkillDamage(player, skill, weapon.id), player.events);

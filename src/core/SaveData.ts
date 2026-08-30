@@ -307,7 +307,8 @@ export function applySaveData(state: GameState, raw: unknown): boolean {
   recomputeDerivedStats(p);
   p.hp = p.maxHp;
   p.mana = p.maxMana;
-  p.skillCooldowns = [0, 0, 0, 0];
+  p.weaponSkillCooldowns = [0, 0, 0, 0];
+  p.fruitSkillCooldowns = [0, 0, 0, 0];
   p.hakiActive = false;
   p.inWater = false;
   p.guideTargetIslandId = null;
