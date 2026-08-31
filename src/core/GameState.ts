@@ -463,8 +463,20 @@ export type GameEvent =
   // 실제로 다른 플레이어를 맞혔는지는 src/network/PvpCombat.ts가 이 이벤트를
   // 보고 별도로 판정합니다.
   | { type: "melee_attack_fired" }
-  /** chargeFrac은 차지 스킬(고무 피스톨 등)일 때만 있으며, 0~1로 얼마나 눌렀는지를 나타냅니다. */
-  | { type: "skill_fired"; slot: number; chargeFrac?: number }
+  /**
+   * chargeFrac은 차지 스킬(고무 피스톨 등)일 때만 있으며, 0~1로 얼마나 눌렀는지를 나타냅니다.
+   * rangeMult는 용으로 변신(dragonFormActive) 중에 발동된 공격 스킬(dragon_z/x/c)일 때만
+   * 있으며, 실제로 적용된 사거리 배율(DRAGON_FORM_RANGE_MULTIPLIER)입니다 — chargeFrac과
+   * 마찬가지로 PvpCombat.ts의 broadcastSkillFx가 그대로 실어 보내서, 다른 플레이어 화면의
+   * 이펙트도 실제 판정 범위와 같은 크기로 보이게 합니다(withRangeMultiplier 참고).
+   */
+  | { type: "skill_fired"; slot: number; chargeFrac?: number; rangeMult?: number }
+  /**
+   * 빛빛(F: 빛의 비행)·용용(F: 용의 비행) 전용 특수 능력이 발동됐을 때 — 일반
+   * Z/X/C/V 슬롯 시스템 밖이라 skill_fired와 완전히 별개입니다. 순수 연출용
+   * 중계(PvpCombat.ts의 broadcastSpecialAbilityFx)를 위한 신호일 뿐입니다.
+   */
+  | { type: "special_ability_fired"; abilityId: "light_f" | "dragon_f" }
   | { type: "pvp_connected" }
   | { type: "pvp_disconnected"; reason: string }
   | { type: "pvp_hit_landed"; targetName: string; damage: number }

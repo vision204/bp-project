@@ -5,7 +5,16 @@ import { grantExp } from "./Leveling";
 import { effectiveMeleeDamage, HAKI_DAMAGE_MULTIPLIER } from "./HakiSystem";
 import { fruitExpFromEnemy, fruitLevelDamageMultiplier, grantFruitExp } from "./FruitLeveling";
 import { weaponExpFromEnemy, weaponLevelDamageMultiplier, weaponMasteryLevel, grantWeaponExp } from "./WeaponLeveling";
-import { DRAGON_FLIGHT_SKILL, LIGHT_FLIGHT_SKILL, isSlotUnlocked, skillsForFruit, withCharge, type SkillDef } from "./skills";
+import {
+  DRAGON_FLIGHT_SKILL,
+  DRAGON_FORM_RANGE_MULTIPLIER,
+  LIGHT_FLIGHT_SKILL,
+  isSlotUnlocked,
+  skillsForFruit,
+  withCharge,
+  withRangeMultiplier,
+  type SkillDef,
+} from "./skills";
 import { isWeaponSlotUnlocked, skillsForWeapon } from "./weaponSkills";
 import {
   drawnWeapon,
@@ -389,6 +398,10 @@ export function stepFruitSpecialAbility(dt: number, input: InputSnapshot, player
     player.lastManaSpentAtMs = nowMs;
     player.lightFlightCooldownRemainingSec = skill.cooldownSec;
     player.lightFormRemainingSec = skill.transformDurationSec ?? 0.5;
+    // 일반 skill_fired 이벤트 루프 밖(F는 슬롯 시스템에 안 속함)이라, 다른
+    // 플레이어 화면에 이 능력을 보여주려면 별도 이벤트가 필요합니다
+    // (PvpCombat.ts의 broadcastSpecialAbilityFx가 이 이벤트를 보고 중계합니다).
+    player.events.push({ type: "special_ability_fired", abilityId: "light_f" });
   } else if (player.equippedFruit === "dragon_dragon") {
     const skill = DRAGON_FLIGHT_SKILL;
     if (player.dragonFlightActive) {
@@ -409,6 +422,8 @@ export function stepFruitSpecialAbility(dt: number, input: InputSnapshot, player
     player.mana -= skill.manaCost;
     player.lastManaSpentAtMs = nowMs;
     player.dragonFlightActive = true;
+    // 위 light_f와 같은 이유 — F는 skill_fired 루프 밖이라 별도 이벤트가 필요합니다.
+    player.events.push({ type: "special_ability_fired", abilityId: "dragon_f" });
   }
 }
 
@@ -548,12 +563,22 @@ export function stepCombat(
       player.fruitSkillCooldowns[slot] = skill.cooldownSec;
       player.mana -= skill.manaCost;
       player.lastManaSpentAtMs = nowMs;
-      const firedSkill = skill.chargeable ? withCharge(skill, chargeFrac) : skill;
+      let firedSkill = skill.chargeable ? withCharge(skill, chargeFrac) : skill;
+      // 용으로 변신(dragonFormActive) 중이면, 그 열매(dragon_dragon)의 공격
+      // 스킬(dragon_z/x/c) 사거리를 5배로 키웁니다 — dragon_v 자신(shape:"self")은
+      // withRangeMultiplier가 자연히 손대지 않습니다. 데미지는 이미 별도로
+      // fruitBuffMultiplier가 처리하므로 여기서는 손대지 않습니다.
+      const dragonFormBoosted =
+        player.dragonFormActive && player.equippedFruit === "dragon_dragon" && skill.shape.kind !== "self";
+      if (dragonFormBoosted) firedSkill = withRangeMultiplier(firedSkill, DRAGON_FORM_RANGE_MULTIPLIER);
       applySkill(player, enemies, firedSkill, "fruit", skillDamage(player, firedSkill), player.events);
       if (skill.toggle) setToggleActive(player, skill, true, player.position);
-      player.events.push(
-        skill.chargeable ? { type: "skill_fired", slot, chargeFrac } : { type: "skill_fired", slot },
-      );
+      player.events.push({
+        type: "skill_fired",
+        slot,
+        ...(skill.chargeable ? { chargeFrac } : {}),
+        ...(dragonFormBoosted ? { rangeMult: DRAGON_FORM_RANGE_MULTIPLIER } : {}),
+      });
     }
   } else if (weapon) {
     const skills = skillsForWeapon(weapon.id);

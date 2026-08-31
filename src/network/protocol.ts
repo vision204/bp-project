@@ -71,6 +71,13 @@ export interface CombatStatsSnapshot {
   fruitDrawn: boolean;
   /** 지금 손에 든 무기의 숙련 레벨(무기가 없으면 1) — 무기 스킬 데미지/해금 계산용. */
   weaponMasteryLevel: number;
+  /**
+   * 용으로 변신(dragon_v)이 지금 켜져 있는지 — 서버가 PvP 스킬 판정(resolveSkillAttack)에서
+   * 용용 열매(dragon_dragon)의 공격 스킬 사거리를 CombatSystem.ts와 똑같이 5배(
+   * DRAGON_FORM_RANGE_MULTIPLIER) 넓혀 검증해야 하므로 필요합니다 — 없으면 변신 중에
+   * 늘어난 실제 사거리로 때린 공격이 서버에서 "사거리 밖"으로 거부될 수 있습니다.
+   */
+  dragonFormActive: boolean;
 }
 
 export type AnimState = "idle" | "move" | "swim" | "boat";
@@ -93,6 +100,22 @@ export interface RemotePlayerSnapshot {
   hakiActive: boolean;
   drawnWeaponId: string | null;
   pvpEnabled: boolean;
+  /**
+   * 용으로 변신(dragon_v)이 지금 켜져 있는지 — 켜져 있으면 다른 플레이어 화면에서도
+   * 몸집이 5배로 커진 용 모습을 계속 보여줘야 하므로(활성화 순간의 이펙트 한 번뿐이
+   * 아니라 꺼질 때까지 지속되는 상태), boatTier/drawnWeaponId와 같은 패턴으로
+   * 매 state 동기화마다 실어 보냅니다.
+   */
+  dragonFormActive: boolean;
+  /**
+   * 용의 비행(F, dragon_f)으로 지금 날고 있는 중인지. 현재 SceneRenderer.ts는 이 값을
+   * 원격 플레이어 렌더링(몸을 dragon_f.glb로 대체)에 아직 쓰지 않습니다 — dragon_f는
+   * 뼈대 없는 정적 메시라 "헤엄치는" 절차적 애니메이션까지 원격 인스턴스별로 다시
+   * 구현해야 해서 이번 턴 범위를 넘어선다고 판단했습니다(알려진 한계). 그래도 향후
+   * 확장을 위해, 그리고 최소한 "날고 있다"는 사실 자체는 알 수 있도록 필드는 미리
+   * 실어 보냅니다.
+   */
+  dragonFlightActive: boolean;
 }
 
 /**
@@ -200,6 +223,8 @@ export type ClientMessage =
       boatTier: BoatTierId | null;
       hakiActive: boolean;
       drawnWeaponId: string | null;
+      dragonFormActive: boolean;
+      dragonFlightActive: boolean;
     }
   | { type: "combat_stats"; stats: CombatStatsSnapshot }
   | { type: "pvp_toggle"; enabled: boolean }
@@ -210,7 +235,23 @@ export type ClientMessage =
    * 완전히 별개입니다. PvP를 껐어도, 사거리 안에 아무도 없어도 보내서, 같은 방의
    * 다른 사람 화면에 내 스킬 이펙트(부채꼴/직선/원형 베기 등)가 보이게 합니다.
    */
-  | { type: "skill_fx"; slot: number; weaponId: string | null; position: Vec3Like; aimYaw: number }
+  | {
+      type: "skill_fx";
+      slot: number;
+      weaponId: string | null;
+      position: Vec3Like;
+      aimYaw: number;
+      /** 차지 스킬(고무 피스톨 등)이었으면 그 chargeFrac(0~1) — 원격 이펙트 크기 계산용. */
+      chargeFrac?: number;
+      /** 용으로 변신 중 발동된 공격 스킬이었으면 그 사거리 배율(DRAGON_FORM_RANGE_MULTIPLIER). */
+      rangeMult?: number;
+    }
+  /**
+   * 빛빛(F: 빛의 비행)·용용(F: 용의 비행) 전용 특수 능력을 쓸 때마다 순수 연출용으로
+   * 보내는 알림 — skill_fx와 같은 이유로 PvP 켬/끔·후보 유무와 무관하게 항상 보냅니다.
+   * 일반 Z/X/C/V 슬롯(skill_fx)과 완전히 별개입니다(F는 slot: -1로 그 시스템 밖에 있음).
+   */
+  | { type: "special_ability_fx"; abilityId: "light_f" | "dragon_f"; position: Vec3Like; aimYaw: number }
   /**
    * 기본 근접 공격(좌클릭)이 나갈 때마다 순수 연출용으로 보내는 알림 — skill_fx와
    * 같은 이유로 PvP 후보 유무·PvP 켬/끔과 무관하게 항상 보냅니다. 위치/방향은
@@ -272,7 +313,18 @@ export type ServerMessage =
    *  클라이언트가 자기 이동 입력을 이 시간(초) 동안 직접 무시합니다. */
   | { type: "pvp_freeze"; durationSec: number }
   /** 같은 방의 다른 사람이 스킬을 썼다는 순수 연출용 중계 — 그대로 이펙트만 재생합니다. */
-  | { type: "player_skill_fx"; fromId: string; slot: number; weaponId: string | null; position: Vec3Like; aimYaw: number }
+  | {
+      type: "player_skill_fx";
+      fromId: string;
+      slot: number;
+      weaponId: string | null;
+      position: Vec3Like;
+      aimYaw: number;
+      chargeFrac?: number;
+      rangeMult?: number;
+    }
+  /** 같은 방의 다른 사람이 F 특수 능력(빛의 비행/용의 비행)을 썼다는 순수 연출용 중계. */
+  | { type: "player_special_ability_fx"; fromId: string; abilityId: "light_f" | "dragon_f"; position: Vec3Like; aimYaw: number }
   /** 같은 방의 다른 사람이 기본 근접 공격을 냈다는 순수 연출용 중계. */
   | { type: "player_melee_fx"; fromId: string }
   /** 같은 방의 다른 사람이 Q 대쉬를 썼다는 순수 연출용 중계 — dx/dz는 대쉬 방향. */

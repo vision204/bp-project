@@ -34,7 +34,8 @@ const { ISLANDS, WATER_ENTER_Y, islandAt, islandArrivalPosition, boatPosition, w
 const { QUEST_KILL_TARGET, QUEST_REWARD_PERCENT_OF_LEVEL, applyKillsToQuests, questRewardExp, stepInteraction,
         acceptQuest } = await import("../src/simulation/QuestSystem.ts");
 const { SLOT_KEYS, SLOT_UNLOCK_LEVELS, allSkills, skillsForFruit, isSlotUnlocked,
-        LIGHT_FLIGHT_SKILL, DRAGON_FLIGHT_SKILL } =
+        LIGHT_FLIGHT_SKILL, DRAGON_FLIGHT_SKILL, withCharge, withRangeMultiplier,
+        DRAGON_FORM_RANGE_MULTIPLIER } =
   await import("../src/simulation/skills.ts");
 const { stepCombat, stepEnemyStatuses, skillDamage, weaponSkillDamage, canMeleeAttack, stepFruitSpecialAbility } =
   await import("../src/simulation/CombatSystem.ts");
@@ -1794,6 +1795,137 @@ section("밸런스 — 용으로 변신 (용용 열매 V, 쿨다운 없이 토�
   tapSkill(0.016, pLocked, [], 3);
   assert(pLocked.dragonFormActive === false, "열매 Lv.99(슬롯3 해금 전)에서는 V가 발동하지 않음");
   assert(pLocked.events.some((e) => e.type === "skill_locked"), "잠긴 V를 누르면 skill_locked 이벤트가 뜸");
+}
+
+section("withRangeMultiplier — 순수 로직(shape/dashDistance만 스케일, damage는 그대로)");
+{
+  const dragonZ = skillsForFruit("dragon_dragon")[0]; // line, range=16
+  const scaled = withRangeMultiplier(dragonZ, 5);
+  assert(scaled.shape.kind === "line" && scaled.shape.range === 80, `line 스킬 사거리 5배 (실제 ${scaled.shape.range}m)`);
+  assert(scaled.damage === dragonZ.damage, "damage는 건드리지 않음(변경 안 됨)");
+  assert(dragonZ.shape.range === 16, "원본 스킬 객체는 그대로 남아있음(불변)");
+
+  const dragonX = skillsForFruit("dragon_dragon")[1]; // cone, range=20
+  const scaledCone = withRangeMultiplier(dragonX, 5);
+  assert(scaledCone.shape.kind === "cone" && scaledCone.shape.range === 100, `cone 스킬 사거리 5배 (실제 ${scaledCone.shape.range}m)`);
+  assert(scaledCone.shape.halfAngleDeg === dragonX.shape.halfAngleDeg, "halfAngleDeg는 그대로");
+
+  const radialSkill = { ...dragonZ, shape: { kind: "radial", radius: 4 } };
+  const scaledRadial = withRangeMultiplier(radialSkill, 5);
+  assert(scaledRadial.shape.kind === "radial" && scaledRadial.shape.radius === 20, `radial 스킬 반경 5배 (실제 ${scaledRadial.shape.radius}m)`);
+
+  const dragonV = skillsForFruit("dragon_dragon")[3]; // self
+  const scaledSelf = withRangeMultiplier(dragonV, 5);
+  assert(scaledSelf.shape.kind === "self", "self 판정 스킬은 shape가 바뀌지 않음(스케일할 range/radius가 없음)");
+  assert(scaledSelf === dragonV, "mult가 적용될 게 없으면(self) 원본을 그대로 돌려줌(불필요한 복사 방지 확인)");
+
+  const rocket = skillsForFruit("rubber_barrage")[1]; // dashDistance=14
+  const scaledDash = withRangeMultiplier(rocket, 5);
+  assert(scaledDash.dashDistance === 70, `dashDistance가 있으면 그것도 같은 배율로 스케일됨 (실제 ${scaledDash.dashDistance}m)`);
+
+  assert(withRangeMultiplier(dragonZ, 1) === dragonZ, "mult===1이면 원본을 그대로 돌려줌(복사 없음)");
+}
+
+section("밸런스 — 용으로 변신 중엔 공격 스킬(dragon_z/x/c) 사거리도 5배");
+{
+  assert(DRAGON_FORM_RANGE_MULTIPLIER === 5, `DRAGON_FORM_RANGE_MULTIPLIER === 5 (실제 ${DRAGON_FORM_RANGE_MULTIPLIER})`);
+
+  const dragonSkills = skillsForFruit("dragon_dragon");
+  const pBoost = freshPlayer();
+  pBoost.equippedFruit = "dragon_dragon";
+  pBoost.fruitLevel = 100;
+  pBoost.fruitDrawn = true;
+  pBoost.mana = 999;
+  pBoost.position = { x: 0, y: 1, z: 0 };
+  pBoost.aimYaw = 0;
+  pBoost.events = [];
+
+  // 변신 전 — dragon_z(직선, range=16)로 20m 떨어진 적을 맞히지 못해야 함
+  const farBefore = makeEnemy("farBefore", 10000, 10);
+  farBefore.position = { x: 0, y: 1, z: 20 };
+  pBoost.fruitSkillCooldowns = [0, 0, 0, 0];
+  tapSkill(0.016, pBoost, [farBefore], 0);
+  assert(farBefore.hp === 10000, "변신 전엔 사거리 16m 밖(20m)의 적을 맞히지 못함");
+
+  // 변신 ON
+  pBoost.events = [];
+  tapSkill(0.016, pBoost, [], 3);
+  assert(pBoost.dragonFormActive === true, "V로 변신 ON");
+
+  // 변신 후 — 같은 dragon_z로 20m 떨어진 적(사거리 16m 밖이지만 5배=80m 안)을 맞혀야 함
+  const farAfter = makeEnemy("farAfter", 10000, 10);
+  farAfter.position = { x: 0, y: 1, z: 20 };
+  pBoost.fruitSkillCooldowns = [0, 0, 0, 0];
+  pBoost.events = [];
+  tapSkill(0.016, pBoost, [farAfter], 0);
+  assert(farAfter.hp < 10000, "변신 후엔 5배 넓어진 사거리(80m) 덕분에 20m 밖의 적도 맞음");
+  const fireEv = pBoost.events.find((e) => e.type === "skill_fired" && e.slot === 0);
+  assert(!!fireEv && fireEv.rangeMult === DRAGON_FORM_RANGE_MULTIPLIER, `skill_fired 이벤트에 rangeMult=${DRAGON_FORM_RANGE_MULTIPLIER}가 실림 (실제 ${fireEv && fireEv.rangeMult})`);
+
+  // dragon_v(V) 자신은 shape:self라 rangeMult가 붙지 않아야 함(스케일할 게 없으므로) —
+  // 토글 OFF는 skill_fired 자체를 안 띄우므로(위 dragon_v 토글 섹션 참고), 다시
+  // 새로 켤 때(ON, 이 시점엔 켜지기 "직전"이라 dragonFormActive가 아직 false임)의
+  // skill_fired로 확인합니다.
+  const pToggleOn = freshPlayer();
+  pToggleOn.equippedFruit = "dragon_dragon";
+  pToggleOn.fruitLevel = 100;
+  pToggleOn.fruitDrawn = true;
+  pToggleOn.mana = 999;
+  pToggleOn.events = [];
+  tapSkill(0.016, pToggleOn, [], 3);
+  const toggleOnEv = pToggleOn.events.find((e) => e.type === "skill_fired" && e.slot === 3);
+  assert(!!toggleOnEv && toggleOnEv.rangeMult === undefined, "dragon_v(self) 자신의 skill_fired에는 rangeMult가 붙지 않음");
+
+  // 다른 열매(용용이 아님)면 dragonFormActive가 true여도 boost가 적용되지 않아야 함
+  // (dragonFormActive는 사실상 dragon_dragon 전용이지만, 방어적으로 명시 가드했는지 확인)
+  const pOther = freshPlayer();
+  pOther.equippedFruit = "magma_fist";
+  pOther.fruitLevel = 100;
+  pOther.fruitDrawn = true;
+  pOther.mana = 999;
+  pOther.dragonFormActive = true; // 인위적으로 세팅(정상 플레이에선 일어나지 않음)
+  pOther.position = { x: 0, y: 1, z: 0 };
+  pOther.aimYaw = 0;
+  pOther.events = [];
+  const farOther = makeEnemy("farOther", 10000, 10);
+  farOther.position = { x: 0, y: 1, z: 20 }; // magma_x 사거리(12m) 밖
+  pOther.fruitSkillCooldowns = [0, 0, 0, 0];
+  tapSkill(0.016, pOther, [farOther], 1);
+  assert(farOther.hp === 10000, "equippedFruit이 dragon_dragon이 아니면 dragonFormActive가 true여도 사거리 boost가 적용되지 않음(가드 확인)");
+}
+
+section("빛빛/용용 F 특수 능력 — special_ability_fired 이벤트(PvP 중계용)");
+{
+  // F는 일반 skill_fired 루프 밖이라, 다른 플레이어 화면에 보여주려면 별도
+  // 이벤트(special_ability_fired)가 필요합니다 — PvpCombat.ts의
+  // broadcastSpecialAbilityFx가 이 이벤트를 보고 중계합니다.
+  const pLightF = freshPlayer();
+  pLightF.equippedFruit = "light_light";
+  pLightF.fruitLevel = 40;
+  pLightF.fruitDrawn = true;
+  pLightF.mana = 999;
+  pLightF.position = { x: 0, y: 1, z: 0 };
+  pLightF.aimYaw = 0;
+  pLightF.events = [];
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pLightF, Date.now());
+  assert(
+    pLightF.events.some((e) => e.type === "special_ability_fired" && e.abilityId === "light_f"),
+    "빛의 비행(F) 발동 시 special_ability_fired(light_f) 이벤트가 뜸",
+  );
+
+  const pDragonF = freshPlayer();
+  pDragonF.equippedFruit = "dragon_dragon";
+  pDragonF.fruitLevel = 40;
+  pDragonF.fruitDrawn = true;
+  pDragonF.mana = 999;
+  pDragonF.position = { x: 0, y: 1, z: 0 };
+  pDragonF.aimYaw = 0;
+  pDragonF.events = [];
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pDragonF, Date.now());
+  assert(
+    pDragonF.events.some((e) => e.type === "special_ability_fired" && e.abilityId === "dragon_f"),
+    "용의 비행(F) 발동 시 special_ability_fired(dragon_f) 이벤트가 뜸",
+  );
 }
 
 section("빛빛/용용 F 특수 능력 — 일반 4슬롯 시스템과 무관한 독립 필드");

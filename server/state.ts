@@ -38,7 +38,7 @@ import {
   skillDamage,
   weaponSkillDamage,
 } from "../src/simulation/CombatSystem";
-import { isSlotUnlocked, skillsForFruit } from "../src/simulation/skills";
+import { DRAGON_FORM_RANGE_MULTIPLIER, isSlotUnlocked, skillsForFruit, withRangeMultiplier } from "../src/simulation/skills";
 import { isWeaponSlotUnlocked, skillsForWeapon } from "../src/simulation/weaponSkills";
 import { fruitLevelDamageMultiplier } from "../src/simulation/FruitLeveling";
 import { dist2D, pointInShape, skillOrigin } from "../src/simulation/ShapeMath";
@@ -78,6 +78,8 @@ const LIGHTNING_FORM_SKILL = skillsForFruit("thunder_strike")[1];
  *  넉넉히 위지만, 무한대나 1e9 같은 조작값은 확실히 걸러냅니다. */
 const MAX_DAMAGE_PER_HIT = 20000;
 const MAX_MELEE_DAMAGE = 20000;
+/** skill_fx 중계로 실려 오는 rangeMult(순수 연출용 크기 정보)의 상한 — 조작값 방지. */
+const MAX_RANGE_MULT_RELAY = 20;
 const MAX_ABILITY_MULTIPLIER = 50;
 /**
  * sword/gunDamageMultiplier는 더 이상 "1+stat*0.06" 같은 배율(대략 1~수십)이
@@ -143,6 +145,7 @@ function clampStats(raw: CombatStatsSnapshot): CombatStatsSnapshot {
     equippedFruit: typeof raw.equippedFruit === "string" ? raw.equippedFruit : "magma_fist",
     fruitDrawn: raw.fruitDrawn === true,
     weaponMasteryLevel: clampFinite(raw.weaponMasteryLevel, 1, MAX_WEAPON_MASTERY_LEVEL, 1),
+    dragonFormActive: raw.dragonFormActive === true,
   };
 }
 
@@ -175,6 +178,7 @@ function asPlayerStateForCombat(stats: CombatStatsSnapshot, aimYaw: number): Pla
     fruitBuffMultiplier: stats.fruitBuffMultiplier,
     equippedFruit: stats.equippedFruit as PlayerState["equippedFruit"],
     fruitDrawn: stats.fruitDrawn,
+    dragonFormActive: stats.dragonFormActive,
     // weaponSkillDamage/weaponMasteryLevel이 이 무기 id로 찾아 읽습니다.
     weaponMastery: weaponId ? { [weaponId]: { level: stats.weaponMasteryLevel, exp: 0, expToNext: 0 } } : {},
     aimYaw,
@@ -248,6 +252,8 @@ export interface Connection {
   boatTier: BoatTierId | null;
   hakiActive: boolean;
   drawnWeaponId: string | null;
+  dragonFormActive: boolean;
+  dragonFlightActive: boolean;
   pvpEnabled: boolean;
   alive: boolean;
   /** 현상금 — 같은 방 사람들끼리만 겨루는 점수(방을 나가면 사라집니다). 서버가
@@ -286,6 +292,8 @@ function snapshotOf(conn: Connection): RemotePlayerSnapshot {
     boatTier: conn.boatTier,
     hakiActive: conn.hakiActive,
     drawnWeaponId: conn.drawnWeaponId,
+    dragonFormActive: conn.dragonFormActive,
+    dragonFlightActive: conn.dragonFlightActive,
     pvpEnabled: conn.pvpEnabled,
   };
 }
@@ -366,6 +374,8 @@ export class World {
       boatTier: null,
       hakiActive: false,
       drawnWeaponId: null,
+      dragonFormActive: false,
+      dragonFlightActive: false,
       pvpEnabled: true,
       alive: true,
       bounty: 0,
@@ -384,6 +394,7 @@ export class World {
         equippedFruit: "magma_fist",
         fruitDrawn: false,
         weaponMasteryLevel: 1,
+        dragonFormActive: false,
       }),
       lastMeleeAtMs: 0,
       lastSkillAtMs: {},
@@ -578,6 +589,8 @@ export class World {
             : null;
         conn.hakiActive = msg.hakiActive === true;
         conn.drawnWeaponId = typeof msg.drawnWeaponId === "string" ? msg.drawnWeaponId : null;
+        conn.dragonFormActive = msg.dragonFormActive === true;
+        conn.dragonFlightActive = msg.dragonFlightActive === true;
         conn.alive = conn.hp > 0;
         this.broadcastRoom(conn.roomId, { type: "player_state", player: snapshotOf(conn) }, conn.id);
         break;
@@ -610,9 +623,36 @@ export class World {
           z: clampFinite(msg.position?.z, -20000, 20000, conn.position.z),
         };
         const aimYaw = clampFinite(msg.aimYaw, -1000, 1000, conn.aimYaw);
+        const chargeFrac =
+          typeof msg.chargeFrac === "number" && Number.isFinite(msg.chargeFrac)
+            ? Math.max(0, Math.min(1, msg.chargeFrac))
+            : undefined;
+        const rangeMult =
+          typeof msg.rangeMult === "number" && Number.isFinite(msg.rangeMult) && msg.rangeMult > 0
+            ? Math.min(msg.rangeMult, MAX_RANGE_MULT_RELAY)
+            : undefined;
         this.broadcastRoom(
           conn.roomId,
-          { type: "player_skill_fx", fromId: conn.id, slot, weaponId, position, aimYaw },
+          { type: "player_skill_fx", fromId: conn.id, slot, weaponId, position, aimYaw, chargeFrac, rangeMult },
+          conn.id,
+        );
+        break;
+      }
+
+      case "special_ability_fx": {
+        // skill_fx와 같은 이유로 순수 연출 중계입니다 — 검증 없이 그대로(위치만
+        // 상식적인 범위로 잘라서) 같은 방 사람들에게 뿌립니다.
+        const abilityId = msg.abilityId === "light_f" || msg.abilityId === "dragon_f" ? msg.abilityId : null;
+        if (!abilityId) break;
+        const position = {
+          x: clampFinite(msg.position?.x, -20000, 20000, conn.position.x),
+          y: clampFinite(msg.position?.y, -500, 2000, conn.position.y),
+          z: clampFinite(msg.position?.z, -20000, 20000, conn.position.z),
+        };
+        const aimYaw = clampFinite(msg.aimYaw, -1000, 1000, conn.aimYaw);
+        this.broadcastRoom(
+          conn.roomId,
+          { type: "player_special_ability_fx", fromId: conn.id, abilityId, position, aimYaw },
           conn.id,
         );
         break;
@@ -977,11 +1017,19 @@ export class World {
       return;
     }
 
-    const shape = skill.shape;
+    // 용으로 변신(dragonFormActive) 중이면 CombatSystem.ts(PvE 판정)와 똑같이
+    // 용용 열매(dragon_dragon)의 공격 스킬 사거리를 5배로 넓혀서 검증합니다 —
+    // 안 그러면 변신 중 실제로 더 멀리서 맞힌 공격이 여기서 "사거리 밖"으로
+    // 부당하게 거부됩니다(withRangeMultiplier는 damage는 건드리지 않으므로
+    // 아래 damage 계산은 원본 skill을 그대로 씁니다).
+    const dragonFormBoosted =
+      stats.dragonFormActive && stats.equippedFruit === "dragon_dragon" && skill.shape.kind !== "self";
+    const effectiveSkill = dragonFormBoosted ? withRangeMultiplier(skill, DRAGON_FORM_RANGE_MULTIPLIER) : skill;
+    const shape = effectiveSkill.shape;
     // originAtAim 스킬(낙뢰·빙결 감옥·절대 영도·중력정)은 PvE(CombatSystem.ts)와
     // 똑같이 조준 지점을 원점으로 판정해야 합니다 — ShapeMath.ts의 skillOrigin이
     // 그 계산을 공유합니다(클라/서버 판정이 어긋나지 않도록).
-    const origin = skillOrigin({ x: attacker.position.x, z: attacker.position.z }, attacker.aimYaw, skill);
+    const origin = skillOrigin({ x: attacker.position.x, z: attacker.position.z }, attacker.aimYaw, effectiveSkill);
     const inRange =
       shape.kind === "self"
         ? false

@@ -48,11 +48,21 @@ export interface RemoteSkillFx {
   weaponId: string | null;
   position: Vec3Like;
   aimYaw: number;
+  chargeFrac?: number;
+  rangeMult?: number;
 }
 
 /** 다른 플레이어가 기본 근접 공격을 냈다고 서버가 알려준 것 — 순수 연출용입니다. */
 export interface RemoteMeleeFx {
   fromId: string;
+}
+
+/** 다른 플레이어가 F 특수 능력(빛의 비행/용의 비행)을 썼다고 서버가 알려준 것 — 순수 연출용입니다. */
+export interface RemoteSpecialAbilityFx {
+  fromId: string;
+  abilityId: "light_f" | "dragon_f";
+  position: Vec3Like;
+  aimYaw: number;
 }
 
 /** 다른 플레이어가 Q 대쉬를 썼다고 서버가 알려준 것 — 순수 연출용입니다. */
@@ -189,6 +199,8 @@ export class MultiplayerClient {
   private _outgoingTradeInvite: OutgoingTradeInvite | null = null;
   /** 아직 렌더러가 소비하지 않은, 다른 사람의 스킬 이펙트 알림 — 매 프레임 drainSkillFx()로 비웁니다. */
   private _pendingSkillFx: RemoteSkillFx[] = [];
+  /** 아직 렌더러가 소비하지 않은, 다른 사람의 F 특수 능력 알림 — 매 프레임 drainSpecialAbilityFx()로 비웁니다. */
+  private _pendingSpecialAbilityFx: RemoteSpecialAbilityFx[] = [];
   /** 아직 렌더러가 소비하지 않은, 다른 사람의 근접 공격 알림 — 매 프레임 drainMeleeFx()로 비웁니다. */
   private _pendingMeleeFx: RemoteMeleeFx[] = [];
   /** 아직 렌더러가 소비하지 않은, 다른 사람의 Q 대쉬 알림 — 매 프레임 drainDashFx()로 비웁니다. */
@@ -414,6 +426,19 @@ export class MultiplayerClient {
             weaponId: msg.weaponId,
             position: msg.position,
             aimYaw: msg.aimYaw,
+            chargeFrac: msg.chargeFrac,
+            rangeMult: msg.rangeMult,
+          });
+        }
+        break;
+
+      case "player_special_ability_fx":
+        if (msg.fromId !== this.myId) {
+          this._pendingSpecialAbilityFx.push({
+            fromId: msg.fromId,
+            abilityId: msg.abilityId,
+            position: msg.position,
+            aimYaw: msg.aimYaw,
           });
         }
         break;
@@ -600,6 +625,8 @@ export class MultiplayerClient {
         boatTier: this.state.boat.riding ? this.state.boat.tier : null,
         hakiActive: p.hakiActive,
         drawnWeaponId,
+        dragonFormActive: p.dragonFormActive,
+        dragonFlightActive: p.dragonFlightActive,
       });
     }
 
@@ -697,8 +724,15 @@ export class MultiplayerClient {
   }
 
   /** 스킬을 쓸 때마다(전투 후보 유무·PvP 여부와 무관하게) 순수 연출용으로 알립니다. */
-  sendSkillFx(slot: number, weaponId: string | null, position: Vec3Like, aimYaw: number) {
-    this.send({ type: "skill_fx", slot, weaponId, position, aimYaw });
+  sendSkillFx(
+    slot: number,
+    weaponId: string | null,
+    position: Vec3Like,
+    aimYaw: number,
+    chargeFrac?: number,
+    rangeMult?: number,
+  ) {
+    this.send({ type: "skill_fx", slot, weaponId, position, aimYaw, chargeFrac, rangeMult });
   }
 
   /** 아직 화면에 반영하지 않은 다른 사람의 스킬 이펙트 알림을 꺼내고 비웁니다 — 매 프레임 한 번씩. */
@@ -706,6 +740,19 @@ export class MultiplayerClient {
     if (this._pendingSkillFx.length === 0) return this._pendingSkillFx;
     const out = this._pendingSkillFx;
     this._pendingSkillFx = [];
+    return out;
+  }
+
+  /** F 특수 능력(빛의 비행/용의 비행)을 쓸 때마다 순수 연출용으로 알립니다. */
+  sendSpecialAbilityFx(abilityId: "light_f" | "dragon_f", position: Vec3Like, aimYaw: number) {
+    this.send({ type: "special_ability_fx", abilityId, position, aimYaw });
+  }
+
+  /** 아직 화면에 반영하지 않은 다른 사람의 F 특수 능력 알림을 꺼내고 비웁니다 — 매 프레임 한 번씩. */
+  drainSpecialAbilityFx(): RemoteSpecialAbilityFx[] {
+    if (this._pendingSpecialAbilityFx.length === 0) return this._pendingSpecialAbilityFx;
+    const out = this._pendingSpecialAbilityFx;
+    this._pendingSpecialAbilityFx = [];
     return out;
   }
 

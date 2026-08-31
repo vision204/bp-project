@@ -7,7 +7,15 @@ import { maxWorldRadius } from "../world/islands";
 import { BOAT_DECK_Y, boatTier } from "../simulation/BoatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import { skillsForWeapon } from "../simulation/weaponSkills";
-import { skillsForFruit, withCharge, type SkillDef } from "../simulation/skills";
+import {
+  DRAGON_FLIGHT_SKILL,
+  DRAGON_FORM_RANGE_MULTIPLIER,
+  LIGHT_FLIGHT_SKILL,
+  skillsForFruit,
+  withCharge,
+  withRangeMultiplier,
+  type SkillDef,
+} from "../simulation/skills";
 import type { QualitySettings } from "../core/GraphicsSettings";
 import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
 import type {
@@ -16,6 +24,7 @@ import type {
   RemoteMeleeFx,
   RemotePlayerView,
   RemoteSkillFx,
+  RemoteSpecialAbilityFx,
   RemoteTeleportFx,
 } from "../network/MultiplayerClient";
 import { dist2D, skillOrigin } from "../simulation/ShapeMath";
@@ -169,11 +178,11 @@ const DRAGON_FLIGHT_MODEL_PATH = "models/skills/dragon_f.glb";
  * 상태에서의 최선의 추정치이며, "거꾸로(꼬리부터) 난다"는 피드백을 받으면
  * +Math.PI/2로 부호를 반대로 바꿔야 할 수 있습니다.
  */
-// 사용자 피드백(재조정): 위 -Math.PI/2 값으로는 여전히 오른쪽을 보고 있었습니다.
-// "왼쪽으로 90도 더 돌려야 한다"는 피드백에 따라 -Math.PI/2를 추가로 더 빼서
-// -Math.PI로 조정합니다. 그래도 방향이 안 맞으면(예: 이제 반대로 왼쪽을
-// 지나쳤다거나 뒤를 본다면) 부호/크기를 정확히 알려주세요.
-const DRAGON_FLIGHT_BASE_YAW = -Math.PI;
+// 사용자 피드백(2차 재조정): -Math.PI로도 이번엔 반대로(뒤쪽을) 보고 있었습니다.
+// "180도 다시 돌려줘"에 따라 +Math.PI를 더해 0으로 되돌립니다(-Math.PI + Math.PI = 0,
+// 즉 2π 차이라 원래 "보정 없음"과 같아집니다). 그래도 안 맞으면 정확히 몇 도
+// 더/덜 돌아야 하는지 알려주세요.
+const DRAGON_FLIGHT_BASE_YAW = 0;
 /** 캐릭터를 완전히 대신하는 몸이므로, 기존 오라들과 같은 "만화처럼 거대한" 스케일을 그대로 씁니다. */
 const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE;
 
@@ -191,10 +200,10 @@ const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE;
 // 분리해뒀습니다(0=보정 없음 — 실제로 화면에서 확인하기 전까지는 최선의
 // 추정치입니다).
 const DRAGON_FORM_MODEL_PATH = "models/skills/dragon_v.glb";
-// 사용자 피드백(재조정): 0(보정 없음)으로는 오른쪽을 보고 있었습니다. "왼쪽으로
-// 90도 돌려야 한다"는 피드백에 따라 -Math.PI/2로 조정합니다. 그래도 방향이 안
-// 맞으면 정확한 방향(얼마나 더/덜 돌아야 하는지)을 알려주세요.
-const DRAGON_FORM_YAW_OFFSET = -Math.PI / 2;
+// 사용자 피드백(2차 재조정): -Math.PI/2로도 이번엔 반대로(뒤쪽을) 보고 있었습니다.
+// "180도 다시 돌려줘"에 따라 +Math.PI를 더합니다(-Math.PI/2 + Math.PI = +Math.PI/2).
+// 그래도 안 맞으면 정확히 몇 도 더/덜 돌아야 하는지 알려주세요.
+const DRAGON_FORM_YAW_OFFSET = Math.PI / 2;
 /**
  * 사용자 요청("변신했을 때 크기를 지금보다 5배 더 키워줘")에 따라, 기존
  * 캐릭터-대신 스케일(SKILL_MODEL_SCALE, F 비행과 같았던 기준값)에 5배를
@@ -275,8 +284,9 @@ const BOAT_CAMERA_HEIGHT_OFFSET = 5;
 // 같은 이유로 카메라도 뒤로 빼고 높여줍니다 — 사용자 요청: "커지는건 좋은데
 // 카메라 시점도 같이 더 높아졌으면 좋겠어". 배(1.6→5, 약 3.1배 / 6→13, 약
 // 2.2배)와 비슷한 비율로 올렸습니다.
-const DRAGON_FORM_CAMERA_DISTANCE = 14;
-const DRAGON_FORM_CAMERA_HEIGHT_OFFSET = 6;
+// 사용자 피드백: "시점 더 위로 올려줘" — 처음 값(14/6)보다 더 높입니다.
+const DRAGON_FORM_CAMERA_DISTANCE = 17;
+const DRAGON_FORM_CAMERA_HEIGHT_OFFSET = 9;
 
 // 기본 공격(좌클릭) 검 휘두르기 — 짧고 빠르게 한 번 쳤다가 되돌아옵니다.
 const ATTACK_SWING_DURATION_MS = 220;
@@ -308,6 +318,10 @@ interface BlockyCharacter {
   rightArmPivot: THREE.Group;
   /** 오른팔의 실제 박스 메시 — 고무 열매 펀치 때 이 메시 자체를 늘였다 줄입니다. */
   rightArmMesh: THREE.Mesh;
+  /** 몸통 메시 — 원격 플레이어가 용으로 변신했을 때 블록형 몸을 숨기는 데 씁니다. */
+  torsoMesh: THREE.Mesh;
+  /** 머리 메시 — 위와 같은 이유. */
+  headMesh: THREE.Mesh;
 }
 
 /** 아트가 준비되기 전까지, 로블록스 특유의 "블록형" 실루엣을 흉내낸 플레이스홀더 캐릭터. */
@@ -368,7 +382,18 @@ function buildBlockyCharacterParts(color: number): BlockyCharacter {
     }
   }
 
-  return { group, bodyMat: mat, legMat, leftLegPivot, rightLegPivot, leftArmPivot, rightArmPivot, rightArmMesh };
+  return {
+    group,
+    bodyMat: mat,
+    legMat,
+    leftLegPivot,
+    rightLegPivot,
+    leftArmPivot,
+    rightArmPivot,
+    rightArmMesh,
+    torsoMesh: torso,
+    headMesh: head,
+  };
 }
 
 /** 머티리얼 참조가 필요 없는 곳(적·NPC)에서 쓰는 간편 버전 */
@@ -836,6 +861,14 @@ interface RemotePlayerVisual {
   boat: BoatVisual | null;
   /** boat를 마지막으로 어느 등급 색으로 칠했는지 — 등급이 바뀔 때만 다시 칠합니다. */
   lastBoatTier: string;
+  /**
+   * 용으로 변신(dragon_v) 중인 원격 플레이어의 몸을 대신하는 dragon_v.glb 인스턴스
+   * (없으면 null — dragonFormTemplate 로드가 안 끝났거나 아직 변신한 적이 없음).
+   * 로컬 플레이어의 dragonFormVisual과 같은 모델·같은 배율(DRAGON_FORM_MODEL_SCALE)을
+   * 쓰지만, group의 자식으로 붙여서 위치/요(yaw)를 부모(캐릭터 그룹)가 대신
+   * 처리하게 합니다(로컬처럼 매 프레임 월드 좌표를 따로 계산하지 않아도 됨).
+   */
+  dragonFormVisual: THREE.Group | null;
 }
 
 /** 다른 플레이어의 색은 진영으로 정합니다 — 몬스터·NPC와는 다른 배색이라 한눈에 구분됩니다. */
@@ -920,6 +953,12 @@ export class SceneRenderer {
    * 시각을 우선(dragonFlightVisual만 보이고 이건 숨김)합니다.
    */
   private dragonFormVisual: THREE.Group | null = null;
+  /**
+   * dragon_v.glb의 정규화된(scale=1) 원본 — 씬에 추가되지 않는 순수 템플릿입니다.
+   * 로컬 dragonFormVisual과 원격 플레이어별 dragonFormVisual 모두 이 템플릿을
+   * cloneSkillModelInstance로 복제해서 씁니다 — 로드는 한 번만, 인스턴스는 여럿.
+   */
+  private dragonFormTemplate: THREE.Group | null = null;
   private readonly gltfLoader: GLTFLoader;
   private enemyVisuals = new Map<string, EnemyVisual>();
   private npcVisuals = new Map<string, NpcVisual>();
@@ -1178,17 +1217,41 @@ export class SceneRenderer {
     this.gltfLoader.load(
       url,
       (gltf) => {
-        const normalized = normalizeAndCenterModel(gltf.scene, 1);
-        normalized.scale.setScalar(DRAGON_FORM_MODEL_SCALE);
-        normalized.visible = false;
-        this.scene.add(normalized);
-        this.dragonFormVisual = normalized;
+        // 정규화된(scale=1) 원본은 씬에 추가하지 않고 템플릿으로만 보관합니다 —
+        // 로컬 인스턴스도, 이후 나타나는 원격 플레이어 인스턴스도 전부 이걸
+        // cloneSkillModelInstance로 복제해서 씁니다(로드는 한 번, 인스턴스는 여럿).
+        const template = normalizeAndCenterModel(gltf.scene, 1);
+        this.dragonFormTemplate = template;
+
+        const localInstance = cloneSkillModelInstance(template, false);
+        localInstance.scale.setScalar(DRAGON_FORM_MODEL_SCALE);
+        localInstance.visible = false;
+        this.scene.add(localInstance);
+        this.dragonFormVisual = localInstance;
       },
       undefined,
       (err) => {
         console.warn("용으로 변신 모델을 불러오지 못했습니다 (dragon_v):", err);
       },
     );
+  }
+
+  /**
+   * 원격 플레이어 하나의 용으로 변신(dragon_v) 몸 인스턴스를 만듭니다.
+   * dragonFormTemplate 로드가 아직 안 끝났으면 null(다음에 다시 시도).
+   */
+  private buildRemoteDragonFormVisual(): THREE.Group | null {
+    if (!this.dragonFormTemplate) return null;
+    const instance = cloneSkillModelInstance(this.dragonFormTemplate, false);
+    instance.scale.setScalar(DRAGON_FORM_MODEL_SCALE);
+    // 항등 회전(피치/롤 보정 없음)에 DRAGON_FORM_YAW_OFFSET만 추가 — 부모(캐릭터
+    // 그룹)의 rotation.y가 이미 그 사람의 요(yaw)를 담당하므로, 여기서는 로컬
+    // 사무실 좌표계 안에서의 오프셋만 더합니다(로컬 dragonFormVisual의 sync() 계산과
+    // 같은 오프셋, 다만 플레이어 yaw 자체는 부모가 대신 줌).
+    instance.rotation.y = DRAGON_FORM_YAW_OFFSET;
+    instance.position.y = DRAGON_FORM_MODEL_SCALE / 2;
+    instance.visible = false;
+    return instance;
   }
 
   get domElement() {
@@ -1253,6 +1316,7 @@ export class SceneRenderer {
     isLocalPlayer = false,
     chargeFrac?: number,
     aimGroundPoint?: { x: number; z: number } | null,
+    rangeMult?: number,
   ) {
     const weaponSkill = skillsForWeapon(sourceId as ItemId)[slot];
     let skill = weaponSkill ?? skillsForFruit(sourceId as FruitAbilityId)[slot];
@@ -1264,6 +1328,13 @@ export class SceneRenderer {
     // 판정에 쓰는 것과 똑같은 함수입니다.
     if (skill.chargeable && typeof chargeFrac === "number") {
       skill = withCharge(skill, chargeFrac);
+    }
+
+    // 용으로 변신 중 발동된 공격 스킬(dragon_z/x/c)이면, CombatSystem.ts가 실제로
+    // 판정에 쓴 것과 같은 사거리 배율(rangeMult, 보통 DRAGON_FORM_RANGE_MULTIPLIER=5)로
+    // 다시 만들어서 이펙트 범위가 실제 판정 범위와 어긋나지 않게 합니다.
+    if (typeof rangeMult === "number" && rangeMult !== 1) {
+      skill = withRangeMultiplier(skill, rangeMult);
     }
 
     // originAtAim/originAtMouse 스킬(낙뢰·빙결 감옥·절대 영도·중력정·용암 지대 등)은
@@ -1294,7 +1365,13 @@ export class SceneRenderer {
 
     // GLB 이펙트(열매 스킬만 — 무기 스킬용 GLB는 없습니다). 이제 기존 도형
     // 이펙트를 대체하는 유일한 열매 스킬 이펙트입니다.
-    if (!weaponSkill) this.spawnSkillModelEffect(skill, x, y, z, aimYaw, nowMs);
+    // SKILL_MODEL_SCALE은 shape.range/radius와 무관한 고정 크기라서(GLB 모델
+    // 자체는 shape를 보고 자동으로 커지지 않음), 용으로 변신 중이면(rangeMult)
+    // 사거리뿐 아니라 이 모델 자체의 크기도 같은 배율로 함께 키워야
+    // "스킬 크기도 5배로" 요청이 실제로 눈에 보입니다.
+    if (!weaponSkill) {
+      this.spawnSkillModelEffect(skill, x, y, z, aimYaw, nowMs, typeof rangeMult === "number" ? rangeMult : 1);
+    }
 
     // 고무 열매고, 내(로컬 플레이어)가 쓴 거면 진짜 오른팔을 이 타이밍표대로
     // 늘였다 되감습니다 — 다른 플레이어/원격 중계분은 팔 관절 모델이 따로
@@ -1336,16 +1413,30 @@ export class SceneRenderer {
    * 크기는 어느 쪽이든 SKILL_MODEL_SCALE(몬스터 키의 3배 이상, 만화처럼
    * 과장된 크기)을 기준으로 잡습니다 — baseScale로 넘겨서 skillEffects
    * 갱신 루프가 그 크기를 기준으로 성장/유지하게 합니다.
+   *
+   * modelScaleMult(기본 1)는 용으로 변신 중 발동된 스킬처럼, shape(사거리)뿐
+   * 아니라 모델 자체의 시각적 크기도 함께 키워야 할 때 씁니다 — SKILL_MODEL_SCALE
+   * 자체는 shape.range/radius와 무관한 고정 상수라 shape를 늘리는 것만으로는
+   * 모델이 저절로 커지지 않기 때문입니다(spawnSkillEffect의 호출부 주석 참고).
    */
-  private spawnSkillModelEffect(skill: SkillDef, x: number, y: number, z: number, aimYaw: number, nowMs: number) {
+  private spawnSkillModelEffect(
+    skill: SkillDef,
+    x: number,
+    y: number,
+    z: number,
+    aimYaw: number,
+    nowMs: number,
+    modelScaleMult = 1,
+  ) {
     const template = this.skillModelTemplates.get(skill.id);
     if (!template) return;
 
+    const finalScale = SKILL_MODEL_SCALE * modelScaleMult;
     const clone = cloneSkillModelInstance(template, true);
     const fx = Math.sin(aimYaw);
     const fz = Math.cos(aimYaw);
     clone.rotation.y = aimYaw + (SKILL_MODEL_YAW_OFFSET[skill.id] ?? 0);
-    clone.scale.setScalar(SKILL_MODEL_SCALE);
+    clone.scale.setScalar(finalScale);
 
     if (skill.shape.kind === "line" || skill.shape.kind === "cone" || skill.id === "thunder_x") {
       // 투사체형 — 시전 지점에서 조준 방향으로 사거리만큼 날아갑니다.
@@ -1361,7 +1452,7 @@ export class SceneRenderer {
         startedAtMs: nowMs,
         durationMs: 800,
         growTo: 0,
-        baseScale: SKILL_MODEL_SCALE,
+        baseScale: finalScale,
         travel: { from, to },
       });
     } else if (SKY_FALL_SKILL_IDS.has(skill.id)) {
@@ -1378,7 +1469,7 @@ export class SceneRenderer {
         startedAtMs: nowMs,
         durationMs: 950,
         growTo: 0.25,
-        baseScale: SKILL_MODEL_SCALE,
+        baseScale: finalScale,
         travel: { from, to },
       });
     } else {
@@ -1391,7 +1482,7 @@ export class SceneRenderer {
         startedAtMs: nowMs,
         durationMs: 1000,
         growTo: 0.25,
-        baseScale: SKILL_MODEL_SCALE,
+        baseScale: finalScale,
       });
     }
   }
@@ -1454,7 +1545,17 @@ export class SceneRenderer {
       nameTag.sprite.position.y = 2.7;
       group.add(nameTag.sprite);
       this.scene.add(group);
-      visual = { group, nameTag, lastLabel: "", parts, weaponId: null, weaponVisual: null, boat: null, lastBoatTier: "" };
+      visual = {
+        group,
+        nameTag,
+        lastLabel: "",
+        parts,
+        weaponId: null,
+        weaponVisual: null,
+        boat: null,
+        lastBoatTier: "",
+        dragonFormVisual: null,
+      };
       this.remotePlayerVisuals.set(id, visual);
     }
     return visual;
@@ -1496,6 +1597,26 @@ export class SceneRenderer {
       } else if (visual.boat) {
         visual.boat.group.visible = false;
       }
+
+      // 용으로 변신(dragon_v) — 서버가 중계하는 dragonFormActive가 켜져 있으면
+      // 블록형 캐릭터 몸(몸통·머리·팔다리)을 숨기고 그 대신 dragon_v.glb를
+      // 5배 크기(DRAGON_FORM_MODEL_SCALE)로 보여줍니다 — 로컬 플레이어의
+      // dragonFormOn 처리(sync() 참고)와 같은 원칙입니다. 이름표는 계속 보여야
+      // 자연스러우므로 group 전체가 아니라 몸 파츠만 개별적으로 숨깁니다.
+      const formOn = r.snapshot.dragonFormActive === true;
+      if (formOn && !visual.dragonFormVisual) {
+        visual.dragonFormVisual = this.buildRemoteDragonFormVisual();
+        if (visual.dragonFormVisual) visual.group.add(visual.dragonFormVisual);
+      }
+      if (visual.dragonFormVisual) visual.dragonFormVisual.visible = formOn;
+      visual.parts.torsoMesh.visible = !formOn;
+      visual.parts.headMesh.visible = !formOn;
+      visual.parts.leftLegPivot.visible = !formOn;
+      visual.parts.rightLegPivot.visible = !formOn;
+      visual.parts.leftArmPivot.visible = !formOn;
+      visual.parts.rightArmPivot.visible = !formOn;
+      if (visual.weaponVisual) visual.weaponVisual.visible = !formOn;
+      if (visual.boat) visual.boat.group.visible = !formOn && !!r.snapshot.boatTier;
 
       // 손에 든 무기 — drawnWeaponId가 바뀌었을 때만 떼고 새로 답니다.
       if (r.snapshot.drawnWeaponId !== visual.weaponId) {
@@ -1553,7 +1674,18 @@ export class SceneRenderer {
           }
         });
       }
-      this.scene.remove(visual.group); // visual.group의 자식(배 모델 포함)도 함께 씬에서 빠집니다.
+      if (visual.dragonFormVisual) {
+        // cloneSkillModelInstance는 지오메트리를 템플릿과 "공유"합니다(다른
+        // 인스턴스·앞으로 만들 인스턴스가 계속 씁니다) — 그래서 boat와 달리
+        // geometry는 절대 dispose하지 않고, 인스턴스별로 clone된 머티리얼만
+        // 정리합니다(skillEffects 정리 루프와 같은 원칙).
+        visual.dragonFormVisual.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            (obj.material as THREE.Material).dispose();
+          }
+        });
+      }
+      this.scene.remove(visual.group); // visual.group의 자식(배·용 변신 모델 포함)도 함께 씬에서 빠집니다.
       this.remotePlayerVisuals.delete(id);
       this.remoteAttackSwingAtMs.delete(id);
       if (this.hoverOutlineId === id) this.setHoverOutline(null);
@@ -1673,6 +1805,7 @@ export class SceneRenderer {
     remoteMeleeFx?: RemoteMeleeFx[],
     remoteDashFx?: RemoteDashFx[],
     remoteTeleportFx?: RemoteTeleportFx[],
+    remoteSpecialAbilityFx?: RemoteSpecialAbilityFx[],
   ) {
     // 조명과 안개 — 태양은 플레이어를 따라다니고(어느 바다에서든 그림자가 나오도록),
     // 하늘·안개는 지금 있는 바다의 것을 씁니다.
@@ -1906,6 +2039,7 @@ export class SceneRenderer {
             true,
             ev.chargeFrac,
             state.player.aimGroundPoint,
+            ev.rangeMult,
           );
         }
       }
@@ -1913,7 +2047,46 @@ export class SceneRenderer {
     if (remoteSkillFx) {
       for (const fx of remoteSkillFx) {
         if (!fx.weaponId) continue;
-        this.spawnSkillEffect(fx.weaponId, fx.slot, fx.position.x, fx.position.y, fx.position.z, fx.aimYaw, nowMs);
+        // 다른 플레이어가 쓴 스킬도 chargeFrac/rangeMult를 그대로 반영해야,
+        // 그 사람이 차지했거나 용으로 변신 중이었을 때 내 화면에서도 실제
+        // 판정 범위와 같은 크기로 보입니다(원격 위치엔 마우스 지점 정보가
+        // 없어 aimGroundPoint는 넘기지 않습니다 — originAtAim 폴백으로 자연히 처리됨).
+        this.spawnSkillEffect(
+          fx.weaponId,
+          fx.slot,
+          fx.position.x,
+          fx.position.y,
+          fx.position.z,
+          fx.aimYaw,
+          nowMs,
+          false,
+          fx.chargeFrac,
+          null,
+          fx.rangeMult,
+        );
+      }
+    }
+    // 빛의 비행/용의 비행(F) — 일반 슬롯 스킬이 아니므로 skillsForFruit로 못
+    // 찾아서 spawnSkillEffect가 아니라 LIGHT_FLIGHT_SKILL/DRAGON_FLIGHT_SKILL을
+    // 직접 넘겨 spawnSkillModelEffect를 호출합니다(둘 다 이미 skillModelTemplates에
+    // 등록돼 있음 — 위 registerFruitSkillModel 목록의 "light_f"/"dragon_f" 참고).
+    for (const ev of state.player.events) {
+      if (ev.type === "special_ability_fired") {
+        const abilitySkill = ev.abilityId === "light_f" ? LIGHT_FLIGHT_SKILL : DRAGON_FLIGHT_SKILL;
+        this.spawnSkillModelEffect(
+          abilitySkill,
+          state.player.position.x,
+          state.player.position.y,
+          state.player.position.z,
+          state.player.aimYaw,
+          nowMs,
+        );
+      }
+    }
+    if (remoteSpecialAbilityFx) {
+      for (const fx of remoteSpecialAbilityFx) {
+        const abilitySkill = fx.abilityId === "light_f" ? LIGHT_FLIGHT_SKILL : DRAGON_FLIGHT_SKILL;
+        this.spawnSkillModelEffect(abilitySkill, fx.position.x, fx.position.y, fx.position.z, fx.aimYaw, nowMs);
       }
     }
     for (let i = this.skillEffects.length - 1; i >= 0; i--) {

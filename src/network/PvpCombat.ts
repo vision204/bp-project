@@ -14,7 +14,7 @@ import { totalMeleeRange } from "../simulation/CombatSystem";
 import { drawnWeapon } from "../simulation/WeaponSystem";
 import { weaponMasteryLevel } from "../simulation/WeaponLeveling";
 import { dist2D } from "../simulation/ShapeMath";
-import { skillsForFruit } from "../simulation/skills";
+import { skillsForFruit, withRangeMultiplier } from "../simulation/skills";
 import { skillsForWeapon } from "../simulation/weaponSkills";
 import { LIGHTNING_CONTACT_INTERVAL_MS, type CombatStatsSnapshot } from "./protocol";
 import type { MultiplayerClient, RemotePlayerView } from "./MultiplayerClient";
@@ -43,6 +43,7 @@ export function buildCombatStatsSnapshot(state: GameState): CombatStatsSnapshot 
     equippedFruit: p.equippedFruit,
     fruitDrawn: p.fruitDrawn,
     weaponMasteryLevel: weapon ? weaponMasteryLevel(p, weapon.id) : 1,
+    dragonFormActive: p.dragonFormActive,
   };
 }
 
@@ -74,8 +75,12 @@ export function processPvpAttacks(state: GameState, mp: MultiplayerClient) {
         mp.sendMeleeAttack(target.snapshot.id);
       }
     } else if (ev.type === "skill_fired") {
-      const skill = activeSkillsFor(state)[ev.slot];
+      let skill = activeSkillsFor(state)[ev.slot];
       if (!skill || skill.shape.kind === "self") continue;
+      // 용으로 변신 중이면(rangeMult가 실려 있으면) CombatSystem.ts가 실제로
+      // 판정에 쓴 것과 같은(5배 넓어진) 범위로 후보를 찾아야, 넓어진 사거리
+      // 안의 다른 플레이어에게도 실제로 skill_attack이 갑니다.
+      if (ev.rangeMult) skill = withRangeMultiplier(skill, ev.rangeMult);
       let candidates = mp.shapeCandidates(skill.shape);
       // 낙뢰처럼 "근처 가장 가까운 대상 하나"만 노리는 스킬은 서버도 같은 이름의
       // 후보 하나만 검증하므로, 여기서도 가장 가까운 후보 하나만 골라 보냅니다.
@@ -151,7 +156,27 @@ export function broadcastSkillFx(state: GameState, mp: MultiplayerClient) {
   const p = state.player;
   for (const ev of p.events) {
     if (ev.type === "skill_fired") {
-      mp.sendSkillFx(ev.slot, activeSkillFxId(state), p.position, p.aimYaw);
+      // chargeFrac/rangeMult를 그대로 실어 보내서, 다른 사람 화면의 이펙트도
+      // 내가 실제로 판정에 쓴 것과 같은 크기(차지 사거리·용으로 변신 5배)로
+      // 보이게 합니다 — 안 그러면 원격 이펙트는 항상 기본 크기로만 보여서
+      // "분명 넓게 맞았는데 이펙트는 작았다"는 어긋남이 생깁니다.
+      mp.sendSkillFx(ev.slot, activeSkillFxId(state), p.position, p.aimYaw, ev.chargeFrac, ev.rangeMult);
+    }
+  }
+}
+
+/**
+ * 빛의 비행(F)·용의 비행(F)을 쓸 때마다(전투 후보 유무·PvP 켬/끔과 무관하게) 같은
+ * 방의 다른 사람 화면에도 이펙트가 보이도록 순수 연출용 알림을 보냅니다.
+ * broadcastSkillFx와 같은 이유로 별도 함수로 뒀습니다 — F는 일반 skill_fired
+ * 이벤트/슬롯 시스템 밖이라(special_ability_fired) 완전히 분리된 경로가 필요합니다.
+ */
+export function broadcastSpecialAbilityFx(state: GameState, mp: MultiplayerClient) {
+  if (!mp.connected) return;
+  const p = state.player;
+  for (const ev of p.events) {
+    if (ev.type === "special_ability_fired") {
+      mp.sendSpecialAbilityFx(ev.abilityId, p.position, p.aimYaw);
     }
   }
 }

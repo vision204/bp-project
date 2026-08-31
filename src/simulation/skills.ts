@@ -824,22 +824,52 @@ export function withCharge(skill: SkillDef, chargeFrac: number): SkillDef {
   const rangeMult = rangeMin + (rangeMax - rangeMin) * clamped;
   const dmgMult = 1 + ((skill.chargeMaxDamageMultiplier ?? 1) - 1) * clamped;
 
-  let next: SkillDef = skill;
-  if (rangeMult !== 1) {
-    const shape = skill.shape;
-    if (shape.kind === "line" || shape.kind === "cone") {
-      next = { ...next, shape: { ...shape, range: shape.range * rangeMult } };
-    } else if (shape.kind === "radial") {
-      next = { ...next, shape: { ...shape, radius: shape.radius * rangeMult } };
-    }
-    // 돌진형 스킬(고무 로켓·번개 순간이동 등)은 사거리와 함께 돌진 거리도 늘어나야
-    // "더 멀리 늘어나 튕겨나간다"는 느낌이 그대로 이어집니다.
-    if (skill.dashDistance) {
-      next = { ...next, dashDistance: skill.dashDistance * rangeMult };
-    }
-  }
+  let next: SkillDef = scaleShapeAndDash(skill, rangeMult);
   if (dmgMult !== 1) {
     next = { ...next, damage: skill.damage * dmgMult };
   }
   return next;
 }
+
+/**
+ * shape(range/radius)와 dashDistance만 mult배로 늘린 사본을 돌려줍니다 —
+ * withCharge/withRangeMultiplier가 공유하는 순수 스케일링 로직입니다.
+ * mult가 1이면(스케일 없음) 원본을 그대로 돌려줍니다(불필요한 복사 방지).
+ */
+function scaleShapeAndDash(skill: SkillDef, mult: number): SkillDef {
+  if (mult === 1) return skill;
+  let next: SkillDef = skill;
+  const shape = skill.shape;
+  if (shape.kind === "line" || shape.kind === "cone") {
+    next = { ...next, shape: { ...shape, range: shape.range * mult } };
+  } else if (shape.kind === "radial") {
+    next = { ...next, shape: { ...shape, radius: shape.radius * mult } };
+  }
+  // 돌진형 스킬(고무 로켓·번개 순간이동 등)은 사거리와 함께 돌진 거리도 늘어나야
+  // "더 멀리 늘어나 튕겨나간다"는 느낌이 그대로 이어집니다.
+  if (skill.dashDistance) {
+    next = { ...next, dashDistance: skill.dashDistance * mult };
+  }
+  return next;
+}
+
+/**
+ * (용으로 변신 전용) 변신 중(player.dragonFormActive) 공격 스킬(dragon_z/x/c)의
+ * 사거리를 이 배율만큼 키웁니다 — 사용자 요청("변신 중엔 사거리도 5배로")에
+ * 따른 몸집 5배(SceneRenderer.ts의 DRAGON_FORM_SCALE_MULTIPLIER)와 같은 값을
+ * 씁니다(두 상수는 서로 다른 파일에 있지만 "5배"라는 같은 사용자 요청에서
+ * 나온 같은 수치이므로 값을 맞춰뒀습니다 — 렌더러가 이 파일을 import하지
+ * 않으므로 상수 자체를 공유하지는 않습니다).
+ *
+ * withCharge와 마찬가지로 CombatSystem.ts(실제 판정)와 SceneRenderer.ts(이펙트
+ * 크기)가 이 함수를 그대로 재사용해서 "보이는 범위 = 맞는 범위"를 유지합니다.
+ * damage는 건드리지 않습니다 — 변신 중 데미지 증가는 이미 별도로
+ * dragonFormDamageMultiplierBonus(fruitBuffMultiplier)가 담당합니다.
+ * shape가 "self"면(=dragon_v 자기 자신) 자연히 아무것도 바뀌지 않습니다.
+ */
+export function withRangeMultiplier(skill: SkillDef, mult: number): SkillDef {
+  return scaleShapeAndDash(skill, mult);
+}
+
+/** 용으로 변신 중 공격 스킬의 사거리 배율 — CombatSystem.ts/SceneRenderer.ts가 공유하는 단일 출처. */
+export const DRAGON_FORM_RANGE_MULTIPLIER = 5;
