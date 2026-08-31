@@ -1,6 +1,6 @@
 import { initPhysics, createWorld } from "./core/PhysicsWorld";
 import { InputManager } from "./core/InputManager";
-import { isTouchDevice } from "./core/TouchDetect";
+import { isTouchDevice, getDeviceTier } from "./core/TouchDetect";
 import { ensureMobileViewportMeta } from "./ui/ViewportMeta";
 import { TouchInputManager, mergeInputSnapshots } from "./ui/TouchControls";
 import { createEnvironment, createIslands } from "./world/createIslands";
@@ -384,6 +384,11 @@ async function main() {
     },
     onHotbarSlotClick: (slot) => simulation.activateHotbarSlot(slot),
     devMode,
+    // 데스크톱은 기존 HUD 그대로, 폰/태블릿은 터치 조작 버튼(TouchControls.ts)과
+    // 겹치지 않는 완전히 새 레이아웃 — 사용자 요청("휴대폰/태블릿은 UI를 아예
+    // 새로 만들어달라")에 따라 세 갈래로 나눕니다. isTouchDevice()처럼 시작 시
+    // 한 번만 계산합니다(방향 전환 중 레이아웃이 바뀌지 않도록).
+    layout: getDeviceTier(),
   });
 
   // 개발자 모드는 **세이브를 건드리지 않습니다.** 내 진짜 캐릭터를 만렙 테스트본으로

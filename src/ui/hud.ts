@@ -10,6 +10,8 @@ import { drawnWeapon, weaponFor } from "../simulation/WeaponSystem";
 import { FRUIT_CATALOG } from "../simulation/ShopSystem";
 import { boatTier } from "../simulation/BoatSystem";
 import { guideInfo } from "../simulation/GuideSystem";
+import "./hud.css";
+import "./hud-mobile.css";
 
 /** 다른 사람이 정한 이름이 그대로 HTML로 들어가지 않도록 이스케이프합니다. */
 function escapeHtml(text: string): string {
@@ -71,6 +73,8 @@ export class Hud {
   private bountySignature = "";
   /** 현상금 랭킹 패널을 접어뒀는지 (우측 상단 ▾ 버튼으로 토글) */
   private bountyCollapsed = false;
+  /** "desktop"(마우스/키보드용 기존 HUD) · "tablet" · "phone" — 셋 다 완전히 다른 마크업/CSS를 씁니다 */
+  private layout: "desktop" | "tablet" | "phone" = "desktop";
 
   constructor(
     container: HTMLElement,
@@ -88,12 +92,120 @@ export class Hud {
        * 버튼 자체를 숨겨서 접속 경로를 아예 없앱니다 (요청: "무조건 싱글 플레이").
        */
       devMode?: boolean;
+      /**
+       * 어느 HUD 레이아웃을 그릴지 — 생략하면 지금까지와 완전히 같은 "desktop"
+       * 레이아웃입니다(기존 호출부/테스트가 아무 것도 안 바꿔도 그대로 동작).
+       * "phone"/"tablet"은 완전히 새로 만든, 터치 조작 버튼과 겹치지 않는 레이아웃입니다.
+       */
+      layout?: "desktop" | "tablet" | "phone";
     },
   ) {
+    this.layout = buttons.layout ?? "desktop";
     this.onHotbarSlotClick = buttons.onHotbarSlotClick;
     this.root = document.createElement("div");
     this.root.id = "hud";
-    this.root.innerHTML = `
+    this.root.dataset.layout = this.layout;
+    let html: string;
+    switch (this.layout) {
+      case "tablet":
+        html = this.buildTabletTemplate(buttons);
+        break;
+      case "phone":
+        html = this.buildPhoneTemplate(buttons);
+        break;
+      default:
+        html = this.buildDesktopTemplate(buttons);
+    }
+    this.root.innerHTML = html;
+    container.appendChild(this.root);
+
+    this.hpFill = this.root.querySelector("#hud-hp")!;
+    this.manaFill = this.root.querySelector("#hud-mp")!;
+    this.expFill = this.root.querySelector("#hud-exp")!;
+    this.levelBadge = this.root.querySelector("#hud-level")!;
+    this.moneyBadge = this.root.querySelector("#hud-money")!;
+    this.statPointsBadge = this.root.querySelector("#hud-stat-points")!;
+    this.buffBadge = this.root.querySelector("#hud-buff")!;
+    this.hakiBadge = this.root.querySelector("#hud-haki")!;
+    this.islandBadge = this.root.querySelector("#hud-island")!;
+    this.seaBadge = this.root.querySelector("#hud-sea")!;
+    this.skillRow = this.root.querySelector("#hud-skills")!;
+    this.masteryHud = this.root.querySelector("#hud-mastery")!;
+    this.masteryLabel = this.root.querySelector("#hud-mastery-label")!;
+    this.masteryExpFill = this.root.querySelector("#hud-mastery-exp")!;
+    this.masteryText = this.root.querySelector("#hud-mastery-text")!;
+    this.questBox = this.root.querySelector("#hud-quest-box")!;
+    this.interactionPrompt = this.root.querySelector("#hud-interaction")!;
+    this.toastContainer = this.root.querySelector("#hud-toasts")!;
+    this.damageFlash = this.root.querySelector("#hud-damage-flash")!;
+    this.boatHud = this.root.querySelector("#hud-boat")!;
+    this.boatSpeed = this.root.querySelector("#hud-boat-speed")!;
+    this.dashBadge = this.root.querySelector("#hud-dash")!;
+    this.teleportBadge = this.root.querySelector("#hud-teleport")!;
+    this.hotbarEl = this.root.querySelector("#hud-hotbar")!;
+    this.factionBadge = this.root.querySelector("#hud-faction")!;
+    this.hpText = this.root.querySelector("#hud-hp-text")!;
+    this.manaText = this.root.querySelector("#hud-mp-text")!;
+    this.expText = this.root.querySelector("#hud-exp-text")!;
+    this.jumpBadge = this.root.querySelector("#hud-jump")!;
+    this.devBadge = this.root.querySelector("#hud-dev")!;
+    this.bountyPanel = this.root.querySelector("#hud-bounty")!;
+    this.bountyList = this.root.querySelector("#hud-bounty-list")!;
+
+    // 상점은 NPC 없이 화면 버튼으로 언제든 열 수 있습니다.
+    this.root.querySelector<HTMLButtonElement>("#btn-shop")!.addEventListener("click", buttons.onShop);
+    this.root.querySelector<HTMLButtonElement>("#btn-inventory")!.addEventListener("click", buttons.onInventory);
+    this.root.querySelector<HTMLButtonElement>("#btn-stats")!.addEventListener("click", buttons.onStats);
+    this.root.querySelector<HTMLButtonElement>("#btn-guide")!.addEventListener("click", buttons.onGuide);
+    this.root.querySelector<HTMLButtonElement>("#btn-multiplayer")!.addEventListener("click", buttons.onMultiplayer);
+    this.guideHud = this.root.querySelector("#hud-guide")!;
+    this.guideArrow = this.root.querySelector("#hud-guide-arrow")!;
+    this.guideName = this.root.querySelector("#hud-guide-name")!;
+    this.guideDist = this.root.querySelector("#hud-guide-dist")!;
+    this.root.querySelector<HTMLButtonElement>("#hud-guide-cancel")!
+      .addEventListener("click", buttons.onCancelGuide);
+    this.drownOverlay = this.root.querySelector("#hud-drown")!;
+
+    this.root.querySelector<HTMLButtonElement>("#bounty-collapse")!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.bountyCollapsed = !this.bountyCollapsed;
+      this.bountyPanel.classList.toggle("collapsed", this.bountyCollapsed);
+      this.root.querySelector<HTMLButtonElement>("#bounty-collapse")!.textContent = this.bountyCollapsed ? "▸" : "▾";
+    });
+
+    // 폰/태블릿 전용 요소 — 데스크톱 템플릿에는 아예 존재하지 않으므로 옵셔널 체이닝으로
+    // 안전하게 건너뜁니다. update()/updateBounty()는 위에서 전혀 건드리지 않습니다.
+    if (this.layout !== "desktop") {
+      // 현상금 랭킹은 폰/태블릿에서는 처음엔 작게 접힌 배지로 시작합니다
+      // (자리를 넓게 차지하는 목록이 화면 위쪽을 다 가리지 않도록).
+      if (this.layout === "phone") {
+        this.bountyCollapsed = true;
+      }
+
+      // 폰: 햄버거(☰) 버튼을 누르면 상점/인벤토리/캐릭터/가이드/멀티플레이 5개를
+      // 세로 목록으로 담은 드로어가 펼쳐집니다. 항목 하나를 누르면(=버튼의 원래
+      // onClick이 이미 위에서 실행된 뒤) 드로어를 스스로 닫습니다.
+      const menuToggle = this.root.querySelector<HTMLButtonElement>("#m-menu-toggle");
+      const menuDrawer = this.root.querySelector<HTMLDivElement>("#m-menu-drawer");
+      if (menuToggle && menuDrawer) {
+        menuToggle.addEventListener("click", (e) => {
+          e.stopPropagation();
+          menuDrawer.classList.toggle("open");
+        });
+        menuDrawer.querySelectorAll<HTMLButtonElement>("button").forEach((btn) => {
+          btn.addEventListener("click", () => menuDrawer.classList.remove("open"));
+        });
+      }
+    }
+  }
+
+  /**
+   * 기존(데스크톱) HUD 마크업 — 지금까지의 constructor 안에 있던 것과
+   * 바이트 하나 다르지 않습니다. id·class·구조를 전혀 바꾸지 않아야
+   * update()/updateBounty()의 querySelector 배선이 그대로 동작합니다.
+   */
+  private buildDesktopTemplate(buttons: { devMode?: boolean }): string {
+    return `
       <div class="damage-flash" id="hud-damage-flash"></div>
       <div class="drown-overlay" id="hud-drown" hidden>
         <div class="drown-text">숨이 막힙니다! 섬으로 헤엄쳐 돌아가세요</div>
@@ -187,61 +299,239 @@ export class Hud {
       <div class="interaction-prompt" id="hud-interaction" hidden></div>
       <div class="toast-container" id="hud-toasts"></div>
     `;
-    container.appendChild(this.root);
+  }
 
-    this.hpFill = this.root.querySelector("#hud-hp")!;
-    this.manaFill = this.root.querySelector("#hud-mp")!;
-    this.expFill = this.root.querySelector("#hud-exp")!;
-    this.levelBadge = this.root.querySelector("#hud-level")!;
-    this.moneyBadge = this.root.querySelector("#hud-money")!;
-    this.statPointsBadge = this.root.querySelector("#hud-stat-points")!;
-    this.buffBadge = this.root.querySelector("#hud-buff")!;
-    this.hakiBadge = this.root.querySelector("#hud-haki")!;
-    this.islandBadge = this.root.querySelector("#hud-island")!;
-    this.seaBadge = this.root.querySelector("#hud-sea")!;
-    this.skillRow = this.root.querySelector("#hud-skills")!;
-    this.masteryHud = this.root.querySelector("#hud-mastery")!;
-    this.masteryLabel = this.root.querySelector("#hud-mastery-label")!;
-    this.masteryExpFill = this.root.querySelector("#hud-mastery-exp")!;
-    this.masteryText = this.root.querySelector("#hud-mastery-text")!;
-    this.questBox = this.root.querySelector("#hud-quest-box")!;
-    this.interactionPrompt = this.root.querySelector("#hud-interaction")!;
-    this.toastContainer = this.root.querySelector("#hud-toasts")!;
-    this.damageFlash = this.root.querySelector("#hud-damage-flash")!;
-    this.boatHud = this.root.querySelector("#hud-boat")!;
-    this.boatSpeed = this.root.querySelector("#hud-boat-speed")!;
-    this.dashBadge = this.root.querySelector("#hud-dash")!;
-    this.teleportBadge = this.root.querySelector("#hud-teleport")!;
-    this.hotbarEl = this.root.querySelector("#hud-hotbar")!;
-    this.factionBadge = this.root.querySelector("#hud-faction")!;
-    this.hpText = this.root.querySelector("#hud-hp-text")!;
-    this.manaText = this.root.querySelector("#hud-mp-text")!;
-    this.expText = this.root.querySelector("#hud-exp-text")!;
-    this.jumpBadge = this.root.querySelector("#hud-jump")!;
-    this.devBadge = this.root.querySelector("#hud-dev")!;
-    this.bountyPanel = this.root.querySelector("#hud-bounty")!;
-    this.bountyList = this.root.querySelector("#hud-bounty-list")!;
+  /**
+   * 태블릿(iPad급) 레이아웃 — 화면이 넓어 데스크톱과 비슷한 정보 밀도를
+   * 유지하되, TouchControls.ts의 좌하단 조이스틱(약 180x180, left:26/bottom:30)과
+   * 우하단 액션 버튼 묶음(약 240x240, right:14/bottom:18, z-index:40)을 절대
+   * 침범하지 않도록 모든 패널을 다시 배치합니다. update()/updateBounty()가
+   * 찾는 id는 전부 그대로 유지하고(필수), 새로 추가한 감싸는 요소들만
+   * "m-" 접두사 클래스를 씁니다.
+   */
+  private buildTabletTemplate(buttons: { devMode?: boolean }): string {
+    return `
+      <div class="damage-flash" id="hud-damage-flash"></div>
+      <div class="drown-overlay" id="hud-drown" hidden>
+        <div class="drown-text">숨이 막힙니다! 섬으로 헤엄쳐 돌아가세요</div>
+      </div>
 
-    // 상점은 NPC 없이 화면 버튼으로 언제든 열 수 있습니다.
-    this.root.querySelector<HTMLButtonElement>("#btn-shop")!.addEventListener("click", buttons.onShop);
-    this.root.querySelector<HTMLButtonElement>("#btn-inventory")!.addEventListener("click", buttons.onInventory);
-    this.root.querySelector<HTMLButtonElement>("#btn-stats")!.addEventListener("click", buttons.onStats);
-    this.root.querySelector<HTMLButtonElement>("#btn-guide")!.addEventListener("click", buttons.onGuide);
-    this.root.querySelector<HTMLButtonElement>("#btn-multiplayer")!.addEventListener("click", buttons.onMultiplayer);
-    this.guideHud = this.root.querySelector("#hud-guide")!;
-    this.guideArrow = this.root.querySelector("#hud-guide-arrow")!;
-    this.guideName = this.root.querySelector("#hud-guide-name")!;
-    this.guideDist = this.root.querySelector("#hud-guide-dist")!;
-    this.root.querySelector<HTMLButtonElement>("#hud-guide-cancel")!
-      .addEventListener("click", buttons.onCancelGuide);
-    this.drownOverlay = this.root.querySelector("#hud-drown")!;
+      <!-- 좌상단: 메뉴 5개 + 진영/버프류 뱃지. 화면이 넓어 태블릿에서는 굳이
+           햄버거로 접지 않고 그대로 다 보여줍니다. -->
+      <div class="m-t-topleft">
+        <div class="m-t-menu">
+          <button class="ui-btn shop" id="btn-shop">🏪 상점</button>
+          <button class="ui-btn" id="btn-inventory">🎒 인벤토리</button>
+          <button class="ui-btn" id="btn-stats">📊 캐릭터</button>
+          <button class="icon-btn" id="btn-guide" title="섬 가이드">🧭</button>
+          <button class="icon-btn" id="btn-multiplayer" title="멀티플레이" ${buttons.devMode ? "hidden" : ""}>🌐</button>
+        </div>
+        <div class="m-t-status">
+          <div class="money-line" id="hud-money">🪙 0</div>
+          <div class="level-row">
+            <div class="level-chip">Lv.<span id="hud-level">1</span></div>
+            <div class="bar-track level-track">
+              <div class="bar-fill exp" id="hud-exp" style="width:0%"></div>
+              <div class="bar-text" id="hud-exp-text">0 / 0</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label">HP</div>
+            <div class="bar-track">
+              <div class="bar-fill hp" id="hud-hp" style="width:100%"></div>
+              <div class="bar-text" id="hud-hp-text">0 / 0</div>
+            </div>
+          </div>
+          <div class="bar-row">
+            <div class="bar-label">MP</div>
+            <div class="bar-track">
+              <div class="bar-fill mp" id="hud-mp" style="width:100%"></div>
+              <div class="bar-text" id="hud-mp-text">0 / 0</div>
+            </div>
+          </div>
+          <div class="top-badges">
+            <div class="faction-badge" id="hud-faction">해적</div>
+            <div class="jump-badge" id="hud-jump" hidden></div>
+            <div class="buff-badge" id="hud-buff" hidden></div>
+            <div class="haki-badge" id="hud-haki" hidden>무장색 ON</div>
+            <div class="dash-badge" id="hud-dash" hidden></div>
+            <div class="teleport-badge" id="hud-teleport" hidden></div>
+            <div class="stat-points-badge" id="hud-stat-points" hidden></div>
+            <div class="dev-badge" id="hud-dev" hidden></div>
+          </div>
+        </div>
+      </div>
 
-    this.root.querySelector<HTMLButtonElement>("#bounty-collapse")!.addEventListener("click", (e) => {
-      e.stopPropagation();
-      this.bountyCollapsed = !this.bountyCollapsed;
-      this.bountyPanel.classList.toggle("collapsed", this.bountyCollapsed);
-      this.root.querySelector<HTMLButtonElement>("#bounty-collapse")!.textContent = this.bountyCollapsed ? "▸" : "▾";
-    });
+      <!-- 우상단: 현상금 랭킹 (터치 버튼 묶음은 화면 하단이라 상단은 안전) -->
+      <div class="bounty-panel" id="hud-bounty" hidden>
+        <div class="bounty-header">
+          <span>🏆 현상금 랭킹</span>
+          <button class="bounty-collapse-btn" id="bounty-collapse" title="접기/펼치기">▾</button>
+        </div>
+        <div class="bounty-sub">같은 방끼리만 · 플레이어를 처치하면 오릅니다</div>
+        <div class="bounty-list" id="hud-bounty-list"></div>
+      </div>
+
+      <div class="island-badge" id="hud-island">시작 섬</div>
+      <div class="sea-badge" id="hud-sea">첫 번째 바다</div>
+      <div class="guide-hud" id="hud-guide" hidden>
+        <div class="guide-hud-arrow" id="hud-guide-arrow">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2 L20 15 L13 15 L13 22 L11 22 L11 15 L4 15 Z" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="guide-hud-text">
+          <div class="guide-hud-name" id="hud-guide-name"></div>
+          <div class="guide-hud-dist" id="hud-guide-dist"></div>
+        </div>
+        <button class="guide-hud-cancel" id="hud-guide-cancel">✕</button>
+      </div>
+
+      <!-- 항해 HUD는 화면 중앙 상단 쪽으로, 단축바/조이스틱과 안 겹치게 -->
+      <div class="boat-hud" id="hud-boat" hidden>
+        <div class="boat-title">⛵ 항해 중</div>
+        <div class="boat-info"><b>W/S</b> 전진·후진 · <b>A/D</b> 선회 · <b>E</b> 내리기</div>
+        <div class="boat-speed" id="hud-boat-speed"></div>
+      </div>
+
+      <!-- 우측: Z/X/C/V 스킬 세로 스트립 — 위쪽에서 시작해서 우하단 액션 버튼
+           묶음(터치 버튼) 위로는 절대 내려오지 않도록 top/bottom으로 높이를 잡습니다. -->
+      <div class="skill-row" id="hud-skills"></div>
+
+      <!-- 좌측 하단: 단축바 + 숙련도 — 좌하단 조이스틱 위쪽에 띄웁니다. -->
+      <div class="m-t-bottomleft">
+        <div class="mastery-hud" id="hud-mastery" hidden>
+          <div class="bar-row">
+            <div class="bar-label mastery" id="hud-mastery-label">Lv.1</div>
+            <div class="bar-track">
+              <div class="bar-fill mastery" id="hud-mastery-exp" style="width:0%"></div>
+              <div class="bar-text" id="hud-mastery-text">0 / 0</div>
+            </div>
+          </div>
+        </div>
+        <div class="hotbar" id="hud-hotbar"></div>
+      </div>
+
+      <div class="quest-box" id="hud-quest-box" hidden></div>
+      <div class="interaction-prompt" id="hud-interaction" hidden></div>
+      <div class="toast-container" id="hud-toasts"></div>
+    `;
+  }
+
+  /**
+   * 폰 레이아웃 — 화면이 좁아 정보 밀도를 desktop/tablet보다 훨씬 낮춰야
+   * 합니다. TouchControls.ts의 좌하단 조이스틱(약 150x150, left:26/bottom:30)과
+   * 우하단 5+4 액션 버튼 묶음(약 210x220, right:14/bottom:18, z-index:40)이
+   * 화면 하단을 거의 다 차지하므로, 이 템플릿의 모든 패널은 화면의 위쪽
+   * ~65% 안에서만 움직입니다. 상점/인벤토리/캐릭터/가이드/멀티플레이는
+   * 항상 보이는 버튼 3개 대신 좌상단 "☰" 한 개 + 드로어로 압축합니다.
+   */
+  private buildPhoneTemplate(buttons: { devMode?: boolean }): string {
+    return `
+      <div class="damage-flash" id="hud-damage-flash"></div>
+      <div class="drown-overlay" id="hud-drown" hidden>
+        <div class="drown-text">숨이 막힙니다! 섬으로 헤엄쳐 돌아가세요</div>
+      </div>
+
+      <!-- 좌상단 햄버거 메뉴 — 터치 조이스틱(좌하단)과는 완전히 다른 모서리 -->
+      <button class="m-menu-toggle" id="m-menu-toggle" title="메뉴">☰</button>
+      <div class="m-menu-drawer" id="m-menu-drawer">
+        <button class="m-menu-item" id="btn-shop">🏪 상점</button>
+        <button class="m-menu-item" id="btn-inventory">🎒 인벤토리</button>
+        <button class="m-menu-item" id="btn-stats">📊 캐릭터</button>
+        <button class="m-menu-item" id="btn-guide">🧭 섬 가이드</button>
+        <button class="m-menu-item" id="btn-multiplayer" ${buttons.devMode ? "hidden" : ""}>🌐 멀티플레이</button>
+      </div>
+
+      <!-- 최상단 초슬림 바: 레벨 · HP · MP · 코인을 한 줄로 -->
+      <div class="m-topbar">
+        <div class="m-topbar-level">Lv.<span id="hud-level">1</span></div>
+        <div class="m-topbar-bars">
+          <div class="bar-track m-thin-bar">
+            <div class="bar-fill hp" id="hud-hp" style="width:100%"></div>
+            <div class="bar-text" id="hud-hp-text">0 / 0</div>
+          </div>
+          <div class="bar-track m-thin-bar">
+            <div class="bar-fill mp" id="hud-mp" style="width:100%"></div>
+            <div class="bar-text" id="hud-mp-text">0 / 0</div>
+          </div>
+        </div>
+        <div class="m-topbar-money" id="hud-money">🪙 0</div>
+      </div>
+      <div class="bar-track m-exp-bar">
+        <div class="bar-fill exp" id="hud-exp" style="width:0%"></div>
+        <div class="bar-text" id="hud-exp-text">0 / 0</div>
+      </div>
+
+      <!-- 진영/버프 등 상태 뱃지 — 가로 스크롤 가능한 얇은 줄 -->
+      <div class="m-badge-strip">
+        <div class="faction-badge" id="hud-faction">해적</div>
+        <div class="jump-badge" id="hud-jump" hidden></div>
+        <div class="buff-badge" id="hud-buff" hidden></div>
+        <div class="haki-badge" id="hud-haki" hidden>무장색 ON</div>
+        <div class="dash-badge" id="hud-dash" hidden></div>
+        <div class="teleport-badge" id="hud-teleport" hidden></div>
+        <div class="stat-points-badge" id="hud-stat-points" hidden></div>
+        <div class="dev-badge" id="hud-dev" hidden></div>
+      </div>
+
+      <!-- 현상금 랭킹 — 기본은 작은 배지로 접혀 있고, ▸ 버튼을 누르면 펼쳐집니다 -->
+      <div class="bounty-panel collapsed" id="hud-bounty" hidden>
+        <div class="bounty-header">
+          <span>🏆 랭킹</span>
+          <button class="bounty-collapse-btn" id="bounty-collapse" title="펼치기/접기">▸</button>
+        </div>
+        <div class="bounty-sub">같은 방끼리만 · 플레이어를 처치하면 오릅니다</div>
+        <div class="bounty-list" id="hud-bounty-list"></div>
+      </div>
+
+      <!-- 퀘스트 박스 — 상단 바로 아래 얇게 -->
+      <div class="quest-box" id="hud-quest-box" hidden></div>
+
+      <!-- 단축바 — 화면 왼쪽, 상단바 바로 아래 -->
+      <div class="hotbar" id="hud-hotbar"></div>
+
+      <!-- 숙련도 뱃지 — 화면 중앙 상단부, 좌우 터치존 어느 쪽과도 안 겹치는 자리 -->
+      <div class="mastery-hud" id="hud-mastery" hidden>
+        <div class="bar-row">
+          <div class="bar-label mastery" id="hud-mastery-label">Lv.1</div>
+          <div class="bar-track">
+            <div class="bar-fill mastery" id="hud-mastery-exp" style="width:0%"></div>
+            <div class="bar-text" id="hud-mastery-text">0 / 0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Z/X/C/V(+F) 스킬 정보 스트립 — 이제 순수 정보용(잠금/쿨다운/마나부족
+           표시만)입니다. 실제 사용은 우하단 터치 액션 버튼으로 하므로, 이 스트립은
+           그 버튼 묶음 바로 위에 딱 붙는 얇은 가로 줄로 만듭니다(터치 버튼 좌표
+           수정 시 이 CSS의 bottom 값도 같이 맞춰야 합니다 — TouchControls.ts 참고). -->
+      <div class="skill-row" id="hud-skills"></div>
+
+      <div class="guide-hud" id="hud-guide" hidden>
+        <div class="guide-hud-arrow" id="hud-guide-arrow">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2 L20 15 L13 15 L13 22 L11 22 L11 15 L4 15 Z" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="guide-hud-text">
+          <div class="guide-hud-name" id="hud-guide-name"></div>
+          <div class="guide-hud-dist" id="hud-guide-dist"></div>
+        </div>
+        <button class="guide-hud-cancel" id="hud-guide-cancel">✕</button>
+      </div>
+
+      <div class="boat-hud" id="hud-boat" hidden>
+        <div class="boat-title">⛵ 항해 중</div>
+        <div class="boat-info"><b>W/S</b> 전진·후진 · <b>A/D</b> 선회 · <b>E</b> 내리기</div>
+        <div class="boat-speed" id="hud-boat-speed"></div>
+      </div>
+
+      <div class="island-badge" id="hud-island">시작 섬</div>
+      <div class="sea-badge" id="hud-sea">첫 번째 바다</div>
+      <div class="interaction-prompt" id="hud-interaction" hidden></div>
+      <div class="toast-container" id="hud-toasts"></div>
+    `;
   }
 
   private pushToast(text: string, tone: "gold" | "red" | "blue" = "gold") {

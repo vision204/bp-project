@@ -1,0 +1,528 @@
+/*
+ * 태블릿 / 폰 전용 HUD 레이아웃.
+ *
+ * hud.ts가 layout에 따라 완전히 다른 마크업(buildTabletTemplate/buildPhoneTemplate)을
+ * 만들고, 그 루트 div에 data-layout="tablet"|"phone"을 붙입니다. 이 파일의 모든
+ * 규칙은 `#hud[data-layout="tablet"]`/`#hud[data-layout="phone"]`로 시작해서
+ * 데스크톱(`data-layout="desktop"` 또는 미지정)에는 단 한 줄도 적용되지 않습니다
+ * — hud.css는 이 파일과 무관하게 그대로 데스크톱을 그립니다.
+ *
+ * update()/updateBounty()가 innerHTML로 직접 찍어내는 클래스들
+ * (.skill-slot/.skill-body/.skill-name/.skill-cost/.skill-lock/.skill-lock-req/
+ *  .skill-key/.cooldown-overlay/.no-mana/.locked, .hotbar-slot/.hotbar-icon/
+ *  .hotbar-name/.hotbar-key/.hotbar-empty, .bounty-row/.bounty-place/.bounty-name/
+ *  .bounty-score/.bounty-me/.bounty-mine-line, .quest-title/.quest-progress/
+ *  .quest-repeat)는 hud.ts를 건드리지 않고도 여기서 attribute-scoped 규칙으로
+ *  다시 꾸밉니다. #hud-skills/#hud-hotbar/#hud-bounty/#hud-quest-box/#hud-mastery
+ *  같은 "고정 id를 가진 바깥 컨테이너"들은 desktop용 hud.css에도 같은 id 없이
+ *  클래스 규칙만 있으므로, 여기서는 id 선택자로 위치를 다시 잡습니다.
+ *
+ * TouchControls.ts가 그리는 좌하단 조이스틱 / 우하단 액션 버튼 묶음과
+ * 겹치지 않는 것이 이 파일 전체의 목표입니다 — 정확한 픽셀 값은
+ * TouchControls.ts의 상수(JOYSTICK_RADIUS, .tc-actions 등)를 참고해 추정한
+ * 값이며, 실기기에서 확인 전이라는 점을 리포트에 남겨둡니다.
+ */
+
+/* ══════════════════════════════════════════════════════════════════════
+   태블릿 (iPad급) — 데스크톱과 비슷한 정보 밀도, 배치만 재조정
+   ══════════════════════════════════════════════════════════════════════ */
+
+#hud[data-layout="tablet"] #hud-damage-flash,
+#hud[data-layout="tablet"] #hud-drown {
+  /* inset:0 그대로 — 화면 전체 효과라 재배치할 필요 없음 */
+}
+
+/* 좌상단: 메뉴 5개 + 상태(코인/레벨/HP/MP/뱃지) */
+#hud[data-layout="tablet"] .m-t-topleft {
+  position: fixed;
+  left: 20px;
+  top: 16px;
+  width: 380px;
+  max-width: 44vw;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+#hud[data-layout="tablet"] .m-t-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+#hud[data-layout="tablet"] .m-t-menu .ui-btn {
+  flex: 0 0 auto;
+  min-width: 96px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+}
+
+#hud[data-layout="tablet"] .m-t-menu .icon-btn {
+  width: 46px;
+  height: 46px;
+}
+
+#hud[data-layout="tablet"] .m-t-status {
+  background: rgba(16, 16, 20, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  padding: 12px 16px;
+  pointer-events: none;
+}
+
+/* 우상단: 현상금 랭킹 — 데스크톱보다 살짝 좁게 */
+#hud[data-layout="tablet"] #hud-bounty {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  width: 220px;
+}
+
+/* 좌상단 상태 패널과 겹치지 않도록, 퀘스트 박스는 랭킹 패널 왼쪽에 */
+#hud[data-layout="tablet"] #hud-quest-box {
+  position: fixed;
+  top: 16px;
+  right: 254px;
+  max-width: 260px;
+}
+
+#hud[data-layout="tablet"] #hud-guide {
+  top: 16px;
+}
+
+#hud[data-layout="tablet"] #hud-toasts {
+  top: 96px;
+}
+
+/* 우측 스킬 스트립 — top에서 시작해서 bottom을 캡, 우하단 터치 버튼 묶음
+   (약 240px 높이) 위로 절대 내려오지 않게 합니다. */
+#hud[data-layout="tablet"] #hud-skills {
+  position: fixed;
+  right: 20px;
+  top: 96px;
+  bottom: 264px;
+  transform: none;
+  width: 220px;
+  overflow-y: auto;
+  justify-content: flex-start;
+  scrollbar-width: thin;
+}
+
+/* 좌하단: 단축바 + 숙련도 — 조이스틱 존(약 180x180, left:26/bottom:30) 위로 띄움 */
+#hud[data-layout="tablet"] .m-t-bottomleft {
+  position: fixed;
+  left: 20px;
+  bottom: 210px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+#hud[data-layout="tablet"] #hud-mastery {
+  position: static;
+  width: 260px;
+}
+
+#hud[data-layout="tablet"] #hud-hotbar {
+  position: static;
+  left: auto;
+  bottom: auto;
+  transform: none;
+}
+
+#hud[data-layout="tablet"] #hud-boat {
+  bottom: 230px;
+}
+
+#hud[data-layout="tablet"] #hud-interaction {
+  bottom: 264px;
+  font-size: 18px;
+  padding: 12px 26px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   폰 — 완전히 새로 그림. 화면 아래쪽 ~30%는 조이스틱/액션버튼 전용 구역이라
+   모든 패널을 그 위쪽에 압축해서 배치합니다.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* 좌상단 햄버거 메뉴 버튼 — 조이스틱(좌하단)과는 정반대 모서리라 절대 안 겹침 */
+#hud[data-layout="phone"] #m-menu-toggle {
+  position: fixed;
+  left: 8px;
+  top: calc(env(safe-area-inset-top, 0px) + 6px);
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: rgba(20, 20, 24, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  color: #fff;
+  font-size: 19px;
+  line-height: 1;
+  z-index: 3;
+  pointer-events: auto;
+}
+
+#hud[data-layout="phone"] #m-menu-drawer {
+  position: fixed;
+  left: 8px;
+  top: calc(env(safe-area-inset-top, 0px) + 54px);
+  width: 190px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(14, 14, 18, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  padding: 8px;
+  z-index: 3;
+  pointer-events: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+#hud[data-layout="phone"] #m-menu-drawer.open {
+  display: flex;
+}
+
+#hud[data-layout="phone"] .m-menu-item {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 213, 79, 0.5);
+  background: rgba(255, 213, 79, 0.12);
+  color: #ffe9b0;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 최상단 초슬림 바 — 레벨 · HP · MP · 코인 */
+#hud[data-layout="phone"] .m-topbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: calc(env(safe-area-inset-top, 0px) + 50px);
+  padding: calc(env(safe-area-inset-top, 0px) + 6px) 10px 6px 58px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+  pointer-events: none;
+}
+
+#hud[data-layout="phone"] .m-topbar-level {
+  flex: none;
+  font-size: 13px;
+  font-weight: bold;
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  color: #2a2000;
+  padding: 4px 9px;
+  border-radius: 999px;
+}
+
+#hud[data-layout="phone"] .m-topbar-bars {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+#hud[data-layout="phone"] .m-thin-bar {
+  height: 12px;
+}
+
+#hud[data-layout="phone"] .m-thin-bar .bar-text {
+  font-size: 8px;
+}
+
+#hud[data-layout="phone"] .m-topbar-money {
+  flex: none;
+  font-size: 13px;
+  font-weight: bold;
+  color: #69f0ae;
+  white-space: nowrap;
+}
+
+#hud[data-layout="phone"] .m-exp-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: calc(env(safe-area-inset-top, 0px) + 50px);
+  height: 8px;
+  margin: 0;
+  border-radius: 0;
+  border-width: 0 0 1px 0;
+}
+
+#hud[data-layout="phone"] .m-exp-bar .bar-text {
+  display: none;
+}
+
+/* 상태 뱃지 줄 — 가로로 넘치면 스크롤 */
+#hud[data-layout="phone"] .m-badge-strip {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  top: calc(env(safe-area-inset-top, 0px) + 62px);
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  pointer-events: none;
+}
+
+#hud[data-layout="phone"] .m-badge-strip > * {
+  flex: none;
+  font-size: 11px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+
+/* 섬/바다 이름 — 뱃지 줄 바로 아래, 중앙 */
+#hud[data-layout="phone"] #hud-island {
+  top: calc(env(safe-area-inset-top, 0px) + 94px);
+  font-size: 13px;
+  padding: 4px 14px;
+}
+
+#hud[data-layout="phone"] #hud-sea {
+  top: calc(env(safe-area-inset-top, 0px) + 122px);
+  font-size: 10px;
+  padding: 2px 9px;
+}
+
+/* 현상금 랭킹 — 기본은 우상단의 작은 배지, 펼치면 화면 중앙 오버레이로 */
+#hud[data-layout="phone"] #hud-bounty {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 62px);
+  right: 8px;
+  width: 118px;
+  padding: 7px 9px;
+  font-size: 11px;
+}
+
+#hud[data-layout="phone"] #hud-bounty .bounty-header {
+  font-size: 12px;
+}
+
+#hud[data-layout="phone"] #hud-bounty:not(.collapsed) {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  transform: translate(-50%, -50%);
+  width: min(84vw, 320px);
+  max-height: 64vh;
+  overflow-y: auto;
+  padding: 14px 16px;
+  font-size: 13px;
+  z-index: 4;
+}
+
+/* 퀘스트 박스 — 뱃지/섬 이름 줄 아래, 화면 폭 가득 슬림하게 */
+#hud[data-layout="phone"] #hud-quest-box {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  top: calc(env(safe-area-inset-top, 0px) + 150px);
+  max-width: none;
+  padding: 8px 12px;
+  font-size: 11.5px;
+}
+
+#hud[data-layout="phone"] #hud-quest-box .quest-title {
+  font-size: 12.5px;
+  margin-bottom: 3px;
+}
+
+/* 단축바 — 화면 왼쪽, 퀘스트 박스 아래 */
+#hud[data-layout="phone"] #hud-hotbar {
+  position: fixed;
+  left: 8px;
+  bottom: auto;
+  top: calc(env(safe-area-inset-top, 0px) + 192px);
+  transform: none;
+  gap: 6px;
+}
+
+#hud[data-layout="phone"] .hotbar-slot {
+  width: 50px;
+  height: 50px;
+  border-radius: 10px;
+  padding: 3px;
+  gap: 0;
+}
+
+#hud[data-layout="phone"] .hotbar-key {
+  width: 17px;
+  height: 17px;
+  font-size: 9px;
+  top: -6px;
+  left: -5px;
+}
+
+#hud[data-layout="phone"] .hotbar-icon {
+  font-size: 18px;
+}
+
+#hud[data-layout="phone"] .hotbar-name {
+  font-size: 7.5px;
+}
+
+/* 숙련도 배지 — 우측, 단축바와 같은 높이. 좌우 어느 터치존과도 안 겹침 */
+#hud[data-layout="phone"] #hud-mastery {
+  position: fixed;
+  right: 8px;
+  bottom: auto;
+  top: calc(env(safe-area-inset-top, 0px) + 192px);
+  width: 150px;
+}
+
+#hud[data-layout="phone"] #hud-mastery .bar-label.mastery {
+  width: 76px;
+  font-size: 9px;
+}
+
+#hud[data-layout="phone"] #hud-mastery .bar-track {
+  height: 16px;
+}
+
+#hud[data-layout="phone"] #hud-mastery .bar-text {
+  font-size: 9px;
+}
+
+/* Z/X/C/V(+F) 스킬 정보 스트립 — 순수 정보 표시(잠금/쿨다운/마나부족)만.
+   실제 발동은 TouchControls.ts의 우하단 스킬 버튼 5개로 하므로 탭 불가능하게
+   두고, 그 버튼 묶음 바로 위에 가로로 딱 붙입니다. 버튼 묶음 높이가 바뀌면
+   (TouchControls.ts의 .tc-actions/.tc-skill-row/.tc-primary-row) 아래 bottom
+   값도 같이 맞춰야 합니다. */
+#hud[data-layout="phone"] #hud-skills {
+  position: fixed;
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 224px);
+  top: auto;
+  transform: none;
+  flex-direction: row;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  width: 216px;
+  gap: 5px;
+  pointer-events: none;
+}
+
+#hud[data-layout="phone"] .skill-slot {
+  width: 38px;
+  min-height: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 8px;
+  justify-content: center;
+  gap: 0;
+}
+
+#hud[data-layout="phone"] .skill-body {
+  display: none;
+}
+
+#hud[data-layout="phone"] .skill-key {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  font-size: 13px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+#hud[data-layout="phone"] .skill-slot:not(.locked) .skill-key {
+  background: linear-gradient(180deg, #ffd54f, #ffb300);
+  color: #302400;
+}
+
+#hud[data-layout="phone"] .skill-slot.no-mana .skill-key {
+  background: rgba(124, 77, 255, 0.55);
+  color: #fff;
+}
+
+#hud[data-layout="phone"] .skill-slot .cooldown-overlay {
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+#hud[data-layout="phone"] .skill-lock,
+#hud[data-layout="phone"] .skill-lock-req {
+  display: none;
+}
+
+/* 가이드 안내 — 상단 바 아래쪽 중앙, 작게 */
+#hud[data-layout="phone"] #hud-guide {
+  top: calc(env(safe-area-inset-top, 0px) + 60px);
+  font-size: 12px;
+  padding: 6px 10px;
+  gap: 8px;
+}
+
+#hud[data-layout="phone"] #hud-guide-name {
+  font-size: 12.5px;
+}
+
+#hud[data-layout="phone"] #hud-guide-dist {
+  font-size: 10.5px;
+}
+
+/* 항해/상호작용/드론 등 컨텍스트 안내 — 화면 위 65% 밑으로는 절대 안 내려가게,
+   터치 액션 버튼 묶음이 시작되는 높이보다 위쪽 중앙에 띄웁니다. */
+#hud[data-layout="phone"] #hud-boat {
+  position: fixed;
+  left: 50%;
+  bottom: auto;
+  top: 56%;
+  transform: translate(-50%, -50%);
+  min-width: 0;
+  width: min(84vw, 300px);
+  padding: 10px 16px;
+}
+
+#hud[data-layout="phone"] #hud-boat .boat-title {
+  font-size: 13.5px;
+}
+
+#hud[data-layout="phone"] #hud-boat .boat-info,
+#hud[data-layout="phone"] #hud-boat .boat-speed {
+  font-size: 11px;
+}
+
+#hud[data-layout="phone"] #hud-interaction {
+  position: fixed;
+  left: 50%;
+  bottom: auto;
+  top: 58%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  padding: 9px 18px;
+}
+
+#hud[data-layout="phone"] #hud-toasts {
+  top: calc(env(safe-area-inset-top, 0px) + 66px);
+}
+
+#hud[data-layout="phone"] .toast {
+  font-size: 12.5px;
+  padding: 7px 14px;
+}
+
+/* 랭킹 패널 안 목록 줄 — 폰 오버레이 모드에서는 더 큼직하게(탭 실수 방지) */
+#hud[data-layout="phone"] .bounty-row {
+  padding: 6px 8px;
+}
+
+/* 퀘스트/랭킹 안의 텍스트 줄바꿈이 좁은 화면에서 깨지지 않도록 */
+#hud[data-layout="phone"] .quest-progress,
+#hud[data-layout="phone"] .quest-repeat {
+  font-size: 11px;
+}
