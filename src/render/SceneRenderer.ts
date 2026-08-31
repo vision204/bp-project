@@ -143,49 +143,59 @@ const SAND_BLADE_SCALE = NPC_HEIGHT_APPROX * 1.15;
 
 // ── 용의 비행(dragon_dragon, F 능력) 전용 — 실제 몸 전체를 용 모델로 바꿔치기 ──
 // 사용자 피드백: 기존 dragon_f 오라(몸을 감싸는 연출)는 "날아다니는 자세"가
-// 아니라 그냥 공중에 뜬 모습이었다고 함. public/models/skills/dragon_v.glb
-// (원래 "V: 용으로 변신" 능력용으로 만들어진 모델 — 그 능력은 이제
-// skills.ts의 dragon_dragon 배열에 dragon_v로 실제 구현돼 있고, 이 파일
-// 아래쪽의 DRAGON_FORM_* 상수/dragonFormVisual이 그 변신 전용 자세를 따로
-// 담당합니다)을 F 비행에서도 재사용해서, 비행 중에는 캐릭터를 완전히
-// 숨기고 이 GLB를 몸 대신 직접 씬에 띄워 "몸을 쭉 펴고 하늘을 헤엄치는"
-// 모습을 냅니다.
-const DRAGON_FLIGHT_MODEL_PATH = "models/skills/dragon_v.glb";
+// 아니라 그냥 공중에 뜬 모습이었다고 함. 한동안 public/models/skills/dragon_v.glb
+// (V 변신 능력용 모델)를 F 비행에서도 임시로 빌려 썼지만, 사용자 요청으로
+// "예전에 쓰던 GLB로 다시" 되돌려서 이제 다시 원래의 전용 파일
+// public/models/skills/dragon_f.glb를 씁니다(V 변신은 여전히 dragon_v.glb를
+// 그대로 씁니다 — 이 파일 아래쪽의 DRAGON_FORM_* 상수/dragonFormVisual 참고).
+// 비행 중에는 캐릭터를 완전히 숨기고 이 GLB를 몸 대신 직접 씬에 띄워 "몸을
+// 쭉 펴고 하늘을 헤엄치는" 모습을 냅니다.
+const DRAGON_FLIGHT_MODEL_PATH = "models/skills/dragon_f.glb";
 /**
- * dragon_v.glb의 로컬 바운딩 박스를 실제로 재보니(스크립트로 GLB의 JSON
- * 청크 accessor min/max를 직접 파싱) X≈0.89, Y≈0.98(가장 긴 축), Z≈0.47
- * (가장 얇은 축)이었습니다 — "가만히 떠 있는" 자세로 만들어진 모델답게
- * Y(위아래)가 키, Z(앞뒤)가 가장 얇은 두께입니다. 스켈레톤/애니메이션은
- * 없는 정적 메시(스크립트로 skins/animations 필드가 비어 있음을 확인) —
- * 그래서 뼈대 애니메이션이 아니라 그룹 전체를 절차적으로 회전/이동시키는
- * 방식이 유일하게 가능한 접근입니다.
+ * dragon_f.glb의 로컬 바운딩 박스를 실제로 재보니(스크립트로 GLB의 JSON
+ * 청크 accessor min/max를 직접 파싱, POSITION accessor 기준) X≈0.979
+ * (가장 긴 축), Y≈0.713, Z≈0.446(가장 얇은 축)이었습니다. dragon_v.glb와는
+ * 축 배치가 다릅니다 — dragon_v.glb는 "가만히 서 있는" 자세라 Y(키)가 가장
+ * 길었지만, dragon_f.glb는 이미 로컬 X축(몸통 길이 방향)이 가장 긴 걸 보면
+ * 애초에 "누워서/날아가는" 자세로 모델링된 것으로 보입니다. 스켈레톤/
+ * 애니메이션은 없는 정적 메시(skins/animations 필드가 비어 있음을 확인)라
+ * 이번에도 뼈대 애니메이션이 아니라 그룹 전체를 절차적으로 회전/이동시킵니다.
  *
- * "몸을 눕혀 쭉 펴고 코가 진행 방향을 보게" 하려면 모델의 +Y(머리 쪽 위)
- * 축이 이동 방향(+Z, 이 코드베이스의 전방 축)을 향하도록 로컬 X축 기준으로
- * +90도(Math.PI/2) 돌려야 합니다 — 직접 미리보기가 불가능한 상태에서의
- * 최선의 추정치이며, "몸통이 위아래가 뒤집혀 보인다"거나 "거꾸로 난다"는
- * 피드백을 받으면 부호를 반대로(-Math.PI/2) 바꿔야 할 수 있습니다.
+ * 가장 긴 축이 로컬 X(몸통 길이)이므로, 눕히는 피치 회전(로컬 X축 기준
+ * 회전)은 필요 없고, 대신 로컬 X축이 이동 방향(+Z)을 보도록 로컬 Y축
+ * 기준으로 요(yaw) 회전만 주면 됩니다. Three.js의 Y축 회전 공식
+ * (x'=x·cosθ, z'=-x·sinθ)으로 로컬 +X(코 방향으로 가정)를 월드 +Z로
+ * 보내려면 θ=-90°(-Math.PI/2)가 필요합니다 — 직접 미리보기가 불가능한
+ * 상태에서의 최선의 추정치이며, "거꾸로(꼬리부터) 난다"는 피드백을 받으면
+ * +Math.PI/2로 부호를 반대로 바꿔야 할 수 있습니다.
  */
-const DRAGON_FLIGHT_BASE_PITCH = Math.PI / 2;
+const DRAGON_FLIGHT_BASE_YAW = -Math.PI / 2;
 /** 캐릭터를 완전히 대신하는 몸이므로, 기존 오라들과 같은 "만화처럼 거대한" 스케일을 그대로 씁니다. */
 const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE;
 
-// ── 용으로 변신(dragon_dragon, V 슬롯3) 전용 — 같은 dragon_v.glb를 다른 자세로 재사용 ──
-// F(용의 비행)는 "몸을 눕혀 헤엄치듯" 날아가는 자세라 로컬 X축 기준 +90도
-// (DRAGON_FLIGHT_BASE_PITCH)를 돌려 눕혔지만, 이건 완전히 다른 포즈입니다.
+// ── 용으로 변신(dragon_dragon, V 슬롯3) 전용 — dragon_v.glb를 독립적으로 사용 ──
+// F(용의 비행)는 이제 별도 전용 파일 dragon_f.glb를 쓰지만(위 DRAGON_FLIGHT_MODEL_PATH
+// 참고), V 변신은 처음부터 그랬듯 그대로 dragon_v.glb를 씁니다 — 두 파일은
+// 완전히 다른 모델이라 자세 보정 상수도 서로 공유하지 않습니다.
 // 사용자 피드백: "용 머리가 좌표 위를 향해야 하는데 옆으로 누워있어" — 즉
-// 변신 포즈에서는 F 비행의 눕히는 회전을 절대 재사용하면 안 되고, 모델이
-// 원래 만들어진 자세(가장 긴 축인 로컬 Y가 그대로 위를 향하는, "가만히 떠
-// 있는" 자세 — 이 파일 위쪽의 GLB 바운딩 박스 분석 주석 참고) 그대로 세워
-// 둬야 합니다. 그래서 피치/롤 보정은 아예 주지 않고(항등 회전), 캐릭터가
-// 보는 방향(yaw)만 반영합니다 — 모델의 "정면"이 이미 로컬 -Z(이 코드베이스의
-// 전방 축과 일치한다고 가정)를 보고 있지 않다면 요(yaw) 보정만 추가하면
-// 되므로, 그 여지를 위해 별도 상수로 분리해뒀습니다(0=보정 없음 — 실제로
-// 화면에서 확인하기 전까지는 최선의 추정치입니다).
-const DRAGON_FORM_MODEL_PATH = DRAGON_FLIGHT_MODEL_PATH;
+// 변신 포즈에서는 F 비행처럼 눕히는 회전을 주면 안 되고, 모델이 원래
+// 만들어진 자세(dragon_v.glb는 가장 긴 축인 로컬 Y가 그대로 위를 향하는,
+// "가만히 떠 있는" 자세) 그대로 세워둬야 합니다. 그래서 피치/롤 보정은 아예
+// 주지 않고(항등 회전), 캐릭터가 보는 방향(yaw)만 반영합니다 — 모델의
+// "정면"이 이미 로컬 -Z(이 코드베이스의 전방 축과 일치한다고 가정)를 보고
+// 있지 않다면 요(yaw) 보정만 추가하면 되므로, 그 여지를 위해 별도 상수로
+// 분리해뒀습니다(0=보정 없음 — 실제로 화면에서 확인하기 전까지는 최선의
+// 추정치입니다).
+const DRAGON_FORM_MODEL_PATH = "models/skills/dragon_v.glb";
 const DRAGON_FORM_YAW_OFFSET = 0;
-/** F 비행과 똑같이 캐릭터 전체를 대신하는 "만화처럼 거대한" 스케일. */
-const DRAGON_FORM_MODEL_SCALE = SKILL_MODEL_SCALE;
+/**
+ * 사용자 요청("변신했을 때 크기를 지금보다 5배 더 키워줘")에 따라, 기존
+ * 캐릭터-대신 스케일(SKILL_MODEL_SCALE, F 비행과 같았던 기준값)에 5배를
+ * 추가로 곱합니다. normalizeAndCenterModel(gltf.scene, 1)이 이미 "가장 긴
+ * 변 = 1"로 정규화해두므로, 이 배율을 그대로 최종 크기로 곱하면 됩니다.
+ */
+const DRAGON_FORM_SCALE_MULTIPLIER = 5;
+const DRAGON_FORM_MODEL_SCALE = SKILL_MODEL_SCALE * DRAGON_FORM_SCALE_MULTIPLIER;
 /** 헤엄치듯 상하로 일렁이는 피치 진동 진폭(라디안) — 사용자 요청 범위(8~12도) 중간값. */
 const DRAGON_SWIM_PITCH_AMPLITUDE = (10 * Math.PI) / 180;
 /** 피치 진동 주파수(Hz) — 사용자 요청 범위(1.2~1.8Hz) 중간값. */
@@ -883,18 +893,17 @@ export class SceneRenderer {
    */
   private skillAuraVisuals = new Map<string, THREE.Group>();
   /**
-   * 용의 비행(dragon_v.glb) 전용 — 다른 스킬 오라들과 달리 playerVisual의
+   * 용의 비행(dragon_f.glb) 전용 — 다른 스킬 오라들과 달리 playerVisual의
    * 자식이 아니라 씬에 직접 붙입니다. 캐릭터 몸 전체를 "대신"해야 하므로
    * (playerVisual은 비행 중 통째로 숨김), 자체적으로 매 프레임 위치·회전을
    * 계산해서 따라다니게 합니다(sync() 참고).
    */
   private dragonFlightVisual: THREE.Group | null = null;
   /**
-   * 용으로 변신(V, dragon_v)의 dragonFlightVisual과는 별개인 독립 인스턴스 —
-   * 같은 dragon_v.glb를 쓰지만 회전(자세)이 완전히 다르고(DRAGON_FORM_YAW_OFFSET
-   * vs DRAGON_FLIGHT_BASE_PITCH), F 비행과 V 변신은 게이팅상 동시에 켜질 수
-   * 있으므로(둘 다 fruitDrawn && dragon_dragon 조건만 봄) 하나의 트랜스폼을
-   * 공유하면 서로 덮어씁니다. sync()가 두 상태가 동시에 켜져 있으면 비행
+   * 용으로 변신(V, dragon_v)의 dragonFlightVisual과는 별개인 독립 인스턴스이자
+   * 별개 모델 파일(dragon_v.glb, dragonFlightVisual은 dragon_f.glb)입니다 —
+   * F 비행과 V 변신은 게이팅상 동시에 켜질 수 있으므로(둘 다 fruitDrawn &&
+   * dragon_dragon 조건만 봄) sync()가 두 상태가 동시에 켜져 있으면 비행
    * 시각을 우선(dragonFlightVisual만 보이고 이건 숨김)합니다.
    */
   private dragonFormVisual: THREE.Group | null = null;
@@ -1123,7 +1132,7 @@ export class SceneRenderer {
   }
 
   /**
-   * 용의 비행 전용 dragon_v.glb를 불러와 씬에 직접(playerVisual의 자식이
+   * 용의 비행 전용 dragon_f.glb를 불러와 씬에 직접(playerVisual의 자식이
    * 아니라) 추가합니다. skillAuraVisuals와 달리 이 모델은 캐릭터를 완전히
    * "대신"해야 해서, 걷기 애니메이션 등 playerVisual에 걸린 다른 자식
    * 트랜스폼과 얽히지 않도록 독립된 그룹으로 둡니다. 로드 전까지는
@@ -1142,15 +1151,14 @@ export class SceneRenderer {
       },
       undefined,
       (err) => {
-        console.warn("용의 비행 모델을 불러오지 못했습니다 (dragon_v):", err);
+        console.warn("용의 비행 모델을 불러오지 못했습니다 (dragon_f):", err);
       },
     );
   }
 
   /**
-   * 용으로 변신(V) 전용 dragon_v.glb 인스턴스 — dragonFlightVisual과 완전히
-   * 별개로 한 번 더 불러옵니다(같은 파일이지만 자세가 다르고 두 상태가
-   * 동시에 켜질 수 있어 트랜스폼을 공유하면 안 됩니다).
+   * 용으로 변신(V) 전용 dragon_v.glb 인스턴스 — dragonFlightVisual(dragon_f.glb)과는
+   * 파일도 자세도 완전히 다른 별개 인스턴스입니다.
    */
   private loadDragonFormVisual() {
     const url = `${import.meta.env.BASE_URL}${DRAGON_FORM_MODEL_PATH}`;
@@ -2054,8 +2062,9 @@ export class SceneRenderer {
         aura.visible = state.player.lightFormRemainingSec > 0 && state.player.fruitDrawn;
       } else if (skillId === "dragon_f") {
         // 용의 비행 — 사용자 피드백으로 "몸을 감싸는 오라"가 아니라
-        // dragon_v.glb를 몸 대신 직접 보여주는 방식(아래 dragonFlightVisual)
-        // 으로 완전히 대체됐습니다. dragon_f 자체는 다른 용도가 없어서(활성화
+        // dragon_f.glb를 몸 대신 직접 보여주는 방식(아래 dragonFlightVisual,
+        // SKILL_AURA_IDS의 이 GLB 인스턴스와는 별개의 독립 로딩)으로 완전히
+        // 대체됐습니다. 이 오라 인스턴스 자체는 다른 용도가 없어서(활성화
         // 순간의 별도 버스트 연출 없음) 이제 항상 숨깁니다 — GLB 로딩/등록은
         // 그대로 둬서(파일 삭제·참조 제거는 안 함) 다른 곳에 영향이 없게 합니다.
         aura.visible = false;
@@ -2088,7 +2097,7 @@ export class SceneRenderer {
 
     // 1인칭: 내 캐릭터가 시야를 가리지 않도록 숨깁니다.
     const firstPerson = !riding && zoom <= FIRST_PERSON_THRESHOLD;
-    // 용의 비행 중에는 평소 블록형 캐릭터 대신 dragon_v.glb를 몸으로 보여주므로,
+    // 용의 비행 중에는 평소 블록형 캐릭터 대신 dragon_f.glb를 몸으로 보여주므로,
     // 평소 캐릭터는 통째로 숨깁니다(예전 dragon_f 오라 방식은 캐릭터를 숨기지
     // 않고 위에 덧씌우기만 했지만, "실제 몸을 대신"하라는 요청에 따라 바꿨습니다).
     const dragonFlying = state.player.dragonFlightActive && state.player.fruitDrawn;
@@ -2101,10 +2110,11 @@ export class SceneRenderer {
     if (this.dragonFormVisual) {
       this.dragonFormVisual.visible = dragonFormOn && !firstPerson;
       if (dragonFormOn) {
-        // 눕히는 피치 보정(DRAGON_FLIGHT_BASE_PITCH) 없이, 모델이 원래
-        // 만들어진 자세(가장 긴 축인 로컬 Y가 위를 향함) 그대로 세워두고
-        // yaw(보는 방향)만 반영합니다 — "머리가 옆으로 누워있다"는 피드백의
-        // 원인이었던 F 비행용 회전을 여기서는 절대 재사용하지 않습니다.
+        // 눕히는 회전 보정 없이, 모델이 원래 만들어진 자세(가장 긴 축인
+        // 로컬 Y가 위를 향함) 그대로 세워두고 yaw(보는 방향)만 반영합니다 —
+        // "머리가 옆으로 누워있다"는 피드백의 원인이었던 F 비행용 회전
+        // (DRAGON_FLIGHT_BASE_YAW, dragon_f.glb 전용)을 여기서는 절대
+        // 재사용하지 않습니다.
         const formYawQuat = new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(0, 1, 0),
           state.player.yaw + DRAGON_FORM_YAW_OFFSET,
@@ -2112,7 +2122,11 @@ export class SceneRenderer {
         this.dragonFormVisual.quaternion.copy(formYawQuat);
         this.dragonFormVisual.position.set(
           state.player.position.x,
-          state.player.position.y + NPC_HEIGHT_APPROX / 2,
+          // 5배로 커진 모델이 절반쯤 땅에 파묻혀 보이지 않도록, 앵커를 고정된
+          // NPC_HEIGHT_APPROX/2 대신 실제 모델 높이(가장 긴 축=1로 정규화된 뒤
+          // DRAGON_FORM_MODEL_SCALE배 된 세로 크기)의 절반만큼 띄웁니다 —
+          // dragon_v.glb는 로컬 Y가 가장 긴 축이라 world 높이 ≈ DRAGON_FORM_MODEL_SCALE.
+          state.player.position.y + DRAGON_FORM_MODEL_SCALE / 2,
           state.player.position.z,
         );
       }
@@ -2122,19 +2136,22 @@ export class SceneRenderer {
       if (dragonFlying) {
         // 헤엄치듯 몸을 일렁이게 하는 절차적 애니메이션 — 뼈대가 없는 정적
         // 메시라 그룹 전체의 회전/위치만 사인파로 흔듭니다(피치 진동 + 살짝
-        // 어긋난 위상의 수직 bob). 기본자세(DRAGON_FLIGHT_BASE_PITCH)에 이
-        // 진동을 더해 "쭉 뻗은 채 위아래로 굽이치며 나는" 느낌을 냅니다.
+        // 어긋난 위상의 수직 bob). dragon_f.glb는 dragon_v.glb와 축 배치가
+        // 달라(로컬 X가 몸통 길이, Z가 가장 얇은 폭) 기본 자세 보정은
+        // 피치(X축 회전)가 아니라 요(Y축, DRAGON_FLIGHT_BASE_YAW) 회전이고,
+        // "코가 위아래로 까딱이는" 헤엄 진동은 로컬 Z축(요 보정 후 좌우 폭
+        // 축이 되는) 기준 회전으로 줍니다.
         const phase = (nowMs / 1000) * DRAGON_SWIM_FREQUENCY_HZ * Math.PI * 2;
         const oscPitch = DRAGON_SWIM_PITCH_AMPLITUDE * Math.sin(phase);
         const bobY = DRAGON_SWIM_BOB_AMPLITUDE * Math.sin(phase + DRAGON_SWIM_BOB_PHASE_OFFSET);
-        const pitchQuat = new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0),
-          DRAGON_FLIGHT_BASE_PITCH + oscPitch,
+        const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), oscPitch);
+        const yawQuat = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          state.player.yaw + DRAGON_FLIGHT_BASE_YAW,
         );
-        const yawQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), state.player.yaw);
-        // 로컬(모델 좌표계) 피치를 먼저 적용하고, 그 결과를 월드 Y축 기준
-        // 진행 방향(yaw)으로 돌립니다 — 자식(피치)이 부모(요)를 따라가는
-        // 합성 순서라 쿼터니언 곱셈은 yaw * pitch 순서여야 합니다.
+        // 로컬(모델 좌표계) 피치 진동을 먼저 적용하고, 그 결과를 월드 Y축 기준
+        // 진행 방향(yaw + 기본 자세 보정)으로 돌립니다 — 자식(피치)이 부모(요)를
+        // 따라가는 합성 순서라 쿼터니언 곱셈은 yaw * pitch 순서여야 합니다.
         this.dragonFlightVisual.quaternion.copy(yawQuat).multiply(pitchQuat);
         this.dragonFlightVisual.position.set(
           state.player.position.x,

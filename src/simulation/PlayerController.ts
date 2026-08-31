@@ -45,6 +45,16 @@ export const FLY_CEILING = 400;
  */
 export const DRAGON_FLIGHT_SPEED = 24;
 
+// ── 용으로 변신 (용용 열매 V 토글) ────────────────────────────────────────────
+/**
+ * 변신 중 자유 비행 순항 속도(m/s). devMode 자유비행(FLY_SPEED=60)만큼
+ * 빠르진 않되(전투에서 쓰는 능력이라 밸런스상 자제), 용의 비행(F,
+ * DRAGON_FLIGHT_SPEED=24)과 비슷한 범위로 잡았습니다. F의 "절대 정지
+ * 불가"와 달리, 이쪽은 devMode 비행처럼 완전히 자유롭게 멈추고 맴돌 수
+ * 있습니다(사용자 요청: "날아다닐 수 있게" = 일반적인 자유 비행).
+ */
+export const DRAGON_FORM_FLY_SPEED = 26;
+
 function applyZoom(current: number, zoomDelta: number) {
   if (zoomDelta === 0) return current;
   // 멀리 있을수록 한 칸당 더 크게 움직여야 체감이 균일합니다.
@@ -115,8 +125,8 @@ export class PlayerController {
    *   · Space / Ctrl — 수직 상승·하강
    *   · Shift — 가속(3배) 토글
    */
-  private stepFlight(dt: number, input: InputSnapshot, player: PlayerState) {
-    const speed = FLY_SPEED * (input.sprintToggledOn ? FLY_BOOST : 1);
+  private stepFlight(dt: number, input: InputSnapshot, player: PlayerState, baseSpeed: number = FLY_SPEED) {
+    const speed = baseSpeed * (input.sprintToggledOn ? FLY_BOOST : 1);
     player.sprinting = input.sprintToggledOn;
 
     // 보는 방향(피치 포함) 단위 벡터
@@ -226,6 +236,19 @@ export class PlayerController {
     // 프레임부터 여기로 분기합니다.
     if (player.dragonFlightActive) {
       this.stepDragonFlight(dt, input, player);
+      return;
+    }
+
+    // 용으로 변신(V, dragonFormActive) — devMode 자유비행과 똑같은 stepFlight()를
+    // 재사용하되 속도만 DRAGON_FORM_FLY_SPEED로 낮춰서 부릅니다. F의 용의
+    // 비행(stepDragonFlight, 절대 정지 불가)과는 별개의 메커니즘이며, 둘 다
+    // 켜져 있을 수는 없지만(위의 dragonFlightActive 분기가 우선) 혹시 몰라
+    // 순서상 dragonFlightActive를 먼저 검사해 F가 항상 우선하도록 해둡니다.
+    // V를 다시 눌러 dragonFormActive가 꺼지면(CombatSystem.ts) 바로 다음
+    // 프레임부터 이 분기를 타지 않아 평소 중력/충돌 물리로 자연히 복귀합니다
+    // (F와 동일하게 별도 착지 처리가 필요 없습니다).
+    if (player.dragonFormActive) {
+      this.stepFlight(dt, input, player, DRAGON_FORM_FLY_SPEED);
       return;
     }
 

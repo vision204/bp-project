@@ -1734,7 +1734,7 @@ section("빛빛/용용 열매 — 카탈로그·Z/X/C(/V) 스킬 정의");
   assert(dragon[3].toggle === true, "용으로 변신: 토글 스킬로 등록됨");
   assert(dragon[3].cooldownSec === 0, `용으로 변신: 사막의 대검과 같은 패턴 — 쿨다운 없음 (실제 ${dragon[3].cooldownSec}초)`);
   assert(dragon[3].damage === 0 && dragon[3].shape.kind === "self", "용으로 변신: 순수 자기강화형(damage 0, self)");
-  assert(dragon[3].dragonFormDamageMultiplierBonus === 0.2, `용으로 변신: 데미지 +20% 버프 (실제 +${dragon[3].dragonFormDamageMultiplierBonus * 100}%)`);
+  assert(dragon[3].dragonFormDamageMultiplierBonus === 2, `용으로 변신: 데미지 3배 버프 (실제 x${1 + dragon[3].dragonFormDamageMultiplierBonus})`);
 }
 
 section("밸런스 — 용으로 변신 (용용 열매 V, 쿨다운 없이 토글로 변신/해제)");

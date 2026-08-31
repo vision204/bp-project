@@ -736,9 +736,12 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       // 대검처럼 damage:0 + shape:self — thunder_x도 같은 패턴).
       damage: 0,
       shape: { kind: "self" },
-      dragonFormDamageMultiplierBonus: 0.2,
+      // 사용자 요청("전 스킬 딜이 3배는 더 강력해지게")에 따라 0.2(+20%)에서
+      // 2.0(총 3배)으로 상향 — CombatSystem.ts가 이 값을 유일한 출처로 삼아
+      // fruitBuffMultiplier = 1 + dragonFormDamageMultiplierBonus로 적용합니다.
+      dragonFormDamageMultiplierBonus: 2,
       description:
-        "용의 본모습으로 변신해, 머리를 하늘로 향한 채 위풍당당하게 떠오릅니다. 변신해 있는 동안 열매 데미지가 20% 강해집니다. 쿨다운 없이 V를 다시 누르면 언제든 원래 모습으로 돌아올 수 있습니다.",
+        "용의 본모습으로 변신해, 몸집이 5배 커지고 하늘을 자유로이 날아다닐 수 있습니다. 변신해 있는 동안 열매 데미지가 3배 강해집니다. 쿨다운 없이 V를 다시 누르면 언제든 원래 모습으로 돌아올 수 있습니다.",
     },
   ],
 };
