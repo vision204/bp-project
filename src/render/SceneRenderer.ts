@@ -169,7 +169,11 @@ const DRAGON_FLIGHT_MODEL_PATH = "models/skills/dragon_f.glb";
  * 상태에서의 최선의 추정치이며, "거꾸로(꼬리부터) 난다"는 피드백을 받으면
  * +Math.PI/2로 부호를 반대로 바꿔야 할 수 있습니다.
  */
-const DRAGON_FLIGHT_BASE_YAW = -Math.PI / 2;
+// 사용자 피드백(재조정): 위 -Math.PI/2 값으로는 여전히 오른쪽을 보고 있었습니다.
+// "왼쪽으로 90도 더 돌려야 한다"는 피드백에 따라 -Math.PI/2를 추가로 더 빼서
+// -Math.PI로 조정합니다. 그래도 방향이 안 맞으면(예: 이제 반대로 왼쪽을
+// 지나쳤다거나 뒤를 본다면) 부호/크기를 정확히 알려주세요.
+const DRAGON_FLIGHT_BASE_YAW = -Math.PI;
 /** 캐릭터를 완전히 대신하는 몸이므로, 기존 오라들과 같은 "만화처럼 거대한" 스케일을 그대로 씁니다. */
 const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE;
 
@@ -187,7 +191,10 @@ const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE;
 // 분리해뒀습니다(0=보정 없음 — 실제로 화면에서 확인하기 전까지는 최선의
 // 추정치입니다).
 const DRAGON_FORM_MODEL_PATH = "models/skills/dragon_v.glb";
-const DRAGON_FORM_YAW_OFFSET = 0;
+// 사용자 피드백(재조정): 0(보정 없음)으로는 오른쪽을 보고 있었습니다. "왼쪽으로
+// 90도 돌려야 한다"는 피드백에 따라 -Math.PI/2로 조정합니다. 그래도 방향이 안
+// 맞으면 정확한 방향(얼마나 더/덜 돌아야 하는지)을 알려주세요.
+const DRAGON_FORM_YAW_OFFSET = -Math.PI / 2;
 /**
  * 사용자 요청("변신했을 때 크기를 지금보다 5배 더 키워줘")에 따라, 기존
  * 캐릭터-대신 스케일(SKILL_MODEL_SCALE, F 비행과 같았던 기준값)에 5배를
@@ -264,6 +271,12 @@ const CAMERA_HEIGHT_OFFSET = 1.6;
 // (그러지 않으면 카메라가 선체·돛 안쪽에 들어가 화면이 가려집니다)
 const BOAT_CAMERA_DISTANCE = 13;
 const BOAT_CAMERA_HEIGHT_OFFSET = 5;
+// 용으로 변신(V)하면 몸이 5배(DRAGON_FORM_SCALE_MULTIPLIER)로 커지므로, 배와
+// 같은 이유로 카메라도 뒤로 빼고 높여줍니다 — 사용자 요청: "커지는건 좋은데
+// 카메라 시점도 같이 더 높아졌으면 좋겠어". 배(1.6→5, 약 3.1배 / 6→13, 약
+// 2.2배)와 비슷한 비율로 올렸습니다.
+const DRAGON_FORM_CAMERA_DISTANCE = 14;
+const DRAGON_FORM_CAMERA_HEIGHT_OFFSET = 6;
 
 // 기본 공격(좌클릭) 검 휘두르기 — 짧고 빠르게 한 번 쳤다가 되돌아옵니다.
 const ATTACK_SWING_DURATION_MS = 220;
@@ -2091,12 +2104,6 @@ export class SceneRenderer {
     // 거리는 마우스 휠로 조절하며(로블록스식), 끝까지 당기면 1인칭이 됩니다.
     const riding = state.boat.riding;
     const zoom = playerController.camDistance;
-    // 배를 탔을 때는 배가 커서 기본 거리가 더 멀어야 합니다 (휠 조절은 그대로 반영).
-    const camDist = riding ? Math.max(4, zoom + BOAT_CAMERA_DISTANCE - CAMERA_DISTANCE) : zoom;
-    const camHeight = riding ? BOAT_CAMERA_HEIGHT_OFFSET : CAMERA_HEIGHT_OFFSET;
-
-    // 1인칭: 내 캐릭터가 시야를 가리지 않도록 숨깁니다.
-    const firstPerson = !riding && zoom <= FIRST_PERSON_THRESHOLD;
     // 용의 비행 중에는 평소 블록형 캐릭터 대신 dragon_f.glb를 몸으로 보여주므로,
     // 평소 캐릭터는 통째로 숨깁니다(예전 dragon_f 오라 방식은 캐릭터를 숨기지
     // 않고 위에 덧씌우기만 했지만, "실제 몸을 대신"하라는 요청에 따라 바꿨습니다).
@@ -2106,6 +2113,17 @@ export class SceneRenderer {
     // 둘 다 켜져 있으면 비행 시각(dragonFlying)을 우선해서 보여주고 변신
     // 시각은 숨깁니다.
     const dragonFormOn = state.player.dragonFormActive && state.player.fruitDrawn && !dragonFlying;
+    // 배를 탔을 때 / 용으로 변신했을 때는 모델이 훨씬 커서 기본 거리·높이가
+    // 더 필요합니다 (휠 조절은 그대로 유지한 채 기준값만 올립니다).
+    const camDist = riding
+      ? Math.max(4, zoom + BOAT_CAMERA_DISTANCE - CAMERA_DISTANCE)
+      : dragonFormOn
+        ? Math.max(4, zoom + DRAGON_FORM_CAMERA_DISTANCE - CAMERA_DISTANCE)
+        : zoom;
+    const camHeight = riding ? BOAT_CAMERA_HEIGHT_OFFSET : dragonFormOn ? DRAGON_FORM_CAMERA_HEIGHT_OFFSET : CAMERA_HEIGHT_OFFSET;
+
+    // 1인칭: 내 캐릭터가 시야를 가리지 않도록 숨깁니다.
+    const firstPerson = !riding && zoom <= FIRST_PERSON_THRESHOLD;
     this.playerVisual.visible = !firstPerson && !dragonFlying && !dragonFormOn;
     if (this.dragonFormVisual) {
       this.dragonFormVisual.visible = dragonFormOn && !firstPerson;
