@@ -1,5 +1,8 @@
 import { initPhysics, createWorld } from "./core/PhysicsWorld";
 import { InputManager } from "./core/InputManager";
+import { isTouchDevice } from "./core/TouchDetect";
+import { ensureMobileViewportMeta } from "./ui/ViewportMeta";
+import { TouchInputManager, mergeInputSnapshots } from "./ui/TouchControls";
 import { createEnvironment, createIslands } from "./world/createIslands";
 import { createOcean } from "./world/createOcean";
 import * as islandHelpers from "./world/islands";
@@ -32,6 +35,12 @@ import { MultiplayerUI } from "./ui/MultiplayerUI";
 import { connectMultiplayerOrWait, defaultMultiplayerUrl } from "./ui/ConnectGate";
 import { TradeUI } from "./ui/TradeUI";
 import { canUseTeleport, TELEPORT_MAX_DISTANCE_M } from "./simulation/TeleportSystem";
+
+// 다른 어떤 DOM 작업(시작 화면 조회 등)보다도 먼저 뷰포트 메타 태그를
+// 챙겨둡니다 — 모바일 브라우저가 데스크톱 폭 기준으로 렌더링해서 레이아웃이
+// 깨지고 확대/축소까지 되는 것을 막습니다. (index.html이 없는 이 프로젝트
+// 구조상 정적 <meta> 태그를 넣어둘 곳이 없어 여기서 런타임에 만듭니다.)
+ensureMobileViewportMeta();
 
 export interface StartChoice {
   faction: Faction;
@@ -124,8 +133,9 @@ function chooseStart(
   );
 
   // 시작 화면 마크업이 없는 환경(테스트 하네스 등)에서는 그냥 통과시킵니다.
+  // 그런 환경이라도 터치 기기로 감지되면 성능 우선 모드로 시작하는 게 맞습니다.
   if (!screen || factionButtons.length === 0) {
-    return Promise.resolve({ faction: "pirate", mode: "normal" });
+    return Promise.resolve({ faction: "pirate", mode: isTouchDevice() ? "fast" : "normal" });
   }
 
   // 개발자 모드는 지정된 계정(또는 개발용 localhost)에서만 열립니다.
@@ -149,15 +159,31 @@ function chooseStart(
     let faction: Faction | null = null;
     let settled = false;
 
+    // 자동 테스트나 딥링크용 파라미터 — 아래 forcedFaction/forcedMode 처리와
+    // 같은 것을 가리키므로 여기서 한 번만 읽어 재사용합니다.
+    const params = new URLSearchParams(location.search);
+    // 딥링크(?mode=...)가 명시돼 있으면 그 값을 그대로 존중합니다 — 자동
+    // 테스트(e2e.mjs)나 북마크 진입 경로라 모바일 자동 선택이 끼어들면 안 됩니다.
+    const modeForcedByLink = params.has("mode");
+    // 모바일/터치 기기는 "모드"가 그래픽 성능 프리셋일 뿐 실제 게임플레이
+    // 선택(진영)과는 성격이 달라서, 사용자 요청대로 빠른 모드로 자동 결정하고
+    // 모드 선택 화면 자체를 건너뜁니다. 진영 선택은 그대로 물어봅니다.
+    const autoFastForTouch = isTouchDevice() && !modeForcedByLink;
+
     const pickFaction = (value: Faction) => {
       if (settled || faction) return;
       faction = value;
       if (factionStep) factionStep.hidden = true;
-      if (modeStep) modeStep.hidden = false;
       if (chosenLabel) {
         chosenLabel.textContent = `— ${FACTION_LABELS[value]}로 시작`;
         chosenLabel.classList.add(value);
       }
+      if (autoFastForTouch) {
+        if (status) status.textContent = "모바일 기기 감지 — 빠른 모드로 바로 시작합니다";
+        pickMode("fast");
+        return;
+      }
+      if (modeStep) modeStep.hidden = false;
       if (status) status.textContent = "모드를 선택하면 바로 시작합니다";
     };
 
@@ -201,7 +227,6 @@ function chooseStart(
     }
 
     // 자동 테스트나 딥링크용: ?mode=fast&faction=marine 을 붙이면 화면을 건너뜁니다.
-    const params = new URLSearchParams(location.search);
     const forcedFaction = params.get("faction");
     const forcedMode = params.get("mode");
     if (forcedFaction === "pirate" || forcedFaction === "marine") pickFaction(forcedFaction);
@@ -278,6 +303,9 @@ async function main() {
 
   const simulation = new Simulation(world, RAPIER_NS, faction, quality.devMode);
   const input = new InputManager(renderer.domElement);
+  // 터치 기기에서만 만들어 붙입니다 — 데스크톱에서는 이 레이어 자체가
+  // 존재하지 않아서 기존 마우스/키보드 입력 경로에 어떤 영향도 없습니다.
+  const touchInput = isTouchDevice() ? new TouchInputManager(appEl) : null;
   const panels = new PanelManager(appEl, {
     onAllocateStat: (stat) => simulation.allocateStat(stat),
     onBuyFruit: (fruitId) => simulation.buyFruit(fruitId),
@@ -406,6 +434,7 @@ async function main() {
     multiplayer,
     multiplayerUI,
     tradeUI,
+    touchInput,
   };
 
   hideStartScreen();
@@ -438,13 +467,23 @@ async function main() {
     const dt = Math.min(0.05, (now - lastTime) / 1000); // 탭 전환 등으로 인한 큰 dt 스파이크 방지
     lastTime = now;
 
-    const snapshot = input.consumeFrame();
+    // 터치 레이어가 있으면(모바일) 키보드/마우스 스냅샷과 합쳐서 하나의
+    // InputSnapshot으로 만듭니다 — 그 아래 시뮬레이션/전투 로직은 입력이
+    // 어디서 왔는지 전혀 모릅니다. 데스크톱은 touchInput이 애초에 null이라
+    // 병합 자체가 일어나지 않고 기존 동작 그대로입니다.
+    const kbSnapshot = input.consumeFrame();
+    const snapshot = touchInput ? mergeInputSnapshots(kbSnapshot, touchInput.consumeFrame()) : kbSnapshot;
 
     // I/C는 패널 열림 여부와 상관없이 항상 토글되어야 함 (닫을 때도 같은 키를 씀)
     if (snapshot.toggleInventoryPressed) panels.toggle("inventory");
     if (snapshot.toggleStatsPressed) panels.toggle("stats");
     // P — 개발자 패널 (개발자 모드에서만)
     if (snapshot.toggleDevPanelPressed && quality.devMode) panels.toggle("dev");
+
+    // 패널(상점 등)이나 거래창이 열려 있으면 조작부(조이스틱/카메라 드래그/
+    // 액션 버튼)를 숨깁니다 — 안 그러면 패널 위에 겹쳐 보이고, 패널을 만지는
+    // 손가락이 뒤에서 캐릭터를 움직이는 조이스틱으로 오인될 수 있습니다.
+    touchInput?.setSuppressed(panels.isBlocking() || tradeUI.isBlocking());
 
     // 패널이 열려 있는 동안은 이동·전투·상호작용 입력을 무시해서
     // 마우스로 버튼을 누르는 도중 캐릭터가 움직이거나 공격이 나가지 않게 함.
