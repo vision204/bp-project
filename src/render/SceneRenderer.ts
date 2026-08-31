@@ -56,12 +56,19 @@ const SKILL_MODEL_IDS = [
   "dark_z", "dark_x", "dark_c", "dark_v",
   "rubber_z", "rubber_x", "rubber_c", "rubber_v",
   "sand_z", "sand_x", "sand_c", "sand_v",
-  // 빛빛(Z/X/C/V + F 특수 능력)·용용(Z/X/C + F 특수 능력, V는 아직 미구현) —
+  // 빛빛(Z/X/C/V + F 특수 능력)·용용(Z/X/C/V + F 특수 능력) —
   // light_f/dragon_f는 일반 슬롯 스킬이 아니지만(skills.ts의 slot: -1 참고),
   // 이펙트/변신 GLB 로딩은 다른 스킬 GLB와 완전히 같은 방식(스킬 id로 파일명
   // 결정)이라 이 목록에 함께 둡니다.
   "light_z", "light_x", "light_c", "light_v", "light_f",
-  "dragon_z", "dragon_x", "dragon_c", "dragon_f",
+  // dragon_v는 이제 진짜 슬롯3 스킬(용으로 변신)입니다 — 발동 순간 다른
+  // 토글 스킬(sand_v·thunder_x)과 같은 "켤 때 한 번 재생되는 버스트" 이펙트를
+  // 위해 여기 목록에도 둡니다. 지속되는 변신 시각 자체는 이 목록과 무관하게
+  // dragonFormVisual(전용 독립 인스턴스, sync() 참고)이 담당합니다 —
+  // SKILL_AURA_IDS에는 넣지 않았습니다(그쪽은 playerVisual에 붙는 작은
+  // 오라용 메커니즘이라, "캐릭터 전체를 대신"해야 하는 이 변신에는 맞지
+  // 않습니다).
+  "dragon_z", "dragon_x", "dragon_c", "dragon_v", "dragon_f",
 ] as const;
 function skillModelPath(skillId: string): string {
   return `models/skills/${skillId}.glb`;
@@ -137,10 +144,12 @@ const SAND_BLADE_SCALE = NPC_HEIGHT_APPROX * 1.15;
 // ── 용의 비행(dragon_dragon, F 능력) 전용 — 실제 몸 전체를 용 모델로 바꿔치기 ──
 // 사용자 피드백: 기존 dragon_f 오라(몸을 감싸는 연출)는 "날아다니는 자세"가
 // 아니라 그냥 공중에 뜬 모습이었다고 함. public/models/skills/dragon_v.glb
-// (원래는 "V: 용으로 변신" 능력용으로 만들어졌지만 그 능력 자체는 이번
-// 작업 범위 밖 — skills.ts의 dragon_dragon 배열이 여전히 3개인 이유 참고)을
-// 재사용해서, 비행 중에는 캐릭터를 완전히 숨기고 이 GLB를 몸 대신 직접
-// 씬에 띄워 "몸을 쭉 펴고 하늘을 헤엄치는" 모습을 냅니다.
+// (원래 "V: 용으로 변신" 능력용으로 만들어진 모델 — 그 능력은 이제
+// skills.ts의 dragon_dragon 배열에 dragon_v로 실제 구현돼 있고, 이 파일
+// 아래쪽의 DRAGON_FORM_* 상수/dragonFormVisual이 그 변신 전용 자세를 따로
+// 담당합니다)을 F 비행에서도 재사용해서, 비행 중에는 캐릭터를 완전히
+// 숨기고 이 GLB를 몸 대신 직접 씬에 띄워 "몸을 쭉 펴고 하늘을 헤엄치는"
+// 모습을 냅니다.
 const DRAGON_FLIGHT_MODEL_PATH = "models/skills/dragon_v.glb";
 /**
  * dragon_v.glb의 로컬 바운딩 박스를 실제로 재보니(스크립트로 GLB의 JSON
@@ -160,6 +169,23 @@ const DRAGON_FLIGHT_MODEL_PATH = "models/skills/dragon_v.glb";
 const DRAGON_FLIGHT_BASE_PITCH = Math.PI / 2;
 /** 캐릭터를 완전히 대신하는 몸이므로, 기존 오라들과 같은 "만화처럼 거대한" 스케일을 그대로 씁니다. */
 const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE;
+
+// ── 용으로 변신(dragon_dragon, V 슬롯3) 전용 — 같은 dragon_v.glb를 다른 자세로 재사용 ──
+// F(용의 비행)는 "몸을 눕혀 헤엄치듯" 날아가는 자세라 로컬 X축 기준 +90도
+// (DRAGON_FLIGHT_BASE_PITCH)를 돌려 눕혔지만, 이건 완전히 다른 포즈입니다.
+// 사용자 피드백: "용 머리가 좌표 위를 향해야 하는데 옆으로 누워있어" — 즉
+// 변신 포즈에서는 F 비행의 눕히는 회전을 절대 재사용하면 안 되고, 모델이
+// 원래 만들어진 자세(가장 긴 축인 로컬 Y가 그대로 위를 향하는, "가만히 떠
+// 있는" 자세 — 이 파일 위쪽의 GLB 바운딩 박스 분석 주석 참고) 그대로 세워
+// 둬야 합니다. 그래서 피치/롤 보정은 아예 주지 않고(항등 회전), 캐릭터가
+// 보는 방향(yaw)만 반영합니다 — 모델의 "정면"이 이미 로컬 -Z(이 코드베이스의
+// 전방 축과 일치한다고 가정)를 보고 있지 않다면 요(yaw) 보정만 추가하면
+// 되므로, 그 여지를 위해 별도 상수로 분리해뒀습니다(0=보정 없음 — 실제로
+// 화면에서 확인하기 전까지는 최선의 추정치입니다).
+const DRAGON_FORM_MODEL_PATH = DRAGON_FLIGHT_MODEL_PATH;
+const DRAGON_FORM_YAW_OFFSET = 0;
+/** F 비행과 똑같이 캐릭터 전체를 대신하는 "만화처럼 거대한" 스케일. */
+const DRAGON_FORM_MODEL_SCALE = SKILL_MODEL_SCALE;
 /** 헤엄치듯 상하로 일렁이는 피치 진동 진폭(라디안) — 사용자 요청 범위(8~12도) 중간값. */
 const DRAGON_SWIM_PITCH_AMPLITUDE = (10 * Math.PI) / 180;
 /** 피치 진동 주파수(Hz) — 사용자 요청 범위(1.2~1.8Hz) 중간값. */
@@ -863,6 +889,15 @@ export class SceneRenderer {
    * 계산해서 따라다니게 합니다(sync() 참고).
    */
   private dragonFlightVisual: THREE.Group | null = null;
+  /**
+   * 용으로 변신(V, dragon_v)의 dragonFlightVisual과는 별개인 독립 인스턴스 —
+   * 같은 dragon_v.glb를 쓰지만 회전(자세)이 완전히 다르고(DRAGON_FORM_YAW_OFFSET
+   * vs DRAGON_FLIGHT_BASE_PITCH), F 비행과 V 변신은 게이팅상 동시에 켜질 수
+   * 있으므로(둘 다 fruitDrawn && dragon_dragon 조건만 봄) 하나의 트랜스폼을
+   * 공유하면 서로 덮어씁니다. sync()가 두 상태가 동시에 켜져 있으면 비행
+   * 시각을 우선(dragonFlightVisual만 보이고 이건 숨김)합니다.
+   */
+  private dragonFormVisual: THREE.Group | null = null;
   private readonly gltfLoader: GLTFLoader;
   private enemyVisuals = new Map<string, EnemyVisual>();
   private npcVisuals = new Map<string, NpcVisual>();
@@ -1000,6 +1035,7 @@ export class SceneRenderer {
       this.loadSkillModel(skillId);
     }
     this.loadDragonFlightVisual();
+    this.loadDragonFormVisual();
 
     window.addEventListener("resize", () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -1107,6 +1143,29 @@ export class SceneRenderer {
       undefined,
       (err) => {
         console.warn("용의 비행 모델을 불러오지 못했습니다 (dragon_v):", err);
+      },
+    );
+  }
+
+  /**
+   * 용으로 변신(V) 전용 dragon_v.glb 인스턴스 — dragonFlightVisual과 완전히
+   * 별개로 한 번 더 불러옵니다(같은 파일이지만 자세가 다르고 두 상태가
+   * 동시에 켜질 수 있어 트랜스폼을 공유하면 안 됩니다).
+   */
+  private loadDragonFormVisual() {
+    const url = `${import.meta.env.BASE_URL}${DRAGON_FORM_MODEL_PATH}`;
+    this.gltfLoader.load(
+      url,
+      (gltf) => {
+        const normalized = normalizeAndCenterModel(gltf.scene, 1);
+        normalized.scale.setScalar(DRAGON_FORM_MODEL_SCALE);
+        normalized.visible = false;
+        this.scene.add(normalized);
+        this.dragonFormVisual = normalized;
+      },
+      undefined,
+      (err) => {
+        console.warn("용으로 변신 모델을 불러오지 못했습니다 (dragon_v):", err);
       },
     );
   }
@@ -2033,7 +2092,31 @@ export class SceneRenderer {
     // 평소 캐릭터는 통째로 숨깁니다(예전 dragon_f 오라 방식은 캐릭터를 숨기지
     // 않고 위에 덧씌우기만 했지만, "실제 몸을 대신"하라는 요청에 따라 바꿨습니다).
     const dragonFlying = state.player.dragonFlightActive && state.player.fruitDrawn;
-    this.playerVisual.visible = !firstPerson && !dragonFlying;
+    // 용으로 변신(V) — F(비행)와 게이팅이 같아(둘 다 fruitDrawn && dragon_dragon만
+    // 봄) 이론상 동시에 켜질 수 있습니다. 가장 단순하고 안전한 우선순위로,
+    // 둘 다 켜져 있으면 비행 시각(dragonFlying)을 우선해서 보여주고 변신
+    // 시각은 숨깁니다.
+    const dragonFormOn = state.player.dragonFormActive && state.player.fruitDrawn && !dragonFlying;
+    this.playerVisual.visible = !firstPerson && !dragonFlying && !dragonFormOn;
+    if (this.dragonFormVisual) {
+      this.dragonFormVisual.visible = dragonFormOn && !firstPerson;
+      if (dragonFormOn) {
+        // 눕히는 피치 보정(DRAGON_FLIGHT_BASE_PITCH) 없이, 모델이 원래
+        // 만들어진 자세(가장 긴 축인 로컬 Y가 위를 향함) 그대로 세워두고
+        // yaw(보는 방향)만 반영합니다 — "머리가 옆으로 누워있다"는 피드백의
+        // 원인이었던 F 비행용 회전을 여기서는 절대 재사용하지 않습니다.
+        const formYawQuat = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          state.player.yaw + DRAGON_FORM_YAW_OFFSET,
+        );
+        this.dragonFormVisual.quaternion.copy(formYawQuat);
+        this.dragonFormVisual.position.set(
+          state.player.position.x,
+          state.player.position.y + NPC_HEIGHT_APPROX / 2,
+          state.player.position.z,
+        );
+      }
+    }
     if (this.dragonFlightVisual) {
       this.dragonFlightVisual.visible = dragonFlying && !firstPerson;
       if (dragonFlying) {

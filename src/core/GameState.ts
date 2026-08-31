@@ -395,6 +395,16 @@ export interface PlayerState {
   dragonFlightCooldownRemainingSec: number;
 
   /**
+   * 용으로 변신(V, dragon_v)이 지금 켜져 있는지 — 사막의 대검(sandBladeActive)과
+   * 같은 순수 토글로, **일반 Z/X/C/V 4슬롯 시스템에 속한 진짜 슬롯3 스킬**입니다
+   * (F의 용의 비행 dragonFlightActive와는 완전히 별개 — 둘 다 켜질 수 있고,
+   * SceneRenderer.ts는 그 경우 비행 시각을 우선합니다). 켜져 있는 동안
+   * CombatSystem.ts가 player.fruitBuffMultiplier를 1+dragonFormDamageMultiplierBonus로
+   * 세팅합니다. 저장되지 않는 일시적 상태입니다(SaveData.ts).
+   */
+  dragonFormActive: boolean;
+
+  /**
    * 두 번째 바다를 한 번이라도 연 적이 있는지.
    * 첫 항해에만 Lv.1100이 필요하고, 그 뒤로는 레벨과 상관없이 왕복할 수 있게
    * 하려고 따로 들고 있습니다 (돌아왔다가 갇히는 일이 없도록).
@@ -647,6 +657,7 @@ export function createInitialGameState(
       lightFormRemainingSec: 0,
       dragonFlightActive: false,
       dragonFlightCooldownRemainingSec: 0,
+      dragonFormActive: false,
       events: [],
     },
     enemies: [],

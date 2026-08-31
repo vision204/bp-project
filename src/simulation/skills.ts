@@ -147,6 +147,16 @@ export interface SkillDef {
    */
   flightManaDrainPerSec?: number;
 
+  /**
+   * (용으로 변신 전용) 변신 중 열매 데미지에 곱해지는 추가 배율(0.2 = +20%).
+   * 사막의 대검(sandBladeActive)과 같은 "누를 때까지 무제한 지속" 토글이며,
+   * 켜져 있는 동안은 player.fruitBuffMultiplier에 1+이 값을 직접 세팅합니다 —
+   * 기어 세컨드(rubber_v)가 쓰는 것과 같은 필드지만, 그쪽은 selfBuffDurationSec
+   * 타이머로 자동 만료되는 반면 이건 시간제한 없이 V로 다시 끌 때까지
+   * 유지됩니다(CombatSystem.ts의 isToggleActive/setToggleActive 참고).
+   */
+  dragonFormDamageMultiplierBonus?: number;
+
   description: string;
 }
 
@@ -709,11 +719,27 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       originAtMouse: true,
       description: "용의 브레스로 좁고 강한 화염을 길게 내뿜습니다.",
     },
-    // 슬롯 3(V, 용으로 변신)은 사용자 요청으로 이번 작업 범위에서 제외했습니다
-    // (추후 별도 작업으로 구현 예정). skillsForFruit()/HUD/CombatSystem 모두
-    // skills[slot]이 undefined면 그냥 건너뛰도록 이미 짜여 있어서(4개가 꽉
-    // 차 있어야 한다는 가정이 코드 어디에도 없음을 확인했습니다), 여기서는
-    // "잠긴 슬롯" 가짜 placeholder를 넣지 않고 배열을 3개로 짧게 둡니다.
+    {
+      id: "dragon_v",
+      name: "용으로 변신",
+      slot: 3,
+      // light_v와 같은 예외적 조기 해금(다른 열매 슬롯3은 100) — 사용자 확인
+      // 요청("V를 지금 정식 구현")에 따라 light_v와 같은 수준으로 맞췄습니다.
+      unlockFruitLevel: 75,
+      // 사막의 대검(sand_v)과 같은 패턴 — 쿨다운 없이 V로 장착/해제하는
+      // 무제한 지속 토글입니다. 끌 때는 마나도 쿨다운도 소모하지 않고,
+      // 켤 때만 manaCost가 듭니다(CombatSystem.ts의 setToggleActive 참고).
+      cooldownSec: 0,
+      toggle: true,
+      manaCost: 30,
+      // 직접 데미지를 주는 스킬이 아니라 순수 자기 강화형 변신입니다(사막의
+      // 대검처럼 damage:0 + shape:self — thunder_x도 같은 패턴).
+      damage: 0,
+      shape: { kind: "self" },
+      dragonFormDamageMultiplierBonus: 0.2,
+      description:
+        "용의 본모습으로 변신해, 머리를 하늘로 향한 채 위풍당당하게 떠오릅니다. 변신해 있는 동안 열매 데미지가 20% 강해집니다. 쿨다운 없이 V를 다시 누르면 언제든 원래 모습으로 돌아올 수 있습니다.",
+    },
   ],
 };
 

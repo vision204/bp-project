@@ -1237,12 +1237,12 @@ stepInteraction(flow, makeInput({ interactPressed: true })); // 재수락
 applyKillsToQuests(flow, kills("pirate_start", 7));
 assert(fp.level > 30, `버프 중엔 90% x2 = 180%라 레벨업 발생 (Lv.${fp.level})`);
 
-section("스킬 카탈로그 (기존 열매 6종 × Z/X/C/V = 24개 + 빛빛 4개 + 용용 3개(V 제외) = 31개)");
+section("스킬 카탈로그 (기존 열매 6종 × Z/X/C/V = 24개 + 빛빛 4개 + 용용 4개 = 32개)");
 const skills = allSkills();
 // 빛빛/용용의 F 전용 능력(LIGHT_FLIGHT_SKILL/DRAGON_FLIGHT_SKILL)은 slot: -1로
 // 일반 4슬롯 시스템 밖에 있으므로 FRUIT_SKILLS(따라서 allSkills())에 포함되지
 // 않습니다 — 별도로 export되어 있고, 위 섹션에서 이미 따로 검증했습니다.
-assert(skills.length === 31, `총 스킬 ${skills.length}개`);
+assert(skills.length === 32, `총 스킬 ${skills.length}개`);
 const fruitIds = ["magma_fist", "ice_lance", "thunder_strike", "dark_wave", "rubber_barrage", "sand_storm"];
 for (const fid of fruitIds) {
   const fs = skillsForFruit(fid);
@@ -1253,14 +1253,14 @@ for (const fid of fruitIds) {
     `${fid}: 해금 레벨 1/25/50/100`,
   );
 }
-// 빛빛/용용은 자체 밸런스 수치(unlockFruitLevel 1/25/50/75, 1/25/50)를 쓰므로
+// 빛빛/용용은 자체 밸런스 수치(unlockFruitLevel 1/25/50/75)를 쓰므로
 // 위 6종 전용 루프(해금 레벨 1/25/50/100 고정)와 별도로 슬롯 순서만 확인합니다.
 for (const fid of ["light_light", "dragon_dragon"]) {
   const fs = skillsForFruit(fid);
-  assert(fs.every((sk, i) => sk.slot === i), `${fid}: 슬롯이 Z/X/C(/V) 순서대로`);
+  assert(fs.every((sk, i) => sk.slot === i), `${fid}: 슬롯이 Z/X/C/V 순서대로`);
 }
-assert(new Set(skills.map((sk) => sk.id)).size === 31, "스킬 id가 모두 고유함");
-assert(new Set(skills.map((sk) => sk.name)).size === 31, "스킬 이름이 모두 고유함");
+assert(new Set(skills.map((sk) => sk.id)).size === 32, "스킬 id가 모두 고유함");
+assert(new Set(skills.map((sk) => sk.name)).size === 32, "스킬 이름이 모두 고유함");
 assert(JSON.stringify(SLOT_UNLOCK_LEVELS) === JSON.stringify([1, 25, 50, 100]), `해금 레벨 상수 ${SLOT_UNLOCK_LEVELS}`);
 assert(JSON.stringify(SLOT_KEYS) === JSON.stringify(["Z", "X", "C", "V"]), "키 배치 Z/X/C/V");
 // 슬롯이 뒤로 갈수록 강해지는지 (자기강화형 V는 damage 0이라 제외)
@@ -1718,11 +1718,8 @@ section("빛빛/용용 열매 — 카탈로그·Z/X/C(/V) 스킬 정의");
   assert(light[3].id === "light_v" && light[3].damage === 62 && light[3].unlockFruitLevel === 75, "광속 일격 수치");
 
   const dragon = skillsForFruit("dragon_dragon");
-  // 사용자 요청으로 V(용으로 변신)는 이번 범위에서 제외 — skillsForFruit()/HUD/
-  // CombatSystem 모두 undefined 슬롯을 그냥 건너뛰도록 이미 짜여 있음을 확인했으므로
-  // (배열 길이가 항상 4여야 한다는 가정이 코드 어디에도 없음), 가짜 "잠긴 V" placeholder를
-  // 넣지 않고 배열을 3개로 짧게 뒀습니다.
-  assert(dragon.length === 3, `용용은 이번 범위에서 Z/X/C 3개만 구현(V는 추후 별도 작업) (실제 ${dragon.length}개)`);
+  // V(용으로 변신, dragon_v)가 이제 진짜 슬롯3 스킬로 구현되어 4개가 됩니다.
+  assert(dragon.length === 4, `용용은 Z/X/C/V 4개 스킬 (실제 ${dragon.length}개)`);
   assert(dragon[0].id === "dragon_z" && dragon[0].damage === 18 && dragon[0].shape.kind === "line", "용의 발톱: 직선 판정");
   // 사용자 요청으로 용의 발톱 사정거리를 두 배로 늘렸습니다 (8 → 16).
   assert(dragon[0].shape.range === 16, `용의 발톱: 사정거리 2배 확장(16m) (실제 ${dragon[0].shape.range}m)`);
@@ -1732,7 +1729,71 @@ section("빛빛/용용 열매 — 카탈로그·Z/X/C(/V) 스킬 정의");
   assert(dragon[2].id === "dragon_c" && dragon[2].damage === 46 && dragon[2].shape.kind === "cone", "용의 화염: 부채꼴 판정");
   // 사용자 요청으로 용의 화염 사정거리를 두 배로 늘렸습니다 (11 → 22). halfAngleDeg는 그대로.
   assert(dragon[2].shape.range === 22 && dragon[2].shape.halfAngleDeg === 20, `용의 화염: 사정거리 2배 확장(22m), 각도 유지(20도) (실제 ${dragon[2].shape.range}m / ${dragon[2].shape.halfAngleDeg}도)`);
-  assert(dragon.every((sk) => sk.originAtMouse === true), "용용의 모든 공격 스킬이 마우스 방향으로 발사됨");
+  assert(dragon[0].originAtMouse === true && dragon[1].originAtMouse === true && dragon[2].originAtMouse === true, "용용의 공격 스킬(Z/X/C)이 마우스 방향으로 발사됨");
+  assert(dragon[3].id === "dragon_v" && dragon[3].name === "용으로 변신", `용으로 변신: id/이름 확인 (실제 "${dragon[3].name}")`);
+  assert(dragon[3].toggle === true, "용으로 변신: 토글 스킬로 등록됨");
+  assert(dragon[3].cooldownSec === 0, `용으로 변신: 사막의 대검과 같은 패턴 — 쿨다운 없음 (실제 ${dragon[3].cooldownSec}초)`);
+  assert(dragon[3].damage === 0 && dragon[3].shape.kind === "self", "용으로 변신: 순수 자기강화형(damage 0, self)");
+  assert(dragon[3].dragonFormDamageMultiplierBonus === 0.2, `용으로 변신: 데미지 +20% 버프 (실제 +${dragon[3].dragonFormDamageMultiplierBonus * 100}%)`);
+}
+
+section("밸런스 — 용으로 변신 (용용 열매 V, 쿨다운 없이 토글로 변신/해제)");
+{
+  const dragonV = skillsForFruit("dragon_dragon")[3];
+
+  const pDragonForm = freshPlayer();
+  pDragonForm.equippedFruit = "dragon_dragon";
+  pDragonForm.fruitLevel = 100; // V 해금(SLOT_UNLOCK_LEVELS[3]=100)
+  pDragonForm.fruitDrawn = true;
+  pDragonForm.mana = 999;
+  pDragonForm.events = [];
+  assert(pDragonForm.dragonFormActive === false, "평소엔 변신 안 되어 있음");
+  assert(pDragonForm.fruitBuffMultiplier === 1, "평소엔 열매 데미지 배율 1배");
+
+  // 변신 — 토글 ON, 마나 소모, 데미지 배율 상승
+  const manaBeforeOn = pDragonForm.mana;
+  tapSkill(0.016, pDragonForm, [], 3);
+  assert(pDragonForm.dragonFormActive === true, "V로 용으로 변신 발동됨");
+  assert(pDragonForm.mana === manaBeforeOn - dragonV.manaCost, `변신에는 manaCost(${dragonV.manaCost}) 만큼 마나가 듦`);
+  assert(Math.abs(pDragonForm.fruitBuffMultiplier - (1 + dragonV.dragonFormDamageMultiplierBonus)) < 0.001, `변신 중엔 열매 데미지 배율이 ${1 + dragonV.dragonFormDamageMultiplierBonus}배로 상승 (실제 ${pDragonForm.fruitBuffMultiplier}배)`);
+
+  // 실제 열매 스킬 데미지에도 그 배율이 곱해지는지 확인 (dragon_z로 검증)
+  const eForm = makeEnemy("dragonFormTarget", 10000, 10);
+  eForm.position = { x: 0, y: 1, z: 5 };
+  pDragonForm.position = { x: 0, y: 1, z: 0 };
+  pDragonForm.aimYaw = 0;
+  pDragonForm.fruitSkillCooldowns = [0, 0, 0, 0];
+  tapSkill(0.016, pDragonForm, [eForm], 0); // dragon_z
+  const dmgWithForm = 10000 - eForm.hp;
+  assert(dmgWithForm > 0, "변신 중에도 다른 슬롯 스킬(용의 발톱)이 정상 발동됨");
+
+  // 시간이 아무리 지나도(쿨다운/지속시간 개념이 없으므로) 저절로 꺼지지 않음
+  stepCombat(999, input(), pDragonForm, []);
+  assert(pDragonForm.dragonFormActive === true, "시간이 지나도 저절로 풀리지 않음(다시 눌러야 함)");
+  assert(pDragonForm.fruitBuffMultiplier > 1, "지속시간 타이머가 없으므로 fruitBuffRemainingSec 만료로도 안 풀림");
+
+  // 다시 V — 쿨다운 없이 즉시 해제, 마나도 안 들고 배율도 원복
+  const manaBeforeOff = pDragonForm.mana;
+  tapSkill(0.016, pDragonForm, [], 3);
+  assert(pDragonForm.dragonFormActive === false, "다시 V를 누르면 쿨다운 없이 즉시 해제됨");
+  assert(pDragonForm.mana === manaBeforeOff, "해제할 때는 마나가 들지 않음");
+  assert(pDragonForm.fruitBuffMultiplier === 1, "해제 후 데미지 배율 원복");
+
+  // 곧바로 다시 변신해도 쿨다운에 막히지 않음
+  pDragonForm.mana = 999;
+  tapSkill(0.016, pDragonForm, [], 3);
+  assert(pDragonForm.dragonFormActive === true, "해제 직후에도 쿨다운 없이 바로 다시 변신 가능");
+
+  // 레벨 미달이면 V 자체가 잠김(SLOT_UNLOCK_LEVELS[3]=100 기준)
+  const pLocked = freshPlayer();
+  pLocked.equippedFruit = "dragon_dragon";
+  pLocked.fruitLevel = 99;
+  pLocked.fruitDrawn = true;
+  pLocked.mana = 999;
+  pLocked.events = [];
+  tapSkill(0.016, pLocked, [], 3);
+  assert(pLocked.dragonFormActive === false, "열매 Lv.99(슬롯3 해금 전)에서는 V가 발동하지 않음");
+  assert(pLocked.events.some((e) => e.type === "skill_locked"), "잠긴 V를 누르면 skill_locked 이벤트가 뜸");
 }
 
 section("빛빛/용용 F 특수 능력 — 일반 4슬롯 시스템과 무관한 독립 필드");

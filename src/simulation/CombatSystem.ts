@@ -589,6 +589,7 @@ function isToggleActive(player: PlayerState, skill: SkillDef): boolean {
   if (skill.id === "ice_x") return player.iceWalkActive;
   if (skill.id === "thunder_x") return player.lightningFormRemainingSec > 0;
   if (skill.id === "sand_v") return player.sandBladeActive;
+  if (skill.id === "dragon_v") return player.dragonFormActive;
   return false;
 }
 
@@ -603,5 +604,13 @@ function setToggleActive(player: PlayerState, skill: SkillDef, active: boolean, 
     // 쿨다운 없이 V로 장착/해제 — 뇌광 질주와 달리 시간 제한 없이 다시 누를
     // 때까지 그대로 유지됩니다(사용자 요청).
     player.sandBladeActive = active;
+  } else if (skill.id === "dragon_v") {
+    // 용으로 변신 — 사막의 대검과 같은 무제한 지속 토글. 켜질 때 열매 데미지
+    // 배율(fruitBuffMultiplier)을 직접 세팅하고, 꺼질 때 1로 되돌립니다.
+    // rubber_v(기어 세컨드)와 달리 fruitBuffRemainingSec 타이머를 쓰지 않으므로
+    // (0인 채로 둠) stepCombat의 자동 만료 로직과 충돌하지 않습니다 — 오직 V를
+    // 다시 눌러야만 꺼집니다.
+    player.dragonFormActive = active;
+    player.fruitBuffMultiplier = active ? 1 + (skill.dragonFormDamageMultiplierBonus ?? 0) : 1;
   }
 }
