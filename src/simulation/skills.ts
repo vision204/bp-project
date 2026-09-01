@@ -174,7 +174,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 1,
       cooldownSec: 2.5,
       manaCost: 10,
-      damage: 14,
+      damage: 7,
       shape: { kind: "radial", radius: 3.5 },
       chargeable: true,
       maxChargeSec: 1,
@@ -189,7 +189,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 25,
       cooldownSec: 6,
       manaCost: 22,
-      damage: 18,
+      damage: 9,
       // 사용자 요청: 사정거리를 더 늘려달라고 해서 7→12로 확장했습니다.
       shape: { kind: "cone", range: 12, halfAngleDeg: 35 },
       originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
@@ -208,7 +208,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 50,
       cooldownSec: 12,
       manaCost: 35,
-      damage: 19,
+      damage: 10,
       shape: { kind: "radial", radius: 6 },
       originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       requireMouseInRange: true, // 사용자 요청: 마우스가 너무 멀면 사용 불가
@@ -227,7 +227,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 100,
       cooldownSec: 22,
       manaCost: 60,
-      damage: 50,
+      damage: 25,
       shape: { kind: "radial", radius: 11 },
       originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       requireMouseInRange: true, // 사용자 요청: 마우스가 너무 멀면 사용 불가
@@ -250,7 +250,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 1,
       cooldownSec: 2,
       manaCost: 9,
-      damage: 11,
+      damage: 6,
       shape: { kind: "line", range: 6, width: 1.8 },
       originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       slowFactor: 0.5,
@@ -283,7 +283,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 50,
       cooldownSec: 13,
       manaCost: 30,
-      damage: 12,
+      damage: 6,
       shape: { kind: "radial", radius: 6 },
       originAtAim: true, // 발밑이 아니라 조준한 곳에 감옥이 생김 (마우스 정보 없을 때 폴백)
       originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
@@ -301,7 +301,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 100,
       cooldownSec: 24,
       manaCost: 58,
-      damage: 33,
+      damage: 16,
       shape: { kind: "radial", radius: 12 },
       originAtAim: true, // 발밑이 아니라 조준한 곳을 중심으로 퍼짐 (마우스 정보 없을 때 폴백)
       originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
@@ -323,7 +323,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 1,
       cooldownSec: 1.4,
       manaCost: 7,
-      damage: 9,
+      damage: 4,
       // 사용자 요청: "마우스 위치로 이동하는 게 아니라 마우스 위치에 번개가
       // 치게" — 돌진(dashDistance)을 완전히 없애고, 낙뢰(thunder_c)처럼
       // 제자리에서 마우스가 가리키는 지점에 번개를 내리꽂는 radial 스킬로
@@ -360,7 +360,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 50,
       cooldownSec: 10,
       manaCost: 26,
-      damage: 23,
+      damage: 12,
       shape: { kind: "radial", radius: 16 },
       originAtAim: true, // 발밑이 아니라 조준한 곳에 번개가 떨어짐 (마우스 정보 없을 때 폴백)
       originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
@@ -378,7 +378,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 100,
       cooldownSec: 22,
       manaCost: 56,
-      damage: 72,
+      damage: 36,
       shape: { kind: "line", range: 24, width: 3.2 },
       originAtMouse: true, // 사용자 요청: 마우스 위치로 재조준되어 그 방향으로 발사
       chargeable: true,
@@ -398,7 +398,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 1,
       cooldownSec: 2.6,
       manaCost: 10,
-      damage: 13,
+      damage: 6,
       // 사용자 요청: 사정거리를 더 늘려달라고 해서 5→9로 확장했습니다.
       shape: { kind: "cone", range: 9, halfAngleDeg: 40 },
       originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
@@ -417,7 +417,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 25,
       cooldownSec: 8,
       manaCost: 22,
-      damage: 15,
+      damage: 8,
       shape: { kind: "radial", radius: 5 },
       originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       healPercentOfMaxHp: 0.08,
@@ -436,7 +436,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 50,
       cooldownSec: 14,
       manaCost: 35,
-      damage: 25,
+      damage: 12,
       shape: { kind: "radial", radius: 7 },
       originAtAim: true, // 발밑이 아니라 조준한 곳에 중력정이 생김 (마우스 정보 없을 때 폴백)
       originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
@@ -456,7 +456,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 100,
       cooldownSec: 26,
       manaCost: 65,
-      damage: 61,
+      damage: 30,
       shape: { kind: "radial", radius: 12 },
       originAtMouse: true, // 사용자 요청: 마우스 위치에서 발생
       healPercentOfMaxHp: 0.2,
@@ -478,7 +478,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 1,
       cooldownSec: 1.8,
       manaCost: 8,
-      damage: 10,
+      damage: 5,
       shape: { kind: "line", range: 7, width: 1.6 },
       originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       // Z를 꾹 눌러 팔을 뒤로 당겼다가(차지) 놓으면 튕겨나가듯 발동 — 오래
@@ -498,7 +498,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 25,
       cooldownSec: 5,
       manaCost: 14,
-      damage: 11,
+      damage: 6,
       shape: { kind: "line", range: 14, width: 2 },
       originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사(돌진 방향도 함께 재조준)
       dashDistance: 14,
@@ -511,7 +511,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 50,
       cooldownSec: 9,
       manaCost: 26,
-      damage: 23,
+      damage: 12,
       shape: { kind: "cone", range: 8, halfAngleDeg: 70 },
       originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       slowFactor: 0.4,
@@ -542,7 +542,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 1,
       cooldownSec: 2.2,
       manaCost: 9,
-      damage: 10,
+      damage: 5,
       shape: { kind: "cone", range: 6, halfAngleDeg: 45 },
       originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       chargeable: true,
@@ -558,7 +558,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 25,
       cooldownSec: 6,
       manaCost: 18,
-      damage: 14,
+      damage: 7,
       shape: { kind: "line", range: 10, width: 2 },
       originAtMouse: true, // 사용자 요청: 앞으로 나가는 스킬도 마우스 방향으로 발사
       burnDps: 8,
@@ -576,7 +576,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 50,
       cooldownSec: 11,
       manaCost: 30,
-      damage: 16,
+      damage: 8,
       shape: { kind: "radial", radius: 8 },
       slowFactor: 0.5,
       slowDurationSec: 3,
@@ -600,7 +600,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 0,
       toggle: true,
       manaCost: 58,
-      damage: 52,
+      damage: 26,
       shape: { kind: "radial", radius: 13 },
       burnDps: 14,
       burnDurationSec: 5,
@@ -629,7 +629,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 1,
       cooldownSec: 1.3,
       manaCost: 7,
-      damage: 9,
+      damage: 4,
       // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 12→24로 확장했습니다.
       shape: { kind: "line", range: 24, width: 1.4 },
       originAtMouse: true,
@@ -642,7 +642,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 25,
       cooldownSec: 3.5,
       manaCost: 15,
-      damage: 14,
+      damage: 7,
       // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 9→18로 확장했습니다.
       shape: { kind: "line", range: 18, width: 1.8 },
       originAtMouse: true,
@@ -655,7 +655,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 50,
       cooldownSec: 9,
       manaCost: 27,
-      damage: 24,
+      damage: 12,
       shape: { kind: "radial", radius: 5 },
       originAtMouse: true,
       originAtAim: true,
@@ -668,7 +668,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 75,
       cooldownSec: 16,
       manaCost: 34,
-      damage: 34,
+      damage: 17,
       shape: { kind: "radial", radius: 6 },
       originAtMouse: true,
       originAtAim: true,
@@ -685,7 +685,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 1,
       cooldownSec: 1.5,
       manaCost: 8,
-      damage: 10,
+      damage: 5,
       // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 8→16으로 확장했습니다.
       shape: { kind: "line", range: 16, width: 1.6 },
       originAtMouse: true,
@@ -698,7 +698,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 25,
       cooldownSec: 6,
       manaCost: 20,
-      damage: 16,
+      damage: 8,
       // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 10→20으로 확장했습니다
       // (halfAngleDeg는 요청 범위 밖이라 그대로 뒀습니다).
       shape: { kind: "cone", range: 20, halfAngleDeg: 35 },
@@ -712,7 +712,7 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       unlockFruitLevel: 50,
       cooldownSec: 9,
       manaCost: 28,
-      damage: 25,
+      damage: 12,
       // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 11→22로 확장했습니다
       // (halfAngleDeg는 요청 범위 밖이라 그대로 뒀습니다).
       shape: { kind: "cone", range: 22, halfAngleDeg: 20 },
