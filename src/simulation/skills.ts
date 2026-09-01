@@ -686,8 +686,8 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 1.5,
       manaCost: 8,
       damage: 5,
-      // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 8→16으로 확장했습니다.
-      shape: { kind: "line", range: 16, width: 1.6 },
+      // 사용자 요청 이력: 8→16(2배)에 이어, 다시 1.5배 확장해서 16→24.
+      shape: { kind: "line", range: 24, width: 1.6 },
       originAtMouse: true,
       description: "용의 발톱으로 전방을 할퀴어 베어냅니다.",
     },
@@ -699,9 +699,9 @@ const FRUIT_SKILLS: Record<FruitAbilityId, SkillDef[]> = {
       cooldownSec: 6,
       manaCost: 20,
       damage: 8,
-      // 사용자 요청: 사정거리를 두 배로 늘려달라고 해서 10→20으로 확장했습니다
+      // 사용자 요청 이력: 10→20(2배)에 이어, 다시 1.5배 확장해서 20→30
       // (halfAngleDeg는 요청 범위 밖이라 그대로 뒀습니다).
-      shape: { kind: "cone", range: 20, halfAngleDeg: 35 },
+      shape: { kind: "cone", range: 30, halfAngleDeg: 35 },
       originAtMouse: true,
       description: "용의 포효로 충격파를 일으켜 넓은 전방을 밀어붙입니다.",
     },

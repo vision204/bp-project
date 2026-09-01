@@ -116,8 +116,10 @@ const SKILL_MODEL_YAW_OFFSET: Record<string, number> = {
   // 조정해야 할 수 있습니다.
   light_z: Math.PI / 2,
   light_x: Math.PI / 2,
-  dragon_z: Math.PI / 2,
-  dragon_x: Math.PI / 2,
+  // 사용자 피드백: 용의 발톱/용의 포효는 여전히 반대쪽을 보고 있다고 해서,
+  // 기존 90도 보정에 180도를 더 얹었습니다(총 270도 = -90도와 동일).
+  dragon_z: Math.PI / 2 + Math.PI,
+  dragon_x: Math.PI / 2 + Math.PI,
   dragon_c: Math.PI / 2,
 };
 
@@ -284,9 +286,16 @@ const BOAT_CAMERA_HEIGHT_OFFSET = 5;
 // 같은 이유로 카메라도 뒤로 빼고 높여줍니다 — 사용자 요청: "커지는건 좋은데
 // 카메라 시점도 같이 더 높아졌으면 좋겠어". 배(1.6→5, 약 3.1배 / 6→13, 약
 // 2.2배)와 비슷한 비율로 올렸습니다.
-// 사용자 피드백: "시점 더 위로 올려줘" — 처음 값(14/6)보다 더 높입니다.
-const DRAGON_FORM_CAMERA_DISTANCE = 17;
-const DRAGON_FORM_CAMERA_HEIGHT_OFFSET = 9;
+// 사용자 피드백: "용의 머리 위에 시점이 고정되게끔 해줘" — 이전 고정값(17/9)은
+// 5배로 커진 모델(DRAGON_FORM_MODEL_SCALE ≈ 41)의 발밑 정도밖에 안 됐습니다.
+// 아래 카메라 계산식(camera.y ≈ position.y + camHeight + heightBoost, 이때
+// camDist가 CAMERA_DISTANCE보다 커서 heightBoost는 camHeight와 같아짐 —
+// 즉 실제 높이는 대략 camHeight의 2배)을 역산해서, 모델의 정수리
+// (position.y + DRAGON_FORM_MODEL_SCALE)보다 위에 오도록 모델 크기에 비례해
+// 다시 계산했습니다. 실제 화면으로 확인이 불가능한 추정치라 여전히 어긋나
+// 있으면 이 두 값을 더 조정해야 합니다.
+const DRAGON_FORM_CAMERA_DISTANCE = DRAGON_FORM_MODEL_SCALE * 0.9;
+const DRAGON_FORM_CAMERA_HEIGHT_OFFSET = (DRAGON_FORM_MODEL_SCALE + 8) / 2;
 
 // 기본 공격(좌클릭) 검 휘두르기 — 짧고 빠르게 한 번 쳤다가 되돌아옵니다.
 const ATTACK_SWING_DURATION_MS = 220;

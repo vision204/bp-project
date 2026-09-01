@@ -1731,11 +1731,11 @@ section("빛빛/용용 열매 — 카탈로그·Z/X/C(/V) 스킬 정의");
   // V(용으로 변신, dragon_v)가 이제 진짜 슬롯3 스킬로 구현되어 4개가 됩니다.
   assert(dragon.length === 4, `용용은 Z/X/C/V 4개 스킬 (실제 ${dragon.length}개)`);
   assert(dragon[0].id === "dragon_z" && dragon[0].damage === 5 && dragon[0].shape.kind === "line", "용의 발톱: 직선 판정");
-  // 사용자 요청으로 용의 발톱 사정거리를 두 배로 늘렸습니다 (8 → 16).
-  assert(dragon[0].shape.range === 16, `용의 발톱: 사정거리 2배 확장(16m) (실제 ${dragon[0].shape.range}m)`);
+  // 사용자 요청 이력: 8→16(2배)에 이어 다시 1.5배 확장(16→24).
+  assert(dragon[0].shape.range === 24, `용의 발톱: 사정거리 1.5배 추가 확장(24m) (실제 ${dragon[0].shape.range}m)`);
   assert(dragon[1].id === "dragon_x" && dragon[1].damage === 8 && dragon[1].shape.kind === "cone", "용의 포효: 부채꼴 판정");
-  // 사용자 요청으로 용의 포효 사정거리를 두 배로 늘렸습니다 (10 → 20). halfAngleDeg는 그대로.
-  assert(dragon[1].shape.range === 20 && dragon[1].shape.halfAngleDeg === 35, `용의 포효: 사정거리 2배 확장(20m), 각도 유지(35도) (실제 ${dragon[1].shape.range}m / ${dragon[1].shape.halfAngleDeg}도)`);
+  // 사용자 요청 이력: 10→20(2배)에 이어 다시 1.5배 확장(20→30). halfAngleDeg는 그대로.
+  assert(dragon[1].shape.range === 30 && dragon[1].shape.halfAngleDeg === 35, `용의 포효: 사정거리 1.5배 추가 확장(30m), 각도 유지(35도) (실제 ${dragon[1].shape.range}m / ${dragon[1].shape.halfAngleDeg}도)`);
   assert(dragon[2].id === "dragon_c" && dragon[2].damage === 12 && dragon[2].shape.kind === "cone", "용의 화염: 부채꼴 판정");
   // 사용자 요청으로 용의 화염 사정거리를 두 배로 늘렸습니다 (11 → 22). halfAngleDeg는 그대로.
   assert(dragon[2].shape.range === 22 && dragon[2].shape.halfAngleDeg === 20, `용의 화염: 사정거리 2배 확장(22m), 각도 유지(20도) (실제 ${dragon[2].shape.range}m / ${dragon[2].shape.halfAngleDeg}도)`);
@@ -1808,15 +1808,15 @@ section("밸런스 — 용으로 변신 (용용 열매 V, 쿨다운 없이 토�
 
 section("withRangeMultiplier — 순수 로직(shape/dashDistance만 스케일, damage는 그대로)");
 {
-  const dragonZ = skillsForFruit("dragon_dragon")[0]; // line, range=16
+  const dragonZ = skillsForFruit("dragon_dragon")[0]; // line, range=24
   const scaled = withRangeMultiplier(dragonZ, 5);
-  assert(scaled.shape.kind === "line" && scaled.shape.range === 80, `line 스킬 사거리 5배 (실제 ${scaled.shape.range}m)`);
+  assert(scaled.shape.kind === "line" && scaled.shape.range === 120, `line 스킬 사거리 5배 (실제 ${scaled.shape.range}m)`);
   assert(scaled.damage === dragonZ.damage, "damage는 건드리지 않음(변경 안 됨)");
-  assert(dragonZ.shape.range === 16, "원본 스킬 객체는 그대로 남아있음(불변)");
+  assert(dragonZ.shape.range === 24, "원본 스킬 객체는 그대로 남아있음(불변)");
 
-  const dragonX = skillsForFruit("dragon_dragon")[1]; // cone, range=20
+  const dragonX = skillsForFruit("dragon_dragon")[1]; // cone, range=30
   const scaledCone = withRangeMultiplier(dragonX, 5);
-  assert(scaledCone.shape.kind === "cone" && scaledCone.shape.range === 100, `cone 스킬 사거리 5배 (실제 ${scaledCone.shape.range}m)`);
+  assert(scaledCone.shape.kind === "cone" && scaledCone.shape.range === 150, `cone 스킬 사거리 5배 (실제 ${scaledCone.shape.range}m)`);
   assert(scaledCone.shape.halfAngleDeg === dragonX.shape.halfAngleDeg, "halfAngleDeg는 그대로");
 
   const radialSkill = { ...dragonZ, shape: { kind: "radial", radius: 4 } };
@@ -1849,25 +1849,25 @@ section("밸런스 — 용으로 변신 중엔 공격 스킬(dragon_z/x/c) 사�
   pBoost.aimYaw = 0;
   pBoost.events = [];
 
-  // 변신 전 — dragon_z(직선, range=16)로 20m 떨어진 적을 맞히지 못해야 함
+  // 변신 전 — dragon_z(직선, range=24)로 30m 떨어진 적을 맞히지 못해야 함
   const farBefore = makeEnemy("farBefore", 10000, 10);
-  farBefore.position = { x: 0, y: 1, z: 20 };
+  farBefore.position = { x: 0, y: 1, z: 30 };
   pBoost.fruitSkillCooldowns = [0, 0, 0, 0];
   tapSkill(0.016, pBoost, [farBefore], 0);
-  assert(farBefore.hp === 10000, "변신 전엔 사거리 16m 밖(20m)의 적을 맞히지 못함");
+  assert(farBefore.hp === 10000, "변신 전엔 사거리 24m 밖(30m)의 적을 맞히지 못함");
 
   // 변신 ON
   pBoost.events = [];
   tapSkill(0.016, pBoost, [], 3);
   assert(pBoost.dragonFormActive === true, "V로 변신 ON");
 
-  // 변신 후 — 같은 dragon_z로 20m 떨어진 적(사거리 16m 밖이지만 5배=80m 안)을 맞혀야 함
+  // 변신 후 — 같은 dragon_z로 30m 떨어진 적(사거리 24m 밖이지만 5배=120m 안)을 맞혀야 함
   const farAfter = makeEnemy("farAfter", 10000, 10);
-  farAfter.position = { x: 0, y: 1, z: 20 };
+  farAfter.position = { x: 0, y: 1, z: 30 };
   pBoost.fruitSkillCooldowns = [0, 0, 0, 0];
   pBoost.events = [];
   tapSkill(0.016, pBoost, [farAfter], 0);
-  assert(farAfter.hp < 10000, "변신 후엔 5배 넓어진 사거리(80m) 덕분에 20m 밖의 적도 맞음");
+  assert(farAfter.hp < 10000, "변신 후엔 5배 넓어진 사거리(120m) 덕분에 30m 밖의 적도 맞음");
   const fireEv = pBoost.events.find((e) => e.type === "skill_fired" && e.slot === 0);
   assert(!!fireEv && fireEv.rangeMult === DRAGON_FORM_RANGE_MULTIPLIER, `skill_fired 이벤트에 rangeMult=${DRAGON_FORM_RANGE_MULTIPLIER}가 실림 (실제 ${fireEv && fireEv.rangeMult})`);
 
