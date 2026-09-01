@@ -1375,6 +1375,12 @@ stepCombat(0.016, input({ attackPressed: true }), pMix, eMix);
 assert(eMix[0].alive && eMix[0].hp < 25, `근접으로 체력만 깎음 (${eMix[0].hp})`);
 assert(pMix.fruitExp === 0, "아직 열매 경험치 없음");
 pMix.fruitSkillCooldowns = [0, 0, 0, 0];
+// 이 마무리 일격이 남은 체력을 확실히 넘도록 열매 스텟을 크게 찍어둡니다
+// (테스트 (4)와 같은 이유 — "막타 출처"만 검증하는 게 목적이라 정확한
+// 스킬 데미지 수치는 중요하지 않습니다. 스킬 너프로 기본 스텟(0)에서는
+// 근소한 차이로 못 죽일 수 있어 추가함).
+pMix.stats.fruit = 3000;
+recomputeDerivedStats(pMix);
 tapSkill(0.016, pMix, eMix, 0);
 assert(!eMix[0].alive, "열매 스킬로 마무리");
 assert(pMix.fruitExp > 0, `막타가 열매라서 열매 경험치 획득 (${pMix.fruitExp})`);
@@ -1709,25 +1715,25 @@ section("빛빛/용용 열매 — 카탈로그·Z/X/C(/V) 스킬 정의");
 
   const light = skillsForFruit("light_light");
   assert(light.length === 4, `빛빛은 Z/X/C/V 4개 스킬 (실제 ${light.length}개)`);
-  assert(light[0].id === "light_z" && light[0].damage === 17 && light[0].cooldownSec === 1.3 && light[0].manaCost === 7, "빛의 탄환 수치");
+  assert(light[0].id === "light_z" && light[0].damage === 9 && light[0].cooldownSec === 1.3 && light[0].manaCost === 7, "빛의 탄환 수치");
   // 사용자 요청으로 빛의 탄환 사정거리를 두 배로 늘렸습니다 (12 → 24).
   assert(light[0].shape.kind === "line" && light[0].shape.range === 24 && light[0].originAtMouse === true, `빛의 탄환: 사정거리 2배 확장(24m) + 마우스 방향 발사 (실제 ${light[0].shape.range}m)`);
-  assert(light[1].id === "light_x" && light[1].damage === 26 && light[1].unlockFruitLevel === 25, "빛의 검 수치");
+  assert(light[1].id === "light_x" && light[1].damage === 14 && light[1].unlockFruitLevel === 25, "빛의 검 수치");
   // 사용자 요청으로 빛의 검 사정거리를 두 배로 늘렸습니다 (9 → 18).
   assert(light[1].shape.kind === "line" && light[1].shape.range === 18, `빛의 검: 사정거리 2배 확장(18m) (실제 ${light[1].shape.range}m)`);
   assert(light[2].id === "light_c" && light[2].shape.kind === "radial" && light[2].originAtMouse === true && light[2].originAtAim === true, "빛의 포격: 마우스 지점 radial 낙하형(originAtMouse+originAtAim)");
-  assert(light[3].id === "light_v" && light[3].damage === 62 && light[3].unlockFruitLevel === 75, "광속 일격 수치");
+  assert(light[3].id === "light_v" && light[3].damage === 34 && light[3].unlockFruitLevel === 75, "광속 일격 수치");
 
   const dragon = skillsForFruit("dragon_dragon");
   // V(용으로 변신, dragon_v)가 이제 진짜 슬롯3 스킬로 구현되어 4개가 됩니다.
   assert(dragon.length === 4, `용용은 Z/X/C/V 4개 스킬 (실제 ${dragon.length}개)`);
-  assert(dragon[0].id === "dragon_z" && dragon[0].damage === 18 && dragon[0].shape.kind === "line", "용의 발톱: 직선 판정");
+  assert(dragon[0].id === "dragon_z" && dragon[0].damage === 10 && dragon[0].shape.kind === "line", "용의 발톱: 직선 판정");
   // 사용자 요청으로 용의 발톱 사정거리를 두 배로 늘렸습니다 (8 → 16).
   assert(dragon[0].shape.range === 16, `용의 발톱: 사정거리 2배 확장(16m) (실제 ${dragon[0].shape.range}m)`);
-  assert(dragon[1].id === "dragon_x" && dragon[1].damage === 30 && dragon[1].shape.kind === "cone", "용의 포효: 부채꼴 판정");
+  assert(dragon[1].id === "dragon_x" && dragon[1].damage === 16 && dragon[1].shape.kind === "cone", "용의 포효: 부채꼴 판정");
   // 사용자 요청으로 용의 포효 사정거리를 두 배로 늘렸습니다 (10 → 20). halfAngleDeg는 그대로.
   assert(dragon[1].shape.range === 20 && dragon[1].shape.halfAngleDeg === 35, `용의 포효: 사정거리 2배 확장(20m), 각도 유지(35도) (실제 ${dragon[1].shape.range}m / ${dragon[1].shape.halfAngleDeg}도)`);
-  assert(dragon[2].id === "dragon_c" && dragon[2].damage === 46 && dragon[2].shape.kind === "cone", "용의 화염: 부채꼴 판정");
+  assert(dragon[2].id === "dragon_c" && dragon[2].damage === 25 && dragon[2].shape.kind === "cone", "용의 화염: 부채꼴 판정");
   // 사용자 요청으로 용의 화염 사정거리를 두 배로 늘렸습니다 (11 → 22). halfAngleDeg는 그대로.
   assert(dragon[2].shape.range === 22 && dragon[2].shape.halfAngleDeg === 20, `용의 화염: 사정거리 2배 확장(22m), 각도 유지(20도) (실제 ${dragon[2].shape.range}m / ${dragon[2].shape.halfAngleDeg}도)`);
   assert(dragon[0].originAtMouse === true && dragon[1].originAtMouse === true && dragon[2].originAtMouse === true, "용용의 공격 스킬(Z/X/C)이 마우스 방향으로 발사됨");
