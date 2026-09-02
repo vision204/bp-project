@@ -16,6 +16,7 @@ import { weaponMasteryLevel } from "../simulation/WeaponLeveling";
 import { dist2D } from "../simulation/ShapeMath";
 import { skillsForFruit, withRangeMultiplier } from "../simulation/skills";
 import { skillsForWeapon } from "../simulation/weaponSkills";
+import { isInSafeZone } from "../world/SafeZones";
 import { LIGHTNING_CONTACT_INTERVAL_MS, type CombatStatsSnapshot } from "./protocol";
 import type { MultiplayerClient, RemotePlayerView } from "./MultiplayerClient";
 
@@ -67,11 +68,17 @@ function activeSkillsFor(state: GameState) {
 export function processPvpAttacks(state: GameState, mp: MultiplayerClient) {
   if (!mp.connected || !state.player.pvpEnabled) return;
   const p = state.player;
+  // 본부 건물 안(PvP 안전지역)에서는 공격 자체를 내보내지 않습니다 — 서버도
+  // 같은 좌표 판정을 다시 하므로(server/state.ts basicPvpCheck) 이건 그냥
+  // "굳이 서버에 물어볼 필요도 없는 공격"을 거르는 최적화이지, 판정의 출처가
+  // 아닙니다(파일 상단 설명과 같은 원칙).
+  if (isInSafeZone(p.position.x, p.position.z)) return;
 
   for (const ev of p.events) {
     if (ev.type === "melee_attack_fired") {
       const range = totalMeleeRange(p);
       for (const target of mp.meleeCandidates(range)) {
+        if (isInSafeZone(target.renderX, target.renderZ)) continue;
         mp.sendMeleeAttack(target.snapshot.id);
       }
     } else if (ev.type === "skill_fired") {
@@ -96,6 +103,7 @@ export function processPvpAttacks(state: GameState, mp: MultiplayerClient) {
         ];
       }
       for (const target of candidates) {
+        if (isInSafeZone(target.renderX, target.renderZ)) continue;
         mp.sendSkillAttack(target.snapshot.id, ev.slot);
       }
     }
@@ -112,10 +120,13 @@ export function processLightningForm(state: GameState, mp: MultiplayerClient, no
   if (!mp.connected || !state.player.pvpEnabled) return;
   if (state.player.lightningFormRemainingSec <= 0) return;
   if (nowMs - lastLightningSentAtMs < LIGHTNING_CONTACT_INTERVAL_MS) return;
+  if (isInSafeZone(state.player.position.x, state.player.position.z)) return;
 
   const radius = LIGHTNING_FORM_SKILL?.lightningFormContactRadius ?? 0;
   if (radius <= 0) return;
-  const nearby: RemotePlayerView[] = mp.meleeCandidates(radius);
+  const nearby: RemotePlayerView[] = mp
+    .meleeCandidates(radius)
+    .filter((t) => !isInSafeZone(t.renderX, t.renderZ));
   if (nearby.length === 0) return;
 
   lastLightningSentAtMs = nowMs;

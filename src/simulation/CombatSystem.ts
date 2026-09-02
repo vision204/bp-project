@@ -28,6 +28,10 @@ import { dist2D, isMouseTargetInRange, pointInShape, skillOrigin } from "./Shape
 const LIGHTNING_FORM_SKILL = skillsForFruit("thunder_strike")[1];
 /** 사막의 대검(모래 열매 V)의 소환 수치 — 마찬가지로 skills.ts를 그대로 읽습니다. */
 const SAND_BLADE_SKILL = skillsForFruit("sand_storm")[3];
+/** 용으로 변신(용용 열매 V)의 토글 수치 — 자동 해제 시 setToggleActive(..., false)를 재사용하려고 참조해둡니다. */
+const DRAGON_V_SKILL = skillsForFruit("dragon_dragon")[3];
+/** 용으로 변신한 채로 공격 스킬(dragon_z/x/c)을 이 횟수만큼 쓰면 자동으로 풀립니다(사용자 요청). */
+const DRAGON_FORM_MAX_SKILL_CASTS = 9;
 
 /**
  * 데미지의 출처.
@@ -579,6 +583,18 @@ export function stepCombat(
         ...(skill.chargeable ? { chargeFrac } : {}),
         ...(dragonFormBoosted ? { rangeMult: DRAGON_FORM_RANGE_MULTIPLIER } : {}),
       });
+
+      // 용으로 변신한 채로 공격 스킬을 DRAGON_FORM_MAX_SKILL_CASTS번 쓰면
+      // 자동으로 사람으로 돌아옵니다(사용자 요청). dragon_v 자신(shape:"self")은
+      // dragonFormBoosted 조건에서 이미 제외되므로 여기 카운트에 안 잡힙니다.
+      if (dragonFormBoosted && DRAGON_V_SKILL) {
+        player.dragonFormSkillCastCount += 1;
+        if (player.dragonFormSkillCastCount >= DRAGON_FORM_MAX_SKILL_CASTS) {
+          setToggleActive(player, DRAGON_V_SKILL, false, player.position);
+          player.dragonFormSkillCastCount = 0;
+          player.events.push({ type: "dragon_form_auto_reverted" });
+        }
+      }
     }
   } else if (weapon) {
     const skills = skillsForWeapon(weapon.id);
@@ -637,5 +653,7 @@ function setToggleActive(player: PlayerState, skill: SkillDef, active: boolean, 
     // 다시 눌러야만 꺼집니다.
     player.dragonFormActive = active;
     player.fruitBuffMultiplier = active ? 1 + (skill.dragonFormDamageMultiplierBonus ?? 0) : 1;
+    // 새로 변신할 때마다 "스킬 9번 쓰면 자동 해제" 카운터를 리셋합니다.
+    if (active) player.dragonFormSkillCastCount = 0;
   }
 }

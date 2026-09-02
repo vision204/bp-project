@@ -327,7 +327,7 @@ export class Simulation {
 
   /**
    * 해적왕에게 부탁해 다른 바다로 건너갑니다.
-   * 도착지는 그 바다의 허브 섬(중앙 교역섬 / 분수 도시) 광장입니다.
+   * 도착지는 그 바다의 허브 섬(중앙 교역섬 / 본부) 광장입니다.
    */
   travelSea() {
     return travelSea(this.state, (pos) => this.playerController.teleport(pos));
@@ -373,6 +373,10 @@ export class Simulation {
     player.sandBladeActive = false;
     player.dragonFlightActive = false;
     player.lightFormRemainingSec = 0;
+    if (player.dragonFormActive) {
+      player.dragonFormActive = false;
+      player.fruitBuffMultiplier = 1;
+    }
     this.state.boat.riding = false;
     player.position = { ...arrival };
     this.playerController.teleport(arrival);

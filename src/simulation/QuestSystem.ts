@@ -73,7 +73,7 @@ export function createNpcs(): NpcState[] {
   }
 
   // 화면 우측 버튼의 상점은 "현금 결제 프리미엄 상점"이 됐고,
-  // 코인으로 열매를 사는 곳은 각 바다 허브 섬(중앙 교역섬 / 분수 도시)의 상인뿐입니다.
+  // 코인으로 열매를 사는 곳은 각 바다 허브 섬(중앙 교역섬 / 본부)의 상인뿐입니다.
   for (const sea of [1, 2] as const) {
     const hub = hubIsland(sea);
     npcs.push({

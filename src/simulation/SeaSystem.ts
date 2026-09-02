@@ -47,7 +47,7 @@ export function levelsUntilSecondSea(player: PlayerState): number {
 }
 
 /**
- * 실제로 바다를 옮깁니다. 도착지는 그 바다의 허브 섬(중앙 교역섬 / 분수 도시)입니다.
+ * 실제로 바다를 옮깁니다. 도착지는 그 바다의 허브 섬(중앙 교역섬 / 본부)입니다.
  * 물리 바디를 옮기는 일은 호출한 쪽(Simulation)이 teleport 콜백으로 처리합니다.
  *
  * @returns 옮겼으면 도착한 허브 섬, 조건이 안 되면 null

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type RAPIER from "@dimforge/rapier3d-compat";
-import { ISLANDS, dockDirection, worldRadius, type IslandDef, type IslandTheme, type Sea } from "./islands";
+import { ISLANDS, SEA_ORIGINS, dockDirection, worldRadius, type IslandDef, type IslandTheme, type Sea } from "./islands";
+import { HQ_BUILDING } from "./SafeZones";
 import type { QualitySettings } from "../core/GraphicsSettings";
 
 // -----------------------------------------------------------------------
@@ -38,8 +39,8 @@ const PALETTES: Record<IslandTheme, ThemePalette> = {
   dragon: { sand: 0x6d2f1e, ground: 0x4a1c12, rock: 0x2b1108, propTrunk: 0x3e1a0e, propTop: 0xff7043, fogColor: 0x8fd0ff },
 
   // ── 두 번째 바다 ─────────────────────────────────────────────────────────
-  // 분수 도시 — 흰 석재와 청록 지붕의 항구 도시 (2세계의 관문)
-  fountain: { sand: 0xe8dfc8, ground: 0xc9c3b2, rock: 0xa8a496, propTrunk: 0xded6c2, propTop: 0x3fa9a0, fogColor: 0x8fd0ff },
+  // 본부 — 초록 창고 건물의 대륙 중심 거점 (2세계의 관문)
+  hq: { sand: 0xe8dfc8, ground: 0xc9c3b2, rock: 0xa8a496, propTrunk: 0x3f5c3f, propTop: 0x4a7a4a, fogColor: 0x8fd0ff },
   // 장미 왕국 — 붉은 장미 정원과 흰 성벽
   rose: { sand: 0xe4c9a8, ground: 0x6f9c58, rock: 0xd9cfc0, propTrunk: 0x4f7a3f, propTop: 0xd6415f, fogColor: 0x8fd0ff },
   // 초원 지대 — 탁 트인 풀밭
@@ -1106,8 +1107,12 @@ function buildTownHouse(
 }
 
 /**
- * 허브 섬(중앙 교역섬 / 분수 도시)에 세우는 마을 — 광장을 둘러싸듯 원형으로 배치합니다.
+ * 허브 섬(중앙 교역섬)에 세우는 마을 — 광장을 둘러싸듯 원형으로 배치합니다.
  * 건물에는 전부 충돌체가 붙어 있어서 안으로 들어갈 수 없습니다 (겉모습 장식).
+ *
+ * 두 번째 바다의 허브(본부)는 더 이상 이 함수를 쓰지 않습니다 — buildHqBuilding이
+ * 대신 걸어 들어갈 수 있는 창고 건물을 세웁니다 (옛 "분수 도시" 마을/분수 장식은
+ * 제거됐습니다).
  */
 function buildTradeTown(
   island: IslandDef,
@@ -1117,10 +1122,8 @@ function buildTradeTown(
   RAPIER_NS: typeof RAPIER,
   quality: QualitySettings,
 ) {
-  // 두 허브가 똑같이 생기지 않도록 섬마다 다른 시드를 씁니다.
-  const rand = makeRandom(island.id === "central" ? 4271 : 90211);
-  const isFountainCity = island.theme === "fountain";
-  const houseCount = Math.max(6, Math.round((isFountainCity ? 12 : 10) * quality.propDensity));
+  const rand = makeRandom(4271);
+  const houseCount = Math.max(6, Math.round(10 * quality.propDensity));
 
   for (let i = 0; i < houseCount; i++) {
     // 부두 방향(배 타러 가는 길)과 열매 상인 자리(dockAngle 방향 안쪽)는 비워둡니다.
@@ -1152,10 +1155,7 @@ function buildTradeTown(
   }
 
   // 광장 바닥 — 돌 포장 느낌의 원반
-  const plazaMat = new THREE.MeshStandardMaterial({
-    color: isFountainCity ? 0xdad3c2 : 0xc9bfa6,
-    roughness: 1,
-  });
+  const plazaMat = new THREE.MeshStandardMaterial({ color: 0xc9bfa6, roughness: 1 });
   const plaza = new THREE.Mesh(
     new THREE.CylinderGeometry(island.radius * 0.36, island.radius * 0.36, 0.12, quality.islandSegments),
     plazaMat,
@@ -1165,47 +1165,420 @@ function buildTradeTown(
   group.add(plaza);
 
   // 광장 한가운데 분수대 (역시 장식).
-  // "분수 도시"는 이름값을 해야 하므로 한 단 더 올린 3층 분수로 세웁니다.
-  const scale = isFountainCity ? 1.45 : 1;
-  const stoneMat = new THREE.MeshStandardMaterial({
-    color: isFountainCity ? 0xe2dccc : 0xb8ae97,
-    roughness: 0.95,
-  });
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0xb8ae97, roughness: 0.95 });
   const waterMat = new THREE.MeshStandardMaterial({ color: 0x4aa3d8, roughness: 0.2, metalness: 0.3 });
 
-  const basin = new THREE.Mesh(new THREE.CylinderGeometry(2.4 * scale, 2.6 * scale, 0.9, 12), stoneMat);
+  const basin = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.6, 0.9, 12), stoneMat);
   basin.position.set(island.center.x, 0.75, island.center.z);
   basin.castShadow = quality.shadows;
   group.add(basin);
-  const water = new THREE.Mesh(new THREE.CylinderGeometry(2.1 * scale, 2.1 * scale, 0.12, 12), waterMat);
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 0.12, 12), waterMat);
   water.position.set(island.center.x, 1.18, island.center.z);
   group.add(water);
-  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.55, 2.2 * scale, 8), stoneMat);
-  pillar.position.set(island.center.x, 1.1 + 1.1 * scale, island.center.z);
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.55, 2.2, 8), stoneMat);
+  pillar.position.set(island.center.x, 2.2, island.center.z);
   pillar.castShadow = quality.shadows;
   group.add(pillar);
-
-  if (isFountainCity) {
-    // 위쪽 물받이 두 단 + 꼭대기 물줄기
-    for (const [i, y] of [3.2, 4.6].entries()) {
-      const tierRadius = 1.5 - i * 0.55;
-      const tier = new THREE.Mesh(new THREE.CylinderGeometry(tierRadius, tierRadius * 0.8, 0.32, 12), stoneMat);
-      tier.position.set(island.center.x, y, island.center.z);
-      tier.castShadow = quality.shadows;
-      group.add(tier);
-      const tierWater = new THREE.Mesh(new THREE.CylinderGeometry(tierRadius * 0.9, tierRadius * 0.9, 0.08, 12), waterMat);
-      tierWater.position.set(island.center.x, y + 0.2, island.center.z);
-      group.add(tierWater);
-    }
-    const jet = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.8, 10), waterMat);
-    jet.position.set(island.center.x, 5.7, island.center.z);
-    group.add(jet);
-  }
 
   const fountainBody = world.createRigidBody(
     RAPIER_NS.RigidBodyDesc.fixed().setTranslation(island.center.x, 0.75, island.center.z),
   );
-  world.createCollider(RAPIER_NS.ColliderDesc.cylinder(0.45, 2.6 * scale), fountainBody);
+  world.createCollider(RAPIER_NS.ColliderDesc.cylinder(0.45, 2.6), fountainBody);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 두 번째 바다 안쪽 대륙 — 장미 왕국/초원 지대/공동묘지/눈 덮인 산을 하나로
+// 잇는 자유형(비원형) 땅덩어리 + 성벽 + 본부 건물.
+//
+// 위 네 섬과 "hq" 허브는 여전히 islands.ts에서 독립된 원형 IslandDef(각자의
+// center/radius)로 존재하고 몬스터/퀘스트/길안내는 전부 그 원형 판정을
+// 그대로 씁니다 — 여기서 만드는 건 "그 5개의 원이 다 들어가는 하나로 이어진
+// 지형/성벽/건물"이라는 시각+물리 레이어일 뿐입니다. islandAt() 등 로직에는
+// 관여하지 않습니다.
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * 대륙 해안선 — 16개 점을 각도·반지름으로 손으로 잡았습니다. 완전한 원이
+ * 아니라 각도마다 반지름을 다르게 줘서(210~252m) 자연스러운 굴곡을 냅니다.
+ * 0°/90°/180°/270°(장미·초원·공동묘지·눈산이 있는 정확히 그 방향)는 반지름을
+ * 넉넉히 키워서(≥245m) 그 섬들(중심에서 150m + 자기 반지름 48m = 198m 필요)이
+ * 여유 있게 다 들어가고, 그 사이(대각선 방향)는 살짝 좁혀서(210~232m) 진짜
+ * 해안선처럼 굴곡이 보이게 했습니다. (검증: 가장 좁은 구간도 210m로,
+ * 198m보다 12m 이상 여유가 있고, 실제로 각 섬이 걸리는 부채꼴 구간은 그보다
+ * 더 안쪽인 대각선 최저점에서 멀리 떨어져 있어 안전합니다 — 자세한 계산은
+ * PR 설명 참고.)
+ */
+const CONTINENT_FOOTPRINT: { angleDeg: number; radius: number }[] = [
+  { angleDeg: 0, radius: 245 }, // → 초원 지대 방향(+x)
+  { angleDeg: 22.5, radius: 225 },
+  { angleDeg: 45, radius: 218 }, // 성문 방향 (본부 부두가 나가는 쪽)
+  { angleDeg: 67.5, radius: 232 },
+  { angleDeg: 90, radius: 252 }, // → 장미 왕국 방향(+z)
+  { angleDeg: 112.5, radius: 228 },
+  { angleDeg: 135, radius: 212 },
+  { angleDeg: 157.5, radius: 230 },
+  { angleDeg: 180, radius: 248 }, // → 눈 덮인 산 방향(-x)
+  { angleDeg: 202.5, radius: 222 },
+  { angleDeg: 225, radius: 210 }, // 뒷문 방향
+  { angleDeg: 247.5, radius: 226 },
+  { angleDeg: 270, radius: 250 }, // → 공동묘지 방향(-z)
+  { angleDeg: 292.5, radius: 224 },
+  { angleDeg: 315, radius: 214 },
+  { angleDeg: 337.5, radius: 234 },
+];
+
+/** 대륙 원점(두 번째 바다 원점) 기준 로컬 좌표의 해안선 정점들. */
+function continentCoastPoints(): { x: number; z: number }[] {
+  return CONTINENT_FOOTPRINT.map(({ angleDeg, radius }) => {
+    const a = (angleDeg * Math.PI) / 180;
+    return { x: Math.cos(a) * radius, z: Math.sin(a) * radius };
+  });
+}
+
+/** 해안선을 원점 쪽으로 amount(m)만큼 들여온 점들 (성벽 등 안쪽 구조물에 씀). */
+function insetPolygon(points: { x: number; z: number }[], amount: number) {
+  return points.map((p) => {
+    const len = Math.hypot(p.x, p.z) || 1;
+    const t = Math.max(0, len - amount) / len;
+    return { x: p.x * t, z: p.z * t };
+  });
+}
+
+/**
+ * 대륙 본체 — THREE.ShapeUtils로 해안선 폴리곤을 삼각분할해서 평평한 지형
+ * 메시를 만들고, 정확히 같은 삼각분할 데이터로 Rapier trimesh 충돌체를
+ * 만듭니다(메시와 충돌이 한 치도 어긋나지 않도록 같은 데이터를 공유).
+ * trimesh를 고른 이유: 원형 섬들의 원기둥 충돌체와 달리 이 폴리곤은 진짜
+ * 비정형이라 원/실린더/박스 몇 개로는 근사가 지저분해지고, 이 프로젝트의
+ * KinematicCharacterController(오토스텝 포함)는 평평한 정적 trimesh 위에서
+ * 별문제 없이 동작합니다 — 원기둥 충돌체들 위를 이미 문제없이 걷고 있는
+ * 것과 같은 부류의 정적 충돌체이기 때문입니다.
+ */
+function buildContinentGround(
+  points: { x: number; z: number }[],
+  group: THREE.Group,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+  origin: { x: number; z: number },
+  groundColor: number,
+) {
+  const contour = points.map((p) => new THREE.Vector2(p.x, p.z));
+  const triangles = THREE.ShapeUtils.triangulateShape(contour, []);
+
+  const positions = new Float32Array(points.length * 3);
+  points.forEach((p, i) => {
+    positions[i * 3] = origin.x + p.x;
+    positions[i * 3 + 1] = 0;
+    positions[i * 3 + 2] = origin.z + p.z;
+  });
+
+  // triangulateShape는 2D 도형 좌표계(반시계 = 앞면) 기준 순서를 돌려주는데,
+  // 그 (x,y)를 그대로 월드 (x,z)에 심으면(회전 없이) 앞면 법선이 -Y(바닥
+  // 방향)로 뒤집힙니다. i1/i2를 맞바꿔 감는 방향을 뒤집어 법선이 +Y(위쪽)를
+  // 보게 합니다.
+  const indices = new Uint32Array(triangles.length * 3);
+  triangles.forEach((tri, i) => {
+    indices[i * 3] = tri[0];
+    indices[i * 3 + 1] = tri[2];
+    indices[i * 3 + 2] = tri[1];
+  });
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  geo.computeVertexNormals();
+  // side: DoubleSide — 위 winding 계산이 혹시 어긋나도(수동 계산이라) 최소한
+  // 안 보이는 사고는 나지 않도록 하는 안전장치입니다.
+  const mat = new THREE.MeshStandardMaterial({ color: groundColor, roughness: 1, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = quality.shadows;
+  group.add(mesh);
+
+  const body = world.createRigidBody(RAPIER_NS.RigidBodyDesc.fixed());
+  world.createCollider(RAPIER_NS.ColliderDesc.trimesh(positions, indices), body);
+}
+
+/**
+ * 해변 경사 — buildBeach(원형 섬용)와 같은 발상을, 폴리곤 변 하나하나에
+ * 적용한 버전입니다. 변마다 바깥쪽 법선 방향으로 밀어낸 사다리꼴 하나(시각용
+ * 경사면)와, 그 위를 걸어 오를 수 있는 4단 박스 충돌체(변을 따라 뻗은 긴
+ * 상자)를 놓습니다. 옆 변과 살짝 겹치게(+1.2m) 잡아서 모서리에 빈틈이
+ * 생기지 않게 했습니다.
+ */
+function buildContinentBeachSkirt(
+  points: { x: number; z: number }[],
+  group: THREE.Group,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+  origin: { x: number; z: number },
+  sandColor: number,
+) {
+  const sandMat = new THREE.MeshStandardMaterial({ color: sandColor, roughness: 1, side: THREE.DoubleSide });
+  const skirtWidth = 7;
+  const n = points.length;
+  const positions: number[] = [];
+  const indices: number[] = [];
+
+  for (let i = 0; i < n; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % n];
+    const dx = p2.x - p1.x;
+    const dz = p2.z - p1.z;
+    const len = Math.hypot(dx, dz) || 1;
+    let nx = -dz / len;
+    let nz = dx / len;
+    const midX = (p1.x + p2.x) / 2;
+    const midZ = (p1.z + p2.z) / 2;
+    if (nx * midX + nz * midZ < 0) {
+      nx = -nx;
+      nz = -nz;
+    }
+
+    const base = positions.length / 3;
+    positions.push(
+      origin.x + p1.x, 0, origin.z + p1.z,
+      origin.x + p2.x, 0, origin.z + p2.z,
+      origin.x + p2.x + nx * skirtWidth, -1.6, origin.z + p2.z + nz * skirtWidth,
+      origin.x + p1.x + nx * skirtWidth, -1.6, origin.z + p1.z + nz * skirtWidth,
+    );
+    // side: DoubleSide 재질이라 앞/뒤 어느 방향에서 봐도 보이므로 감는 순서 하나면 충분합니다.
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+
+    // 충돌용 4단 계단 — 변 방향으로 긴 상자를 깊이별로 쌓습니다 (원형 섬의
+    // buildBeach와 같은 step 높이 0.35m, 오토스텝 0.5m보다 낮아서 자동으로 오름).
+    const angle = Math.atan2(dz, dx);
+    const halfLen = len / 2 + 1.2;
+    for (let s = 1; s <= 4; s++) {
+      const t = s / 4;
+      const cx = origin.x + midX + nx * skirtWidth * t;
+      const cz = origin.z + midZ + nz * skirtWidth * t;
+      const topY = -s * 0.35;
+      const body = world.createRigidBody(
+        RAPIER_NS.RigidBodyDesc.fixed()
+          .setTranslation(cx, topY - 0.5, cz)
+          .setRotation({ x: 0, y: Math.sin(-angle / 2), z: 0, w: Math.cos(-angle / 2) }),
+      );
+      world.createCollider(RAPIER_NS.ColliderDesc.cuboid(halfLen, 0.5, 1.6), body);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, sandMat);
+  mesh.receiveShadow = quality.shadows;
+  group.add(mesh);
+}
+
+/**
+ * 성벽 — 해안선을 ~9m 안쪽으로 들여온 폴리곤을 따라 박스 세그먼트(변 하나가
+ * 22m를 넘으면 여러 조각으로 쪼갬)를 두르고, 각 꼭짓점에는 살짝 더 높은
+ * 원기둥 + 원뿔 지붕으로 성탑을 얹습니다. GATE_EDGE_INDICES에 있는 변은
+ * 통째로 비워서 성문 두 곳(본부 부두가 나가는 45° 방향과 그 반대쪽)을 냅니다.
+ */
+function buildCastleWall(
+  points: { x: number; z: number }[],
+  group: THREE.Group,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+  origin: { x: number; z: number },
+) {
+  const WALL_INSET = 9;
+  const WALL_HEIGHT = 5.5;
+  const WALL_THICKNESS = 2;
+  const MAX_SEGMENT_LEN = 22;
+  // 인덱스 1 = 22.5°~45° 변(본부 부두가 나가는 방향), 인덱스 9 = 202.5°~225°
+  // 변(그 반대쪽) — 성문 두 곳.
+  const GATE_EDGE_INDICES = new Set([1, 9]);
+
+  const wallPts = insetPolygon(points, WALL_INSET);
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x9a9488, roughness: 0.9 });
+  const towerMat = new THREE.MeshStandardMaterial({ color: 0x7d786c, roughness: 0.85 });
+
+  const n = wallPts.length;
+  for (let i = 0; i < n; i++) {
+    if (GATE_EDGE_INDICES.has(i)) continue;
+    const p1 = wallPts[i];
+    const p2 = wallPts[(i + 1) % n];
+    const dx = p2.x - p1.x;
+    const dz = p2.z - p1.z;
+    const len = Math.hypot(dx, dz);
+    const angle = Math.atan2(dz, dx);
+    const segCount = Math.max(1, Math.ceil(len / MAX_SEGMENT_LEN));
+    const segLen = len / segCount;
+
+    for (let s = 0; s < segCount; s++) {
+      const t = (s + 0.5) / segCount;
+      const cx = origin.x + p1.x + dx * t;
+      const cz = origin.z + p1.z + dz * t;
+
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(segLen + 0.5, WALL_HEIGHT, WALL_THICKNESS), wallMat);
+      mesh.position.set(cx, WALL_HEIGHT / 2, cz);
+      mesh.rotation.y = -angle;
+      mesh.castShadow = quality.shadows;
+      mesh.receiveShadow = quality.shadows;
+      group.add(mesh);
+
+      const body = world.createRigidBody(
+        RAPIER_NS.RigidBodyDesc.fixed()
+          .setTranslation(cx, WALL_HEIGHT / 2, cz)
+          .setRotation({ x: 0, y: Math.sin(-angle / 2), z: 0, w: Math.cos(-angle / 2) }),
+      );
+      world.createCollider(
+        RAPIER_NS.ColliderDesc.cuboid(segLen / 2 + 0.25, WALL_HEIGHT / 2, WALL_THICKNESS / 2),
+        body,
+      );
+    }
+  }
+
+  // 모서리 성탑
+  for (const p of wallPts) {
+    const cx = origin.x + p.x;
+    const cz = origin.z + p.z;
+    const towerHeight = WALL_HEIGHT + 2.5;
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.85, towerHeight, 8), towerMat);
+    tower.position.set(cx, towerHeight / 2, cz);
+    tower.castShadow = quality.shadows;
+    group.add(tower);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(2.15, 1.8, 8), towerMat);
+    roof.position.set(cx, towerHeight + 0.9, cz);
+    roof.castShadow = quality.shadows;
+    group.add(roof);
+
+    const body = world.createRigidBody(
+      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(cx, towerHeight / 2, cz),
+    );
+    world.createCollider(RAPIER_NS.ColliderDesc.cylinder(towerHeight / 2, 1.7), body);
+  }
+}
+
+/** 본부 건물 위에 늘 보이는 이름표 — 카메라를 향해 자동으로 돌아가는 캔버스 스프라이트. */
+function makeFloatingLabel(text: string): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "rgba(20, 40, 24, 0.78)";
+  ctx.beginPath();
+  const r = 28;
+  ctx.roundRect(8, 8, canvas.width - 16, canvas.height - 16, r);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(210, 240, 210, 0.9)";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.fillStyle = "#eafff0";
+  ctx.font = "bold 64px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 4);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(9, 2.25, 1);
+  sprite.renderOrder = 10;
+  return sprite;
+}
+
+/**
+ * 본부(HQ) 건물 — buildTownHouse와 달리 **안으로 걸어 들어갈 수 있는 실내**입니다.
+ * 벽 4개를 각각 따로 세우고(동쪽 벽만 문 자리를 비워 두 조각으로 쪼갬) 지붕은
+ * 장식만(충돌 있음, 안에서 위로 못 뚫고 나가게), 바닥은 대륙 지형(y=0)을
+ * 그대로 씁니다 — 이미 걸을 수 있는 평지라 따로 바닥을 깔 필요가 없습니다.
+ * 치수는 SafeZones.ts의 HQ_BUILDING과 정확히 같은 값을 가져다 씁니다 —
+ * 눈에 보이는 벽과 PvP 안전지역 판정 경계가 어긋나지 않게 하기 위해서입니다.
+ */
+function buildHqBuilding(
+  center: { x: number; z: number },
+  group: THREE.Group,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+) {
+  const { width, depth, wallHeight, wallThickness, doorWidth } = HQ_BUILDING;
+  const halfW = width / 2;
+  const halfD = depth / 2;
+
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0x2f6b3f, roughness: 0.85 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x1c3f24, roughness: 0.8 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x24492c, roughness: 0.7 });
+
+  const wallY = wallHeight / 2;
+  const addWall = (cx: number, cz: number, sx: number, sz: number) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, wallHeight, sz), wallMat);
+    mesh.position.set(cx, wallY, cz);
+    mesh.castShadow = quality.shadows;
+    mesh.receiveShadow = quality.shadows;
+    group.add(mesh);
+    const body = world.createRigidBody(RAPIER_NS.RigidBodyDesc.fixed().setTranslation(cx, wallY, cz));
+    world.createCollider(RAPIER_NS.ColliderDesc.cuboid(sx / 2, wallHeight / 2, sz / 2), body);
+  };
+
+  // 남/북 벽 (전체 폭)
+  addWall(center.x, center.z - halfD + wallThickness / 2, width, wallThickness);
+  addWall(center.x, center.z + halfD - wallThickness / 2, width, wallThickness);
+  // 서쪽 벽 (전체)
+  addWall(center.x - halfW + wallThickness / 2, center.z, wallThickness, depth);
+  // 동쪽 벽 — 가운데 문(doorWidth)만큼 비우고 위아래 두 조각
+  const doorHalf = doorWidth / 2;
+  const sideLen = halfD - doorHalf;
+  if (sideLen > 0.5) {
+    addWall(center.x + halfW - wallThickness / 2, center.z - doorHalf - sideLen / 2, wallThickness, sideLen);
+    addWall(center.x + halfW - wallThickness / 2, center.z + doorHalf + sideLen / 2, wallThickness, sideLen);
+  }
+
+  // 문 상인방 (장식)
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(wallThickness + 0.5, 1.2, doorWidth + 0.6), trimMat);
+  lintel.position.set(center.x + halfW - wallThickness / 2, wallHeight - 0.6, center.z);
+  group.add(lintel);
+
+  // 지붕 — 평지붕 한 장 + 충돌(위로 뚫고 나가는 것 방지, 안은 그대로 비워둠)
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(width + 1.2, 0.6, depth + 1.2), roofMat);
+  roof.position.set(center.x, wallHeight + 0.3, center.z);
+  roof.castShadow = quality.shadows;
+  group.add(roof);
+  const roofBody = world.createRigidBody(
+    RAPIER_NS.RigidBodyDesc.fixed().setTranslation(center.x, wallHeight + 0.3, center.z),
+  );
+  world.createCollider(RAPIER_NS.ColliderDesc.cuboid((width + 1.2) / 2, 0.3, (depth + 1.2) / 2), roofBody);
+
+  // 처마 띠 장식
+  const band = new THREE.Mesh(new THREE.BoxGeometry(width + 0.3, 0.4, depth + 0.3), trimMat);
+  band.position.set(center.x, wallHeight, center.z);
+  group.add(band);
+
+  const label = makeFloatingLabel("본부");
+  label.position.set(center.x + halfW + 2, wallHeight * 0.65, center.z);
+  group.add(label);
+}
+
+/**
+ * 두 번째 바다 안쪽 대륙 전체(지형+해변+성벽+본부 건물)를 한 번만 짓습니다.
+ * 개별 IslandDef를 도는 buildIsland()와 달리 이 함수는 createIslands()에서
+ * 딱 한 번 호출됩니다.
+ */
+function buildSecondSeaContinent(
+  scene: THREE.Scene,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+): IslandVisual {
+  const origin = SEA_ORIGINS[2];
+  const group = new THREE.Group();
+  scene.add(group);
+
+  const coast = continentCoastPoints();
+  const palette = PALETTES.hq;
+  buildContinentGround(coast, group, world, RAPIER_NS, quality, origin, palette.ground);
+  buildContinentBeachSkirt(coast, group, world, RAPIER_NS, quality, origin, palette.sand);
+  buildCastleWall(coast, group, world, RAPIER_NS, quality, origin);
+  buildHqBuilding({ x: origin.x + HQ_BUILDING.localCenter.x, z: origin.z + HQ_BUILDING.localCenter.z }, group, world, RAPIER_NS, quality);
+
+  return { group, center: { x: origin.x, z: origin.z } };
 }
 
 function buildIsland(
@@ -1219,33 +1592,50 @@ function buildIsland(
   const group = new THREE.Group();
   scene.add(group);
 
-  // 섬 본체 (윗면 y=0)
-  const baseGeo = new THREE.CylinderGeometry(island.radius, island.radius, 2, quality.islandSegments);
-  const baseMat = new THREE.MeshStandardMaterial({ color: palette.sand, roughness: 0.9 });
-  const baseMesh = new THREE.Mesh(baseGeo, baseMat);
-  baseMesh.position.set(island.center.x, -1, island.center.z);
-  baseMesh.receiveShadow = quality.shadows;
-  group.add(baseMesh);
+  // skipOwnTerrain 섬(두 번째 바다 안쪽 대륙의 허브+4개 사냥터)은 자기 원형
+  // 본체/해변을 만들지 않습니다 — buildContinentLandmass가 만든 공용 대륙
+  // 지형이 이미 바닥을 깔아뒀기 때문입니다 (섬 한가운데에 이중으로 원판이
+  // 겹쳐 튀어나오는 일을 막습니다). center/radius는 몬스터·퀘스트·길안내에는
+  // 그대로 쓰이므로 여기서만 렌더링을 건너뜁니다.
+  if (!island.skipOwnTerrain) {
+    // 섬 본체 (윗면 y=0)
+    const baseGeo = new THREE.CylinderGeometry(island.radius, island.radius, 2, quality.islandSegments);
+    const baseMat = new THREE.MeshStandardMaterial({ color: palette.sand, roughness: 0.9 });
+    const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+    baseMesh.position.set(island.center.x, -1, island.center.z);
+    baseMesh.receiveShadow = quality.shadows;
+    group.add(baseMesh);
 
-  const baseBody = world.createRigidBody(
-    RAPIER_NS.RigidBodyDesc.fixed().setTranslation(island.center.x, -1, island.center.z),
-  );
-  world.createCollider(RAPIER_NS.ColliderDesc.cylinder(1, island.radius), baseBody);
+    const baseBody = world.createRigidBody(
+      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(island.center.x, -1, island.center.z),
+    );
+    world.createCollider(RAPIER_NS.ColliderDesc.cylinder(1, island.radius), baseBody);
 
-  // 지표면 (테마 색)
-  const topGeo = new THREE.CylinderGeometry(island.radius - 1, island.radius - 1, 0.3, quality.islandSegments);
-  const topMat = new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 });
-  const topMesh = new THREE.Mesh(topGeo, topMat);
-  topMesh.position.set(island.center.x, 0.15, island.center.z);
-  topMesh.receiveShadow = quality.shadows;
-  group.add(topMesh);
+    // 지표면 (테마 색)
+    const topGeo = new THREE.CylinderGeometry(island.radius - 1, island.radius - 1, 0.3, quality.islandSegments);
+    const topMat = new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 1 });
+    const topMesh = new THREE.Mesh(topGeo, topMat);
+    topMesh.position.set(island.center.x, 0.15, island.center.z);
+    topMesh.receiveShadow = quality.shadows;
+    group.add(topMesh);
 
-  buildBeach(island, palette, group, world, RAPIER_NS, quality);
-  buildDock(island, group, world, RAPIER_NS, quality);
+    buildBeach(island, palette, group, world, RAPIER_NS, quality);
+  }
+
+  // 부두: 허브(본부)는 대륙에 공용 부두 하나를 그대로 유지합니다(배가 내리는
+  // 자리). skipOwnTerrain이 걸린 4개 사냥터는 이제 대륙 안쪽 땅이라 저마다
+  // 부두를 가질 이유가 없어서(육지 한가운데 다리가 튀어나오는 꼴이 됩니다) 뺐습니다.
+  if (!island.skipOwnTerrain || island.kind === "hub") {
+    buildDock(island, group, world, RAPIER_NS, quality);
+  }
 
   // 중앙 교역섬은 소품 대신 마을(2~3층 건물 + 광장 + 분수)로 꾸밉니다.
+  // 두 번째 바다의 허브(본부)는 buildHqBuilding이 대륙 중심에 따로 세우므로
+  // 여기서는 아무것도 더 짓지 않고 끝냅니다.
   if (island.kind === "hub") {
-    buildTradeTown(island, palette, group, world, RAPIER_NS, quality);
+    if (island.theme !== "hq") {
+      buildTradeTown(island, palette, group, world, RAPIER_NS, quality);
+    }
     return group;
   }
 
@@ -1325,6 +1715,11 @@ export function createIslands(
   for (const island of ISLANDS) {
     visuals.push({ group: buildIsland(island, scene, world, RAPIER_NS, quality), center: island.center });
   }
+  // 두 번째 바다 안쪽 대륙(성벽+본부 건물 포함)은 섬 하나하나가 아니라 통째로
+  // 한 번만 짓습니다 — 위 루프의 "hq"/rose/green_zone/graveyard/snow_mountain은
+  // skipOwnTerrain이 걸려 있어 자기 지형은 만들지 않고, 이 대륙이 그 바닥을
+  // 대신 제공합니다.
+  visuals.push(buildSecondSeaContinent(scene, world, RAPIER_NS, quality));
   return visuals;
 }
 

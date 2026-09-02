@@ -72,7 +72,7 @@ export type IslandTheme =
   | "sky"
   | "dragon"
   // ── 두 번째 바다 ──
-  | "fountain"
+  | "hq"
   | "rose"
   | "green"
   | "graveyard"
@@ -141,6 +141,14 @@ export interface IslandDef {
   requiredLevel: number;
   /** 부두가 뻗어나가는 방향 (라디안). 지정하지 않으면 월드 중심을 향합니다. */
   dockAngle: number;
+  /**
+   * true면 createIslands.ts의 buildIsland()가 이 섬만의 원형 지형(본체 원판·
+   * 해변 경사)을 만들지 않습니다. 두 번째 바다 안쪽 4개 사냥터 + 허브(본부)처럼,
+   * 여러 섬이 하나로 이어붙은 대륙 지형(buildContinentLandmass)이 바닥을
+   * 대신 제공할 때 씁니다. center/radius는 몬스터 배치·퀘스트·길안내·
+   * islandAt() 판정에는 그대로 쓰입니다 — "겹치는 지형 렌더링"만 건너뜁니다.
+   */
+  skipOwnTerrain?: boolean;
   enemy: IslandEnemyProfile;
   /** 이 섬에 사는 몬스터 종류들. 중앙 교역섬(hub)은 비어 있습니다 */
   species: IslandEnemySpecies[];
@@ -470,35 +478,48 @@ export const ISLANDS: IslandDef[] = [
   //  두 번째 바다 (Lv.1100 ~ 2050) — 해적왕에게 부탁해야 갈 수 있습니다.
   //
   //  블록스프루츠 2세계의 지명을 그대로 가져오되, 섬 크기와 간격은 첫 번째
-  //  바다보다 조금씩 작게 잡았습니다. 구조는 같은 두 겹 고리라서, 첫 바다에서
-  //  익힌 "바깥으로 나갈수록 위험하다"는 감각이 그대로 통합니다.
-  //    · 중심      — 분수 도시 (허브. 몬스터 없음, 해적왕과 상인이 있음)
-  //    · 안쪽 고리 — 장미 왕국 / 초원 지대 / 공동묘지 / 눈 덮인 산 (Lv.1100~1400)
+  //  바다보다 조금씩 작게 잡았습니다. 바깥 고리는 첫 바다와 같은 "따로 떨어진
+  //  원형 섬 5개" 구조를 그대로 두었지만, 안쪽 고리 4개(장미 왕국/초원 지대/
+  //  공동묘지/눈 덮인 산)는 사용자 요청으로 **하나로 이어붙은 대륙**이 됐습니다
+  //  (성벽으로 둘러싸이고 가운데에 본부가 있는 형태 — 실제 지형/성벽/본부 건물은
+  //  createIslands.ts의 buildContinentLandmass/buildCastleWall/buildHqBuilding이
+  //  만듭니다). 그래도 이 4개는 여전히 "각자 독립된 원형 사냥터"로 남습니다 —
+  //  center/radius가 몬스터 배치·퀘스트·길안내·islandAt() 판정에 그대로
+  //  쓰이고(skipOwnTerrain은 "겹치는 지형 렌더링"만 생략), 레벨/종족/개체수/HP도
+  //  기존과 완전히 동일합니다. 바뀐 건 좌표(대륙 발자국 안으로 모음)와
+  //  skipOwnTerrain 플래그뿐입니다.
+  //    · 중심      — 본부 (허브. 몬스터 없음, 해적왕과 상인이 있음. 옛 "분수
+  //      도시"를 대체 — PvP 안전지역이기도 합니다)
+  //    · 안쪽 대륙 — 장미 왕국 / 초원 지대 / 공동묘지 / 눈 덮인 산 (Lv.1100~1400),
+  //      본부를 중심으로 N/E/S/W로 둘러싸는 배치 (레벨 오르는 순서 = 바깥으로
+  //      돌아나가는 순서)
   //    · 바깥 고리 — 화염과 얼음 / 저주받은 배 / 얼음 성 / 잊혀진 섬 / 대저택 (Lv.1500~1900)
   //  좌표는 전부 두 번째 바다 원점 기준입니다 (실제 월드에서는 x+6000).
   // ═══════════════════════════════════════════════════════════════════════
   withDock({
-    id: "fountain",
-    name: "분수 도시",
-    theme: "fountain",
+    id: "hq",
+    name: "본부",
+    theme: "hq",
     kind: "hub",
     sea: 2,
     center: { x: 0, z: 0 },
-    radius: 58,
+    radius: 48,
+    skipOwnTerrain: true,
     requiredLevel: SECOND_SEA_LEVEL,
     // 두 번째 바다의 관문이자 중립 지대 — 몬스터가 없습니다.
     enemy: { count: 0, hp: 0, exp: 0, money: 0, contactDamage: 0 },
     speciesSeeds: [],
   }),
 
-  // ── 안쪽 고리 (Lv.1100 ~ 1400) ─────────────────────────────────────────
+  // ── 안쪽 대륙 (Lv.1100 ~ 1400) — 본부를 N/E/S/W로 둘러싼 하나의 땅 ───────
   withDock({
     id: "rose",
     name: "장미 왕국",
     theme: "rose",
     sea: 2,
-    center: { x: 236, z: 88 },
+    center: { x: 0, z: 150 },
     radius: 48,
+    skipOwnTerrain: true,
     requiredLevel: 1100,
     enemy: { count: 10, hp: 26000, exp: 55300, money: 4200, contactDamage: 280 },
     speciesSeeds: [{ name: "장미 기사", color: 0xd45a7a, hpOverride: 27500 }],
@@ -508,8 +529,9 @@ export const ISLANDS: IslandDef[] = [
     name: "초원 지대",
     theme: "green",
     sea: 2,
-    center: { x: 88, z: 284 },
+    center: { x: 150, z: 0 },
     radius: 48,
+    skipOwnTerrain: true,
     requiredLevel: 1200,
     enemy: { count: 10, hp: 30000, exp: 63400, money: 4800, contactDamage: 310 },
     speciesSeeds: [
@@ -522,8 +544,9 @@ export const ISLANDS: IslandDef[] = [
     name: "공동묘지",
     theme: "graveyard",
     sea: 2,
-    center: { x: -230, z: 190 },
+    center: { x: 0, z: -150 },
     radius: 48,
+    skipOwnTerrain: true,
     requiredLevel: 1300,
     enemy: { count: 11, hp: 35000, exp: 72000, money: 5500, contactDamage: 345 },
     speciesSeeds: [{ name: "무덤지기", color: 0x7a8b7f, hpOverride: 10400 }],
@@ -533,8 +556,9 @@ export const ISLANDS: IslandDef[] = [
     name: "눈 덮인 산",
     theme: "snow",
     sea: 2,
-    center: { x: -264, z: -116 },
+    center: { x: -150, z: 0 },
     radius: 48,
+    skipOwnTerrain: true,
     requiredLevel: 1400,
     enemy: { count: 11, hp: 41000, exp: 81100, money: 6300, contactDamage: 385 },
     speciesSeeds: [{ name: "설산 산적", color: 0xcfe4f2, hpOverride: 11800 }],
@@ -646,7 +670,7 @@ export function startIslandFor(faction: Faction): IslandDef {
 
 /**
  * 그 바다의 허브 섬 (상인과 해적왕이 있는 중립 지대).
- * 첫 번째 바다는 중앙 교역섬, 두 번째 바다는 분수 도시입니다.
+ * 첫 번째 바다는 중앙 교역섬, 두 번째 바다는 본부입니다.
  */
 export function hubIsland(sea: Sea = 1): IslandDef {
   const island = ISLANDS.find((i) => i.kind === "hub" && i.sea === sea);

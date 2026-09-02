@@ -519,6 +519,19 @@ async function main() {
       simulation.state.player.aimGroundPoint = null;
     }
 
+    // 용으로 변신해 날아다니는 동안, 지금 발밑(x,z) 바로 아래의 실제 지형
+    // 높이를 매 프레임 미리 구해둡니다 — PlayerController.stepFlight가 이
+    // 값보다 아래로는 못 내려가게 막아서, 고정된 최저 고도(-20)보다 훨씬
+    // 높은 지형에 파묻혀 보이는 문제를 막습니다(사용자 피드백). aimGroundPoint와
+    // 같은 이유로 시뮬레이션이 이 프레임을 처리하기 전에 렌더러 쪽에서 미리
+    // 계산해둡니다.
+    if (simulation.state.player.dragonFormActive) {
+      const groundHit = renderer.raycastTerrainDownAt(simulation.state.player.position.x, simulation.state.player.position.z);
+      simulation.state.player.dragonFormGroundY = groundHit ? groundHit.y : null;
+    } else {
+      simulation.state.player.dragonFormGroundY = null;
+    }
+
     simulation.step(dt, gameplaySnapshot);
     world.step();
 

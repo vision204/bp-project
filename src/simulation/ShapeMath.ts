@@ -92,16 +92,25 @@ export function skillOrigin(
   skill: SkillDef,
   aimGroundPoint?: { x: number; z: number } | null,
 ): ShapeOrigin {
-  // 마우스 위치 타게팅이 최우선 — 마우스 지점이 유효(사거리 안)할 때만 적용하고,
-  // 그렇지 않으면(레이캐스트 실패 등) originAtAim 방식으로 안전하게 폴백합니다.
-  if (skill.originAtMouse && aimGroundPoint && isMouseTargetInRange(position, aimGroundPoint)) {
+  // 마우스 위치 타게팅 — line/cone(부채꼴·직선)처럼 "방향만" 재조준하는
+  // 스킬은 원점이 실제로 마우스 지점까지 이동하는 게 아니라 그 방향을
+  // 바라보게만 만드므로, MAX_MOUSE_TARGET_DISTANCE로 거리를 제한할 이유가
+  // 없습니다(실제 사거리는 스킬 자신의 shape.range가 이미 결정함). 예전엔
+  // 이 방향 재조준에도 40m 제한이 걸려 있어서, 용의 변신처럼 사거리가
+  // 5배(최대 150m)로 늘어난 상태에서 40m보다 먼 곳을 조준하면 마우스 방향을
+  // 완전히 무시하고 카메라 방향으로만 나가는 문제가 있었습니다(사용자 피드백:
+  // "용으로 변신을 사용하면 스킬들이 마우스가 가리키는 방향으로 발사가 안돼").
+  // radial(원점 자체가 마우스 지점으로 이동하는 낙뢰·포격류)만 물리적으로
+  // 너무 먼 지점을 원점으로 삼지 못하도록 거리 제한을 그대로 유지합니다.
+  if (skill.originAtMouse && aimGroundPoint) {
     if (skill.shape.kind === "line" || skill.shape.kind === "cone" || skill.shape.kind === "self") {
-      // 방향성 있는 스킬은 원점은 그대로 두고, 마우스 지점을 바라보는 방향으로 재조준합니다.
       const retargetedYaw = Math.atan2(aimGroundPoint.x - position.x, aimGroundPoint.z - position.z);
       return { x: position.x, z: position.z, aimYaw: retargetedYaw };
     }
-    // radial 스킬은 마우스 지점 자체가 원점이 됩니다.
-    return { x: aimGroundPoint.x, z: aimGroundPoint.z, aimYaw };
+    if (isMouseTargetInRange(position, aimGroundPoint)) {
+      // radial 스킬은 마우스 지점 자체가 원점이 됩니다.
+      return { x: aimGroundPoint.x, z: aimGroundPoint.z, aimYaw };
+    }
   }
 
   if (!skill.originAtAim || skill.shape.kind !== "radial") {

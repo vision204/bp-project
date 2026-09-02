@@ -160,6 +160,14 @@ export class PlayerController {
     const next = { x: pos.x + mx * dt, y: pos.y + my * dt, z: pos.z + mz * dt };
     // 너무 높이 올라가면 아무것도 안 보이므로 상한만 둡니다.
     next.y = Math.max(-20, Math.min(FLY_CEILING, next.y));
+    // 용으로 변신(V) 중에는 5배로 커진 몸이 고정된 -20 바닥보다 훨씬 높은
+    // 지형에도 파묻혀 보일 수 있으므로(사용자 피드백: "충돌하긴 하는데
+    // 고도가 너무 낮아 맵에 껴보임"), main.ts가 매 프레임 채워주는 실제
+    // 지형 높이(dragonFormGroundY)보다는 아래로 못 내려가게 다시 한 번
+    // 막습니다. 지형 정보가 없으면(먼 바다 등) 위의 고정 하한을 그대로 씁니다.
+    if (player.dragonFormActive && player.dragonFormGroundY !== null) {
+      next.y = Math.max(player.dragonFormGroundY, next.y);
+    }
 
     this.body.setNextKinematicTranslation(next);
     this.verticalVelocity = 0;

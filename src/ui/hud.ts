@@ -10,6 +10,7 @@ import { drawnWeapon, weaponFor } from "../simulation/WeaponSystem";
 import { FRUIT_CATALOG } from "../simulation/ShopSystem";
 import { boatTier } from "../simulation/BoatSystem";
 import { guideInfo } from "../simulation/GuideSystem";
+import { isInSafeZone } from "../world/SafeZones";
 import "./hud.css";
 import "./hud-mobile.css";
 
@@ -33,6 +34,7 @@ export class Hud {
   private statPointsBadge!: HTMLDivElement;
   private buffBadge!: HTMLDivElement;
   private hakiBadge!: HTMLDivElement;
+  private safeZoneBadge!: HTMLDivElement;
   private islandBadge!: HTMLDivElement;
   private skillRow!: HTMLDivElement;
   /** 검/총/열매 숙련도 표시 (화면 우측 하단) — 뽑아 든 것 하나만 보여줍니다 */
@@ -127,6 +129,7 @@ export class Hud {
     this.statPointsBadge = this.root.querySelector("#hud-stat-points")!;
     this.buffBadge = this.root.querySelector("#hud-buff")!;
     this.hakiBadge = this.root.querySelector("#hud-haki")!;
+    this.safeZoneBadge = this.root.querySelector("#hud-safe-zone")!;
     this.islandBadge = this.root.querySelector("#hud-island")!;
     this.seaBadge = this.root.querySelector("#hud-sea")!;
     this.skillRow = this.root.querySelector("#hud-skills")!;
@@ -277,6 +280,7 @@ export class Hud {
           <div class="jump-badge" id="hud-jump" hidden></div>
           <div class="buff-badge" id="hud-buff" hidden></div>
           <div class="haki-badge" id="hud-haki" hidden>무장색 ON</div>
+          <div class="safe-zone-badge" id="hud-safe-zone" hidden>🛡️ PvP 안전지역</div>
           <div class="dash-badge" id="hud-dash" hidden></div>
           <div class="teleport-badge" id="hud-teleport" hidden></div>
           <div class="stat-points-badge" id="hud-stat-points" hidden></div>
@@ -354,6 +358,7 @@ export class Hud {
             <div class="jump-badge" id="hud-jump" hidden></div>
             <div class="buff-badge" id="hud-buff" hidden></div>
             <div class="haki-badge" id="hud-haki" hidden>무장색 ON</div>
+            <div class="safe-zone-badge" id="hud-safe-zone" hidden>🛡️ PvP 안전지역</div>
             <div class="dash-badge" id="hud-dash" hidden></div>
             <div class="teleport-badge" id="hud-teleport" hidden></div>
             <div class="stat-points-badge" id="hud-stat-points" hidden></div>
@@ -469,6 +474,7 @@ export class Hud {
         <div class="jump-badge" id="hud-jump" hidden></div>
         <div class="buff-badge" id="hud-buff" hidden></div>
         <div class="haki-badge" id="hud-haki" hidden>무장색 ON</div>
+        <div class="safe-zone-badge" id="hud-safe-zone" hidden>🛡️ PvP 안전지역</div>
         <div class="dash-badge" id="hud-dash" hidden></div>
         <div class="teleport-badge" id="hud-teleport" hidden></div>
         <div class="stat-points-badge" id="hud-stat-points" hidden></div>
@@ -617,6 +623,7 @@ export class Hud {
     }
 
     this.hakiBadge.hidden = !p.hakiActive;
+    this.safeZoneBadge.hidden = !isInSafeZone(p.position.x, p.position.z);
 
     // 질주 표시 (Q 대쉬는 쿨다운 없이 마나로 쓰므로 따로 배지가 없습니다 — MP 바로 확인)
     if (p.sprinting) {
@@ -889,6 +896,9 @@ export class Hud {
           break;
         case "haki_toggled":
           this.pushToast(ev.active ? "무장색 발동!" : "무장색 해제", "blue");
+          break;
+        case "dragon_form_auto_reverted":
+          this.pushToast("🐲 스킬을 너무 많이 써서 다시 사람으로 돌아왔습니다", "red");
           break;
         case "fruit_purchased":
           this.pushToast(`${ev.fruitName}를 먹었습니다! 기존 열매는 사라집니다`);

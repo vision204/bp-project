@@ -31,6 +31,7 @@ const { ISLANDS, WATER_ENTER_Y, islandAt, islandArrivalPosition, boatPosition, w
         getIsland, getSpecies, speciesCountForGap, levelGapToNextIsland, SPECIES_LEVEL_STEP,
         startIslandFor, hubIsland, hasEnemies, FACTION_LABELS } =
   await import("../src/world/islands.ts");
+const { isInSafeZone, HQ_SAFE_ZONE_BOUNDS } = await import("../src/world/SafeZones.ts");
 const { QUEST_KILL_TARGET, QUEST_REWARD_PERCENT_OF_LEVEL, applyKillsToQuests, questRewardExp, stepInteraction,
         acceptQuest } = await import("../src/simulation/QuestSystem.ts");
 const { SLOT_KEYS, SLOT_UNLOCK_LEVELS, allSkills, skillsForFruit, isSlotUnlocked,
@@ -42,6 +43,8 @@ const { stepCombat, stepEnemyStatuses, skillDamage, weaponSkillDamage, canMeleeA
 const { fruitExpRequiredForLevel, fruitLevelDamageMultiplier, MAX_FRUIT_LEVEL } =
   await import("../src/simulation/FruitLeveling.ts");
 const { SAVE_VERSION, toSaveData, applySaveData } = await import("../src/core/SaveData.ts");
+const { skillOrigin, isMouseTargetInRange, MAX_MOUSE_TARGET_DISTANCE } =
+  await import("../src/simulation/ShapeMath.ts");
 const { DEFAULT_CONFIG, resolveConfig, isConfigComplete } = await import("../src/firebase/config.ts");
 const { TRAINER_ISLAND_ID, FIRST_JUMP_LEVEL, JUMP_LEVEL_STEP, MAX_JUMPS,
         jumpRequiredLevel, jumpPrice, jumpBlockReason, canLearnJump, learnJump } =
@@ -274,7 +277,7 @@ section("퀘스트: 몬스터 종류 선택 (여러 종류인 섬)");
 section("섬 구성 — 진영 시작 섬 2개 + 중앙 교역섬 + 두 겹 고리");
 assert(ISLANDS.length === 23, `섬 ${ISLANDS.length}개 (첫 바다 13 + 두 번째 바다 10)`);
 assert(ISLANDS.filter((i) => i.sea === 1).length === 13, "첫 번째 바다 13개 (시작 2 + 중앙 1 + 안쪽 5 + 바깥 5)");
-assert(ISLANDS.filter((i) => i.sea === 2).length === 10, "두 번째 바다 10개 (분수 도시 1 + 사냥터 9)");
+assert(ISLANDS.filter((i) => i.sea === 2).length === 10, "두 번째 바다 10개 (본부 1 + 사냥터 9)");
 
 const pirateStart = startIslandFor("pirate");
 const marineStart = startIslandFor("marine");
@@ -390,8 +393,8 @@ section("몬스터 종류 — 참고 자료(다른 게임의 섬별 몬스터 �
 // speciesCountForGap을 다시 재현하는 대신, Part B 스펙 그대로의 종족 구성을
 // 리터럴로 검증합니다. speciesCountForGap 자체(순수 함수)는 아래에서 별도로
 // 검증합니다.
-assert(ISLANDS.filter((i) => i.species.length === 0).map((i) => i.id).sort().join() === "central,fountain",
-  "몬스터가 없는 섬은 바다별 허브 둘뿐 (중앙 교역섬 · 분수 도시)");
+assert(ISLANDS.filter((i) => i.species.length === 0).map((i) => i.id).sort().join() === "central,hq",
+  "몬스터가 없는 섬은 바다별 허브 둘뿐 (중앙 교역섬 · 본부)");
 const EXPECTED_WILD_SPECIES_NAMES = {
   jungle: ["정글 도적"],
   desert: ["사막 도적"],
@@ -1903,6 +1906,69 @@ section("밸런스 — 용으로 변신 중엔 공격 스킬(dragon_z/x/c) 사�
   assert(farOther.hp === 10000, "equippedFruit이 dragon_dragon이 아니면 dragonFormActive가 true여도 사거리 boost가 적용되지 않음(가드 확인)");
 }
 
+section("skillOrigin — line/cone(방향만 재조준)은 마우스 거리 제한이 없어야 함");
+{
+  // 사용자 피드백: 용의 변신처럼 사거리가 5배(최대 150m)로 늘어난 상태에서
+  // MAX_MOUSE_TARGET_DISTANCE(40m)보다 먼 곳을 조준하면 마우스 방향을 완전히
+  // 무시하는 문제가 있었습니다 — line/cone은 원점이 옮겨가는 게 아니라
+  // "방향만" 바뀌므로 거리 제한이 애초에 필요 없다는 걸 확인합니다.
+  const lineSkill = { id: "t", name: "t", slot: 0, unlockFruitLevel: 1, cooldownSec: 0, manaCost: 0, damage: 1,
+    shape: { kind: "line", range: 999, width: 1 }, originAtMouse: true };
+  const farPoint = { x: 0, z: 200 }; // MAX_MOUSE_TARGET_DISTANCE보다 훨씬 먼 지점
+  assert(200 > MAX_MOUSE_TARGET_DISTANCE, "테스트 전제: 200m는 MAX_MOUSE_TARGET_DISTANCE보다 멀다");
+  const originLine = skillOrigin({ x: 0, z: 0 }, 0, lineSkill, farPoint);
+  assert(Math.abs(originLine.aimYaw) < 1e-9, `line: 40m 밖이어도 마우스 방향(정면)으로 재조준됨 (실제 aimYaw=${originLine.aimYaw})`);
+
+  const coneSkill = { ...lineSkill, shape: { kind: "cone", range: 999, halfAngleDeg: 30 } };
+  const farSide = { x: 200, z: 0 }; // 옆(+X)의 아주 먼 지점
+  const originCone = skillOrigin({ x: 0, z: 0 }, 0, coneSkill, farSide);
+  assert(Math.abs(originCone.aimYaw - Math.PI / 2) < 1e-9, `cone: 40m 밖이어도 마우스 방향(+X)으로 재조준됨 (실제 aimYaw=${originCone.aimYaw})`);
+
+  // radial(원점 자체가 마우스 지점으로 이동)은 여전히 거리 제한이 걸려야 함(악용 방지)
+  const radialSkill = { ...lineSkill, shape: { kind: "radial", radius: 5 } };
+  const originRadialFar = skillOrigin({ x: 0, z: 0 }, 0, radialSkill, farPoint);
+  assert(originRadialFar.x === 0 && originRadialFar.z === 0, "radial: 40m 밖이면 원점 이동이 막히고 발밑으로 폴백됨(그대로 유지)");
+  const nearPoint = { x: 0, z: 10 };
+  const originRadialNear = skillOrigin({ x: 0, z: 0 }, 0, radialSkill, nearPoint);
+  assert(originRadialNear.x === 0 && originRadialNear.z === 10, "radial: 40m 안이면 마우스 지점이 그대로 원점이 됨");
+}
+
+section("밸런스 — 용으로 변신 중 공격 스킬을 9번 쓰면 자동으로 사람으로 돌아옴");
+{
+  const pAuto = freshPlayer();
+  pAuto.equippedFruit = "dragon_dragon";
+  pAuto.fruitLevel = 100;
+  pAuto.fruitDrawn = true;
+  pAuto.mana = 999;
+  pAuto.position = { x: 0, y: 1, z: 0 };
+  pAuto.aimYaw = 0;
+  pAuto.events = [];
+  tapSkill(0.016, pAuto, [], 3);
+  assert(pAuto.dragonFormActive === true, "V로 변신 ON");
+  assert(pAuto.dragonFormSkillCastCount === 0, "변신 직후 카운터는 0");
+
+  for (let i = 1; i <= 8; i++) {
+    pAuto.fruitSkillCooldowns = [0, 0, 0, 0];
+    pAuto.events = [];
+    tapSkill(0.016, pAuto, [], 0);
+    assert(pAuto.dragonFormActive === true, `8번까지는 변신이 풀리지 않음 (${i}번째 사용 후)`);
+  }
+  assert(pAuto.dragonFormSkillCastCount === 8, `8번 사용 후 카운터 8 (실제 ${pAuto.dragonFormSkillCastCount})`);
+
+  pAuto.fruitSkillCooldowns = [0, 0, 0, 0];
+  pAuto.events = [];
+  tapSkill(0.016, pAuto, [], 0);
+  assert(pAuto.dragonFormActive === false, "9번째 사용하면 자동으로 사람으로 돌아옴");
+  assert(pAuto.dragonFormSkillCastCount === 0, "해제되면서 카운터도 0으로 리셋됨");
+  assert(pAuto.events.some((e) => e.type === "dragon_form_auto_reverted"), "dragon_form_auto_reverted 이벤트 발생");
+
+  // 다시 변신하면 카운터가 새로 0부터 시작해야 함
+  pAuto.fruitSkillCooldowns = [0, 0, 0, 0];
+  tapSkill(0.016, pAuto, [], 3);
+  assert(pAuto.dragonFormActive === true, "다시 V로 변신 ON");
+  assert(pAuto.dragonFormSkillCastCount === 0, "재변신하면 카운터가 다시 0부터 시작");
+}
+
 section("빛빛/용용 F 특수 능력 — special_ability_fired 이벤트(PvP 중계용)");
 {
   // F는 일반 skill_fired 루프 밖이라, 다른 플레이어 화면에 보여주려면 별도
@@ -3089,8 +3155,9 @@ section("두 번째 바다 — 해적왕이 유일한 통로");
 
   // 허브가 바다마다 하나씩
   assert(hubIsland(1).id === "central", `첫 번째 바다 허브: ${hubIsland(1).name}`);
-  assert(hubIsland(2).id === "fountain", `두 번째 바다 허브: ${hubIsland(2).name}`);
-  assert(hubIsland(2).species.length === 0, "분수 도시도 중립 지대 (몬스터 없음)");
+  assert(hubIsland(2).id === "hq", `두 번째 바다 허브: ${hubIsland(2).name}`);
+  assert(hubIsland(2).name === "본부", `두 번째 바다 허브 이름: ${hubIsland(2).name}`);
+  assert(hubIsland(2).species.length === 0, "본부도 중립 지대 (몬스터 없음)");
 
   // 레벨 구간이 첫 바다 위로 이어짐
   const sea2Wild = sea2.filter((i) => i.kind === "wild").sort((a, b) => a.requiredLevel - b.requiredLevel);
@@ -3144,10 +3211,10 @@ section("두 번째 바다 — 해적왕이 유일한 통로");
   state.player.guideTargetIslandId = "dragon";
 
   const moved = travelSea(state, teleport);
-  assert(moved?.sea === 2 && moved.islandId === "fountain", `분수 도시에 도착 (${moved?.islandId})`);
+  assert(moved?.sea === 2 && moved.islandId === "hq", `본부에 도착 (${moved?.islandId})`);
   assert(state.sea === 2, "상태의 바다가 2로 바뀜");
-  assert(state.currentIslandId === "fountain", "현재 섬도 분수 도시");
-  const hub2 = getIsland("fountain");
+  assert(state.currentIslandId === "hq", "현재 섬도 본부");
+  const hub2 = getIsland("hq");
   assert(Math.hypot(state.player.position.x - hub2.center.x, state.player.position.z - hub2.center.z) < 1,
     "광장 한가운데에 내려섬");
   assert(teleports.length === 1, "물리 바디도 같이 옮겨짐");
@@ -3206,14 +3273,14 @@ section("두 번째 바다 — 해적왕이 유일한 통로");
   state.player.level = 1500;
   travelSea(state, () => {});
   const saved = JSON.parse(JSON.stringify(toSaveData(state, 1_700_000_000_000)));
-  assert(saved.sea === 2 && saved.currentIslandId === "fountain", "어느 바다에 있었는지 저장됨");
+  assert(saved.sea === 2 && saved.currentIslandId === "hq", "어느 바다에 있었는지 저장됨");
   assert(saved.unlockedSecondSea === true, "두 번째 바다를 연 사실도 저장됨");
 
   const loaded = createInitialGameState("pirate");
   loaded.quests = createQuests();
   applySaveData(loaded, saved);
   assert(loaded.sea === 2, "불러오면 두 번째 바다에서 시작");
-  assert(loaded.currentIslandId === "fountain", "섬도 분수 도시");
+  assert(loaded.currentIslandId === "hq", "섬도 본부");
   assert(loaded.player.unlockedSecondSea === true, "해금 상태도 복원");
 
   // 섬과 바다가 어긋난 세이브가 들어와도 좌표를 따릅니다
@@ -3221,7 +3288,7 @@ section("두 번째 바다 — 해적왕이 유일한 통로");
   const fixed = createInitialGameState("pirate");
   fixed.quests = createQuests();
   applySaveData(fixed, tampered);
-  assert(fixed.sea === 2, "sea 값을 손으로 1로 고쳐도 섬(분수 도시) 기준으로 바로잡힘");
+  assert(fixed.sea === 2, "sea 값을 손으로 1로 고쳐도 섬(본부) 기준으로 바로잡힘");
 
   // 반대로 첫 바다 섬 + sea:2 로 조작한 경우
   const tampered2 = { ...saved, currentIslandId: "jungle" };
@@ -3778,6 +3845,121 @@ assert(islandAt(0, 0)?.id === "central", "원점은 중앙 교역섬 (해적·�
 assert(islandAt(200, 180) === null, "먼 바다는 어떤 섬에도 속하지 않음");
 const jungleForCheck = ISLANDS.find((i) => i.id === "jungle");
 assert(islandAt(jungleForCheck.center.x, jungleForCheck.center.z)?.id === "jungle", "정글 섬 중심 판정");
+
+section("두 번째 바다 안쪽 대륙 — 본부(hq) 허브 + 4개 사냥터 병합 (분수 도시 → 본부 리모델링)");
+{
+  // (1) hubIsland(2)는 새 "hq" 섬으로 해석되고 이름이 "본부"여야 합니다.
+  const hub2 = hubIsland(2);
+  assert(hub2.id === "hq", `두 번째 바다 허브 id: ${hub2.id}`);
+  assert(hub2.name === "본부", `두 번째 바다 허브 이름: ${hub2.name}`);
+  assert(hub2.kind === "hub" && hub2.species.length === 0, "본부도 중립 지대 (허브·몬스터 없음)");
+
+  // (2) 옛 "fountain" id는 더 이상 존재하지 않아야 합니다.
+  assert(ISLANDS.every((i) => i.id !== "fountain"), "ISLANDS에 id \"fountain\"인 섬이 없음 (본부로 교체됨)");
+  let threw = false;
+  try {
+    getIsland("fountain");
+  } catch {
+    threw = true;
+  }
+  assert(threw, "getIsland(\"fountain\")은 이제 예외를 던짐 (알 수 없는 섬 id)");
+
+  // (3) 회귀 가드 — 좌표만 바뀌었을 뿐, 4개 사냥터의 레벨/종족/개체수/HP는
+  // 기존과 완전히 동일해야 합니다 (이번 리모델링은 시각적 지형 변경일 뿐).
+  const REGION_REGRESSION = {
+    rose: { requiredLevel: 1100, radius: 48, enemyHp: 26000, species: [{ name: "장미 기사", hp: 27500, count: 10 }] },
+    green_zone: {
+      requiredLevel: 1200,
+      radius: 48,
+      enemyHp: 30000,
+      species: [
+        { name: "초원 사냥꾼", hp: 7400, count: 10 },
+        { name: "초원 족장", hp: 43000 },
+      ],
+    },
+    graveyard: { requiredLevel: 1300, radius: 48, enemyHp: 35000, species: [{ name: "무덤지기", hp: 10400, count: 11 }] },
+    snow_mountain: { requiredLevel: 1400, radius: 48, enemyHp: 41000, species: [{ name: "설산 산적", hp: 11800, count: 11 }] },
+  };
+  for (const [id, expected] of Object.entries(REGION_REGRESSION)) {
+    const island = getIsland(id);
+    assert(island.requiredLevel === expected.requiredLevel, `${island.name}: 요구 레벨 그대로 (${island.requiredLevel})`);
+    assert(island.radius === expected.radius, `${island.name}: 반지름 그대로 (${island.radius}) — 대륙 안으로 좌표만 옮김`);
+    assert(island.enemy.hp === expected.enemyHp, `${island.name}: 기준 hp 그대로 (${island.enemy.hp})`);
+    assert(
+      island.species.map((s) => s.name).join(",") === expected.species.map((s) => s.name).join(","),
+      `${island.name}: 종족 구성 그대로 [${island.species.map((s) => s.name).join(", ")}]`,
+    );
+    expected.species.forEach((sp, k) => {
+      assert(island.species[k].hp === sp.hp, `${island.name} "${sp.name}": hp 그대로 (${island.species[k].hp})`);
+      if (sp.count !== undefined) {
+        assert(island.species[k].count === sp.count, `${island.name} "${sp.name}": 개체수 그대로 (${island.species[k].count})`);
+      }
+    });
+    assert(island.skipOwnTerrain === true, `${island.name}: skipOwnTerrain — 대륙이 바닥을 대신 제공`);
+  }
+  assert(hub2.skipOwnTerrain === true, "본부도 skipOwnTerrain — 대륙 지형 위에 얹힘");
+
+  // 새 좌표가 정말 본부를 N/E/S/W로 둘러싸는지 (본부 중심에서 정확히 150m)
+  for (const id of ["rose", "green_zone", "graveyard", "snow_mountain"]) {
+    const island = getIsland(id);
+    const d = Math.hypot(island.center.x - hub2.center.x, island.center.z - hub2.center.z);
+    assert(Math.abs(d - 150) < 0.01, `${island.name}: 본부 중심에서 정확히 150m (${d.toFixed(1)}m)`);
+  }
+}
+
+section("PvP 안전지역 — 본부 건물 내부");
+{
+  // (4) 본부 건물 내부의 한 점은 안전지역, 사냥터 섬 중심처럼 명백히 바깥인
+  // 점은 안전지역이 아니어야 합니다.
+  const insideX = (HQ_SAFE_ZONE_BOUNDS.minX + HQ_SAFE_ZONE_BOUNDS.maxX) / 2;
+  const insideZ = (HQ_SAFE_ZONE_BOUNDS.minZ + HQ_SAFE_ZONE_BOUNDS.maxZ) / 2;
+  assert(isInSafeZone(insideX, insideZ) === true, `본부 건물 한가운데(${insideX}, ${insideZ})는 안전지역`);
+
+  const rose = getIsland("rose");
+  assert(isInSafeZone(rose.center.x, rose.center.z) === false, "장미 왕국 중심은 안전지역이 아님 (본부 밖 사냥터)");
+  const marineStart = getIsland("marine_start");
+  assert(isInSafeZone(marineStart.center.x, marineStart.center.z) === false, "첫 번째 바다 섬은(좌표가 완전히 다르므로) 당연히 안전지역이 아님");
+
+  // 경계 바로 바깥은 안전지역이 아니어야 합니다 (박스 판정이 실제로 유한함을 확인)
+  assert(isInSafeZone(HQ_SAFE_ZONE_BOUNDS.maxX + 5, insideZ) === false, "경계 바로 바깥은 안전지역이 아님");
+}
+
+section("PvP 안전지역 — 서버 판정(basicPvpCheck)도 같은 좌표 기준으로 막음");
+{
+  function fakeConn(world, name, faction) {
+    const sent = [];
+    const sock = { readyState: 1, OPEN: 1, send: (d) => sent.push(JSON.parse(d)), close() {} };
+    const conn = world.join(sock, name, faction);
+    return { conn, sent };
+  }
+
+  const world = new World();
+  const attacker = fakeConn(world, "공격자", "pirate");
+  const victim = fakeConn(world, "피해자", "marine");
+  attacker.conn.pvpEnabled = true;
+  victim.conn.pvpEnabled = true;
+  attacker.conn.sea = 2;
+  victim.conn.sea = 2;
+
+  const insideX = (HQ_SAFE_ZONE_BOUNDS.minX + HQ_SAFE_ZONE_BOUNDS.maxX) / 2;
+  const insideZ = (HQ_SAFE_ZONE_BOUNDS.minZ + HQ_SAFE_ZONE_BOUNDS.maxZ) / 2;
+  attacker.conn.position = { x: insideX, y: 1, z: insideZ };
+  victim.conn.position = { x: insideX + 3, y: 1, z: insideZ };
+
+  const hpBefore = victim.conn.hp;
+  world.handleMessage(attacker.conn, JSON.stringify({ type: "melee_attack", targetId: victim.conn.id }));
+  const rejected = attacker.sent.find((m) => m.type === "pvp_rejected");
+  assert(rejected?.reason === "safe_zone", `본부 안에서는 서버가 공격을 막음 (reason: ${rejected?.reason})`);
+  assert(victim.conn.hp === hpBefore, "안전지역 안이라 실제로 맞지 않음 (hp 그대로)");
+
+  // 공격자를 밖으로 옮기면(대상은 안전지역 안) 여전히 막혀야 합니다 — 둘 중 하나만 안이어도 막힘.
+  attacker.conn.position = { x: getIsland("rose").center.x, y: 1, z: getIsland("rose").center.z };
+  attacker.conn.lastMeleeAtMs = 0;
+  attacker.sent.length = 0;
+  world.handleMessage(attacker.conn, JSON.stringify({ type: "melee_attack", targetId: victim.conn.id }));
+  const rejected2 = attacker.sent.find((m) => m.type === "pvp_rejected");
+  assert(rejected2?.reason === "safe_zone", `대상만 안전지역 안이어도 막힘 (reason: ${rejected2?.reason})`);
+}
 
 console.log(failures === 0 ? "\n모든 로직 검증 통과 ✅" : `\n${failures}개 실패 ❌`);
 process.exit(failures === 0 ? 0 : 1);

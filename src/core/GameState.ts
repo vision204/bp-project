@@ -403,6 +403,23 @@ export interface PlayerState {
    * 세팅합니다. 저장되지 않는 일시적 상태입니다(SaveData.ts).
    */
   dragonFormActive: boolean;
+  /**
+   * 용으로 변신한 동안(dragonFormActive===true) dragon_z/x/c를 몇 번 썼는지
+   * 세는 카운터 — 사용자 요청("스킬을 9번 이상 사용하면 바로 다시 사람으로
+   * 돌아오게")으로, DRAGON_FORM_MAX_SKILL_CASTS(CombatSystem.ts)에 도달하면
+   * 자동으로 변신이 풀립니다. V로 변신할 때(다시 켤 때) 0으로 초기화됩니다.
+   */
+  dragonFormSkillCastCount: number;
+  /**
+   * 용으로 변신해 하늘을 나는 동안, 지금 발밑(x,z) 바로 아래 지형의 실제
+   * 높이(y) — main.ts가 매 프레임 시뮬레이션을 돌리기 전에 렌더러로
+   * 레이캐스트해서 채워줍니다(aimGroundPoint와 같은 패턴). 지형 위가 아니면
+   * (먼 바다 등) null. PlayerController.stepFlight가 이 값보다 아래로는
+   * 내려가지 못하게 막아서, 예전의 고정된 최저 고도(-20)보다 훨씬 낮은
+   * 지형에서도(또는 반대로 높은 산 위에서도) 땅속에 파묻혀 보이지 않게
+   * 합니다(사용자 피드백: "충돌하긴 하는데 고도가 너무 낮아 맵에 껴보임").
+   */
+  dragonFormGroundY: number | null;
 
   /**
    * 두 번째 바다를 한 번이라도 연 적이 있는지.
@@ -426,6 +443,8 @@ export type GameEvent =
   | { type: "skill_locked"; skillName: string; requiredFruitLevel: number }
   | { type: "haki_learned" }
   | { type: "haki_toggled"; active: boolean }
+  /** 용으로 변신한 채로 dragon_z/x/c를 DRAGON_FORM_MAX_SKILL_CASTS번 쓰면 자동으로 사람으로 돌아옴(사용자 요청) */
+  | { type: "dragon_form_auto_reverted" }
   | { type: "player_damaged"; amount: number }
   | { type: "player_drowning" }
   | { type: "player_respawned" }
@@ -670,6 +689,8 @@ export function createInitialGameState(
       dragonFlightActive: false,
       dragonFlightCooldownRemainingSec: 0,
       dragonFormActive: false,
+      dragonFormSkillCastCount: 0,
+      dragonFormGroundY: null,
       events: [],
     },
     enemies: [],

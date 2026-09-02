@@ -42,6 +42,7 @@ import { DRAGON_FORM_RANGE_MULTIPLIER, isSlotUnlocked, skillsForFruit, withRange
 import { isWeaponSlotUnlocked, skillsForWeapon } from "../src/simulation/weaponSkills";
 import { fruitLevelDamageMultiplier } from "../src/simulation/FruitLeveling";
 import { dist2D, pointInShape, skillOrigin } from "../src/simulation/ShapeMath";
+import { isInSafeZone } from "../src/world/SafeZones";
 import {
   addCrewBounty,
   crewBonusForKill,
@@ -872,11 +873,16 @@ export class World {
   }
 
   /**
-   * 공격 가능 여부의 공통 조건 (진영·PvP 켜짐·같은 바다·생존).
+   * 공격 가능 여부의 공통 조건 (진영·PvP 켜짐·같은 바다·생존·안전지역).
    *
    * 같은 진영끼리는 원래 전부 막혀 있었지만, 해적은 자기들끼리도 싸울 수 있게
    * 열어달라는 요청에 따라 "해적 vs 해적"만 예외로 허용합니다. 해군은 여전히
    * 해군끼리 공격할 수 없습니다 — 명시적으로 "해적만" 열기로 확인받은 부분입니다.
+   *
+   * 본부(HQ) 건물 안(PvP 안전지역)은 공격자·대상 둘 중 누구든 들어가 있으면
+   * 막습니다 — 클라이언트(src/network/PvpCombat.ts)도 같은 isInSafeZone으로
+   * 먼저 걸러서 애초에 요청을 안 보내지만, 최종 판정은 항상 서버 쪽 좌표
+   * (attacker.position / target.position)를 기준으로 다시 합니다.
    */
   private basicPvpCheck(attacker: Connection, target: Connection | undefined): string | null {
     if (!target) return "not_connected";
@@ -886,6 +892,8 @@ export class World {
     if (attacker.faction === target.faction && attacker.faction !== "pirate") return "same_faction";
     if (attacker.sea !== target.sea) return "different_sea";
     if (!target.alive || target.hp <= 0) return "target_down";
+    if (isInSafeZone(attacker.position.x, attacker.position.z)) return "safe_zone";
+    if (isInSafeZone(target.position.x, target.position.z)) return "safe_zone";
     return null;
   }
 
