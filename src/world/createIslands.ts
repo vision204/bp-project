@@ -77,6 +77,15 @@ const PLATEAU_MIN_LEVEL = 400;
  */
 const PLATEAU_HEIGHT = 7;
 
+/**
+ * 장미 왕국의 성(랜드마크) 세로 배율 — "장미 조형물은 높이가 엄청 높게"라는
+ * 요청에 맞춰 다른 섬 랜드마크보다 훨씬 크게 키웁니다. 랜드마크는 buildLandmark()가
+ * 만드는 순수 시각 오브젝트(충돌체 없음)라 세로로만 늘려도 걷는 데는 영향이
+ * 없습니다. 원래 keep(성 몸체) 높이가 8m였으니 6배면 대략 48m — 성벽(5.5m)과
+ * 본부(14m)를 압도적으로 넘어서는, 대륙 어디서나 보이는 높이입니다.
+ */
+const ROSE_LANDMARK_HEIGHT_SCALE = 6;
+
 /** 섬 반지름에 비례하되 12~22m 사이로 잡습니다 (너무 작거나 섬을 다 덮지 않게). */
 function plateauRadiusFor(island: IslandDef): number {
   return Math.min(22, Math.max(12, island.radius * 0.3));
@@ -891,6 +900,7 @@ function buildPlateau(
 
   const landmark = buildLandmark(island.theme, palette, rand);
   landmark.position.set(island.center.x, height + 0.3, island.center.z);
+  if (island.theme === "rose") landmark.scale.y *= ROSE_LANDMARK_HEIGHT_SCALE;
   group.add(landmark);
 }
 
@@ -1568,6 +1578,214 @@ function buildHqBuilding(
   group.add(label);
 }
 
+/** 대륙 안쪽 4개 사냥터 — 색 얼룩·나무/바위 스캐터·장미 배치에서 반복해서 씁니다. */
+const CONTINENT_REGIONS: { theme: IslandTheme; local: { x: number; z: number } }[] = [
+  { theme: "rose", local: { x: 0, z: 150 } },
+  { theme: "green", local: { x: 150, z: 0 } },
+  { theme: "graveyard", local: { x: 0, z: -150 } },
+  { theme: "snow", local: { x: -150, z: 0 } },
+];
+
+/** 부드러운 원형 페이드 텍스처 — 중심은 불투명, 가장자리는 투명. 색 얼룩 패치들이 공유해서 씁니다. */
+function makeRadialFadeTexture(): THREE.Texture {
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, "rgba(255,255,255,0.85)");
+  grad.addColorStop(0.55, "rgba(255,255,255,0.45)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  return new THREE.CanvasTexture(canvas);
+}
+
+/**
+ * 지면 색 얼룩 — 대륙 바닥(buildContinentGround)은 충돌체와 정점을 공유하는
+ * 16각형 저해상도 메시라 정점 컬러로는 지역별 색을 표현할 수 없어서(내부에
+ * 정점이 없음), 대신 각 사냥터 중심 위에 그 테마 색으로 부드럽게 번지는
+ * 반투명 원판을 한 장씩 얹습니다(충돌 없음, 시각 전용 — 바닥이 회색 하나로
+ * 통일돼 보이는 문제를 지역별 색 얼룩으로 깹니다).
+ */
+function buildGroundColorPatch(
+  group: THREE.Group,
+  origin: { x: number; z: number },
+  centerLocal: { x: number; z: number },
+  radius: number,
+  color: number,
+  texture: THREE.Texture,
+) {
+  const geo = new THREE.PlaneGeometry(radius * 2, radius * 2);
+  const mat = new THREE.MeshBasicMaterial({
+    map: texture,
+    color,
+    transparent: true,
+    depthWrite: false,
+    opacity: 0.6,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(origin.x + centerLocal.x, CONTINENT_GROUND_Y + 0.02, origin.z + centerLocal.z);
+  mesh.renderOrder = 1;
+  group.add(mesh);
+}
+
+/** 허브(본부)에서 사냥터 하나로 뻗은 흙길 하나. 충돌은 없음(바닥이 이미 평평해서 안 필요). */
+function buildContinentRoad(
+  group: THREE.Group,
+  origin: { x: number; z: number },
+  dir: { x: number; z: number },
+  fromDist: number,
+  toDist: number,
+) {
+  const width = 6;
+  const roadColor = 0xb49a6e;
+  const length = toDist - fromDist;
+  const midDist = (fromDist + toDist) / 2;
+  const angle = Math.atan2(dir.z, dir.x);
+  const mat = new THREE.MeshStandardMaterial({ color: roadColor, roughness: 1 });
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, 0.06, width), mat);
+  mesh.position.set(origin.x + dir.x * midDist, CONTINENT_GROUND_Y + 0.04, origin.z + dir.z * midDist);
+  mesh.rotation.y = -angle;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+}
+
+/** 장미 왕국 주변에 촘촘히 깔 작은 장미 덤불 — buildProp의 장미 아치보다 훨씬 작고 가벼워서 밀집 배치에 씁니다. */
+function buildRoseBush(palette: ThemePalette): THREE.Group {
+  const group = new THREE.Group();
+  const stemMat = new THREE.MeshStandardMaterial({ color: palette.propTrunk });
+  const bloomMat = new THREE.MeshStandardMaterial({ color: palette.propTop, roughness: 0.6 });
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f7a3f, roughness: 0.8 });
+  const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.35, 0), leafMat);
+  leaf.position.y = 0.2;
+  leaf.scale.set(1.3, 0.6, 1.3);
+  leaf.castShadow = true;
+  group.add(leaf);
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2;
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.35, 5), stemMat);
+    stem.position.set(Math.cos(a) * 0.12, 0.4, Math.sin(a) * 0.12);
+    stem.rotation.z = Math.cos(a) * 0.2;
+    stem.rotation.x = -Math.sin(a) * 0.2;
+    group.add(stem);
+    const bloom = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 0), bloomMat);
+    bloom.position.set(Math.cos(a) * 0.16, 0.58, Math.sin(a) * 0.16);
+    bloom.castShadow = true;
+    group.add(bloom);
+  }
+  return group;
+}
+
+/**
+ * 대륙 안쪽(사냥터 4곳 자체 소품 지역 바깥, 길 옆은 피해서)에 나무·바위를
+ * 흩뿌리고, 장미 왕국 근처에는 장미 덤불을 훨씬 촘촘하게 추가로 깝니다.
+ * 시드 고정 난수라 매번 같은 배치가 나옵니다(다른 섬 소품 배치와 같은 방식).
+ */
+function buildContinentGreenery(
+  group: THREE.Group,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+  origin: { x: number; z: number },
+) {
+  const rand = makeRandom(20260902);
+  const roseCenter = CONTINENT_REGIONS.find((r) => r.theme === "rose")!.local;
+
+  const isInRoadZone = (x: number, z: number) => {
+    const dist = Math.hypot(x, z);
+    if (dist < 54 || dist > 116) return false;
+    const angle = (Math.atan2(z, x) * 180) / Math.PI;
+    for (const cardinal of [0, 90, 180, -90]) {
+      let diff = Math.abs(angle - cardinal);
+      if (diff > 180) diff = 360 - diff;
+      if (diff < 11) return true;
+    }
+    return false;
+  };
+  const nearAnyRegion = (x: number, z: number, margin: number) =>
+    CONTINENT_REGIONS.some((r) => Math.hypot(x - r.local.x, z - r.local.z) < margin);
+
+  const treeCount = Math.round(70 * quality.propDensity);
+  for (let i = 0; i < treeCount; i++) {
+    const angle = rand() * Math.PI * 2;
+    const dist = 54 + rand() * 136;
+    const x = Math.cos(angle) * dist;
+    const z = Math.sin(angle) * dist;
+    if (isInRoadZone(x, z) || nearAnyRegion(x, z, 62)) continue;
+
+    const nearest = CONTINENT_REGIONS.reduce((best, r) => {
+      const d = Math.hypot(x - r.local.x, z - r.local.z);
+      return d < best.d ? { d, theme: r.theme } : best;
+    }, { d: Infinity, theme: "green" as IslandTheme });
+    const theme = nearest.d < 130 ? nearest.theme : "green";
+    const palette = PALETTES[theme];
+
+    const prop = buildProp(theme, palette);
+    prop.position.set(origin.x + x, CONTINENT_GROUND_Y, origin.z + z);
+    prop.rotation.y = rand() * Math.PI * 2;
+    group.add(prop);
+
+    const propBody = world.createRigidBody(
+      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(
+        origin.x + x,
+        CONTINENT_GROUND_Y + PROP_COLLIDER_HALF_HEIGHT,
+        origin.z + z,
+      ),
+    );
+    world.createCollider(
+      RAPIER_NS.ColliderDesc.cylinder(PROP_COLLIDER_HALF_HEIGHT, PROP_COLLIDER_RADIUS),
+      propBody,
+    );
+  }
+
+  const rockCount = Math.round(45 * quality.propDensity);
+  for (let i = 0; i < rockCount; i++) {
+    const angle = rand() * Math.PI * 2;
+    const dist = 54 + rand() * 136;
+    const x = Math.cos(angle) * dist;
+    const z = Math.sin(angle) * dist;
+    if (isInRoadZone(x, z) || nearAnyRegion(x, z, 58)) continue;
+
+    const nearest = CONTINENT_REGIONS.reduce((best, r) => {
+      const d = Math.hypot(x - r.local.x, z - r.local.z);
+      return d < best.d ? { d, theme: r.theme } : best;
+    }, { d: Infinity, theme: "hq" as IslandTheme });
+    const rockColor = nearest.d < 130 ? PALETTES[nearest.theme].rock : PALETTES.hq.rock;
+    const rockRadius = 1.0 + rand() * 1.1;
+    const rockMat = new THREE.MeshStandardMaterial({ color: rockColor, roughness: 0.95 });
+    const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(rockRadius, 0), rockMat);
+    rock.position.set(origin.x + x, CONTINENT_GROUND_Y + 0.5, origin.z + z);
+    rock.rotation.set(rand(), rand(), rand());
+    rock.castShadow = quality.shadows;
+    group.add(rock);
+
+    const rockBody = world.createRigidBody(
+      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(origin.x + x, CONTINENT_GROUND_Y + 0.5, origin.z + z),
+    );
+    world.createCollider(RAPIER_NS.ColliderDesc.ball(rockRadius * 0.85), rockBody);
+  }
+
+  // 장미 왕국 근처는 장미 덤불을 훨씬 촘촘하게(요청: "장미 꽃도 장미왕국 근처에 더 많이").
+  // 덤불은 장식일 뿐이라 충돌은 안 붙입니다(빽빽하게 깔아도 이동을 막지 않도록).
+  const rosePalette = PALETTES.rose;
+  const bushCount = Math.round(90 * quality.propDensity);
+  for (let i = 0; i < bushCount; i++) {
+    const angle = rand() * Math.PI * 2;
+    const dist = 20 + rand() * 70;
+    const x = roseCenter.x + Math.cos(angle) * dist;
+    const z = roseCenter.z + Math.sin(angle) * dist;
+    if (Math.hypot(x, z) < 54) continue; // 본부/성벽 반경은 비워둠
+    const bush = buildRoseBush(rosePalette);
+    bush.position.set(origin.x + x, CONTINENT_GROUND_Y, origin.z + z);
+    bush.rotation.y = rand() * Math.PI * 2;
+    bush.scale.setScalar(0.85 + rand() * 0.4);
+    group.add(bush);
+  }
+}
+
 /**
  * 두 번째 바다 안쪽 대륙 전체(지형+해변+성벽+본부 건물)를 한 번만 짓습니다.
  * 개별 IslandDef를 도는 buildIsland()와 달리 이 함수는 createIslands()에서
@@ -1589,6 +1807,19 @@ function buildSecondSeaContinent(
   buildContinentBeachSkirt(coast, group, world, RAPIER_NS, quality, origin, palette.sand);
   buildCastleWall(coast, group, world, RAPIER_NS, quality, origin);
   buildHqBuilding({ x: origin.x + HQ_BUILDING.localCenter.x, z: origin.z + HQ_BUILDING.localCenter.z }, group, world, RAPIER_NS, quality);
+
+  // 바닥이 회색 하나로 통일돼 보이지 않도록, 사냥터 4곳 위에 그 테마 색으로
+  // 번지는 얼룩을 얹고(길/나무/바위보다 먼저 깔아야 그 위에 자연스럽게 겹침),
+  // 허브↔사냥터를 잇는 흙길을 내고, 대륙 안쪽에 나무·바위를 흩뿌립니다.
+  const fadeTexture = makeRadialFadeTexture();
+  for (const region of CONTINENT_REGIONS) {
+    buildGroundColorPatch(group, origin, region.local, 125, PALETTES[region.theme].ground, fadeTexture);
+  }
+  for (const region of CONTINENT_REGIONS) {
+    const len = Math.hypot(region.local.x, region.local.z) || 1;
+    buildContinentRoad(group, origin, { x: region.local.x / len, z: region.local.z / len }, 54, 108);
+  }
+  buildContinentGreenery(group, world, RAPIER_NS, quality, origin);
 
   return { group, center: { x: origin.x, z: origin.z } };
 }
