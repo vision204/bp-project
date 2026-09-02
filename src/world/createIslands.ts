@@ -1208,6 +1208,18 @@ function buildTradeTown(
  * 더 안쪽인 대각선 최저점에서 멀리 떨어져 있어 안전합니다 — 자세한 계산은
  * PR 설명 참고.)
  */
+/**
+ * 대륙 지면의 높이(y). 원형 섬들은 기둥 몸체 위에 0.3m 두께의 상판 텍스처
+ * 디스크를 얹어서 실제 걸어다니는 표면이 y≈0.3에 옵니다. 대륙 지형은 그
+ * 상판 디스크가 없는 평평한 폴리곤 한 장이라 예전엔 y=0에 있었는데, 바다
+ * 메시(OCEAN_MESH_Y = -0.8)와의 여유가 원형 섬보다 0.3m 적어서 파도가 치는
+ * 각도/거리에 따라 해안선 쪽에서 바다와 지면이 겹쳐 보이는 문제가 있었습니다.
+ * 원형 섬과 정확히 같은 높이(0.3)로 맞춥니다 — buildIsland()의 소품/바위/고원
+ * 배치(y=0.3, y=0.7 등)도 전부 이 관례를 전제로 하고 있어서, 대륙 안쪽 4개
+ * 사냥터(skipOwnTerrain)에 있는 소품들과도 높이가 어긋나지 않습니다.
+ */
+const CONTINENT_GROUND_Y = 0.3;
+
 const CONTINENT_FOOTPRINT: { angleDeg: number; radius: number }[] = [
   { angleDeg: 0, radius: 245 }, // → 초원 지대 방향(+x)
   { angleDeg: 22.5, radius: 225 },
@@ -1269,7 +1281,7 @@ function buildContinentGround(
   const positions = new Float32Array(points.length * 3);
   points.forEach((p, i) => {
     positions[i * 3] = origin.x + p.x;
-    positions[i * 3 + 1] = 0;
+    positions[i * 3 + 1] = CONTINENT_GROUND_Y;
     positions[i * 3 + 2] = origin.z + p.z;
   });
 
@@ -1338,10 +1350,10 @@ function buildContinentBeachSkirt(
 
     const base = positions.length / 3;
     positions.push(
-      origin.x + p1.x, 0, origin.z + p1.z,
-      origin.x + p2.x, 0, origin.z + p2.z,
-      origin.x + p2.x + nx * skirtWidth, -1.6, origin.z + p2.z + nz * skirtWidth,
-      origin.x + p1.x + nx * skirtWidth, -1.6, origin.z + p1.z + nz * skirtWidth,
+      origin.x + p1.x, CONTINENT_GROUND_Y, origin.z + p1.z,
+      origin.x + p2.x, CONTINENT_GROUND_Y, origin.z + p2.z,
+      origin.x + p2.x + nx * skirtWidth, CONTINENT_GROUND_Y - 1.6, origin.z + p2.z + nz * skirtWidth,
+      origin.x + p1.x + nx * skirtWidth, CONTINENT_GROUND_Y - 1.6, origin.z + p1.z + nz * skirtWidth,
     );
     // side: DoubleSide 재질이라 앞/뒤 어느 방향에서 봐도 보이므로 감는 순서 하나면 충분합니다.
     indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
@@ -1354,7 +1366,7 @@ function buildContinentBeachSkirt(
       const t = s / 4;
       const cx = origin.x + midX + nx * skirtWidth * t;
       const cz = origin.z + midZ + nz * skirtWidth * t;
-      const topY = -s * 0.35;
+      const topY = CONTINENT_GROUND_Y - s * 0.35;
       const body = world.createRigidBody(
         RAPIER_NS.RigidBodyDesc.fixed()
           .setTranslation(cx, topY - 0.5, cz)
@@ -1417,7 +1429,7 @@ function buildCastleWall(
       const cz = origin.z + p1.z + dz * t;
 
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(segLen + 0.5, WALL_HEIGHT, WALL_THICKNESS), wallMat);
-      mesh.position.set(cx, WALL_HEIGHT / 2, cz);
+      mesh.position.set(cx, CONTINENT_GROUND_Y + WALL_HEIGHT / 2, cz);
       mesh.rotation.y = -angle;
       mesh.castShadow = quality.shadows;
       mesh.receiveShadow = quality.shadows;
@@ -1425,7 +1437,7 @@ function buildCastleWall(
 
       const body = world.createRigidBody(
         RAPIER_NS.RigidBodyDesc.fixed()
-          .setTranslation(cx, WALL_HEIGHT / 2, cz)
+          .setTranslation(cx, CONTINENT_GROUND_Y + WALL_HEIGHT / 2, cz)
           .setRotation({ x: 0, y: Math.sin(-angle / 2), z: 0, w: Math.cos(-angle / 2) }),
       );
       world.createCollider(
@@ -1441,16 +1453,16 @@ function buildCastleWall(
     const cz = origin.z + p.z;
     const towerHeight = WALL_HEIGHT + 2.5;
     const tower = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.85, towerHeight, 8), towerMat);
-    tower.position.set(cx, towerHeight / 2, cz);
+    tower.position.set(cx, CONTINENT_GROUND_Y + towerHeight / 2, cz);
     tower.castShadow = quality.shadows;
     group.add(tower);
     const roof = new THREE.Mesh(new THREE.ConeGeometry(2.15, 1.8, 8), towerMat);
-    roof.position.set(cx, towerHeight + 0.9, cz);
+    roof.position.set(cx, CONTINENT_GROUND_Y + towerHeight + 0.9, cz);
     roof.castShadow = quality.shadows;
     group.add(roof);
 
     const body = world.createRigidBody(
-      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(cx, towerHeight / 2, cz),
+      RAPIER_NS.RigidBodyDesc.fixed().setTranslation(cx, CONTINENT_GROUND_Y + towerHeight / 2, cz),
     );
     world.createCollider(RAPIER_NS.ColliderDesc.cylinder(towerHeight / 2, 1.7), body);
   }
@@ -1487,7 +1499,7 @@ function makeFloatingLabel(text: string): THREE.Sprite {
 /**
  * 본부(HQ) 건물 — buildTownHouse와 달리 **안으로 걸어 들어갈 수 있는 실내**입니다.
  * 벽 4개를 각각 따로 세우고(동쪽 벽만 문 자리를 비워 두 조각으로 쪼갬) 지붕은
- * 장식만(충돌 있음, 안에서 위로 못 뚫고 나가게), 바닥은 대륙 지형(y=0)을
+ * 장식만(충돌 있음, 안에서 위로 못 뚫고 나가게), 바닥은 대륙 지형(y=CONTINENT_GROUND_Y)을
  * 그대로 씁니다 — 이미 걸을 수 있는 평지라 따로 바닥을 깔 필요가 없습니다.
  * 치수는 SafeZones.ts의 HQ_BUILDING과 정확히 같은 값을 가져다 씁니다 —
  * 눈에 보이는 벽과 PvP 안전지역 판정 경계가 어긋나지 않게 하기 위해서입니다.
@@ -1507,7 +1519,7 @@ function buildHqBuilding(
   const trimMat = new THREE.MeshStandardMaterial({ color: 0x1c3f24, roughness: 0.8 });
   const roofMat = new THREE.MeshStandardMaterial({ color: 0x24492c, roughness: 0.7 });
 
-  const wallY = wallHeight / 2;
+  const wallY = CONTINENT_GROUND_Y + wallHeight / 2;
   const addWall = (cx: number, cz: number, sx: number, sz: number) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(sx, wallHeight, sz), wallMat);
     mesh.position.set(cx, wallY, cz);
@@ -1533,26 +1545,26 @@ function buildHqBuilding(
 
   // 문 상인방 (장식)
   const lintel = new THREE.Mesh(new THREE.BoxGeometry(wallThickness + 0.5, 1.2, doorWidth + 0.6), trimMat);
-  lintel.position.set(center.x + halfW - wallThickness / 2, wallHeight - 0.6, center.z);
+  lintel.position.set(center.x + halfW - wallThickness / 2, CONTINENT_GROUND_Y + wallHeight - 0.6, center.z);
   group.add(lintel);
 
   // 지붕 — 평지붕 한 장 + 충돌(위로 뚫고 나가는 것 방지, 안은 그대로 비워둠)
   const roof = new THREE.Mesh(new THREE.BoxGeometry(width + 1.2, 0.6, depth + 1.2), roofMat);
-  roof.position.set(center.x, wallHeight + 0.3, center.z);
+  roof.position.set(center.x, CONTINENT_GROUND_Y + wallHeight + 0.3, center.z);
   roof.castShadow = quality.shadows;
   group.add(roof);
   const roofBody = world.createRigidBody(
-    RAPIER_NS.RigidBodyDesc.fixed().setTranslation(center.x, wallHeight + 0.3, center.z),
+    RAPIER_NS.RigidBodyDesc.fixed().setTranslation(center.x, CONTINENT_GROUND_Y + wallHeight + 0.3, center.z),
   );
   world.createCollider(RAPIER_NS.ColliderDesc.cuboid((width + 1.2) / 2, 0.3, (depth + 1.2) / 2), roofBody);
 
   // 처마 띠 장식
   const band = new THREE.Mesh(new THREE.BoxGeometry(width + 0.3, 0.4, depth + 0.3), trimMat);
-  band.position.set(center.x, wallHeight, center.z);
+  band.position.set(center.x, CONTINENT_GROUND_Y + wallHeight, center.z);
   group.add(band);
 
   const label = makeFloatingLabel("본부");
-  label.position.set(center.x + halfW + 2, wallHeight * 0.65, center.z);
+  label.position.set(center.x + halfW + 2, CONTINENT_GROUND_Y + wallHeight * 0.65, center.z);
   group.add(label);
 }
 

@@ -17,9 +17,9 @@ import { SEA_ORIGINS } from "./islands";
 export const HQ_BUILDING = {
   /** 건물 중심 (본부 섬의 localCenter와 같습니다 — islands.ts의 "hq" 항목 참고) */
   localCenter: { x: 0, z: 0 },
-  /** 바깥 치수(m) — x축 46m, z축 30m인 큰 창고 한 채 */
-  width: 46,
-  depth: 30,
+  /** 바깥 치수(m) — 넓이 4배(가로·세로 각 2배) 확장, x축 92m, z축 60m인 큰 창고 한 채 */
+  width: 92,
+  depth: 60,
   /** 벽 높이(m) */
   wallHeight: 14,
   /** 벽 두께(m) — 안전지역은 "내벽 안쪽" 기준이라 두께의 절반만큼 안쪽으로 뺍니다 */
