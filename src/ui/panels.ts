@@ -563,8 +563,8 @@ export class PanelManager {
           : "클릭하면 사용";
         html += `
           <div class="inv-slot filled ${interactive ? "usable" : ""} ${onHotbar >= 0 ? "hotbarred" : ""}"
-               data-item="${item.id}" title="${item.name} — ${item.description} (${hint})">
-            <div class="inv-icon">${item.icon}</div>
+               data-item="${item.id}" title="${escapeHtml(item.name)} — ${escapeHtml(item.description)} (${hint})">
+            <div class="inv-icon">${escapeHtml(item.icon)}</div>
             ${item.quantity > 1 ? `<div class="inv-qty">${item.quantity}</div>` : ""}
             ${onHotbar >= 0 ? `<div class="inv-slot-badge">${onHotbar + 1}</div>` : ""}
           </div>

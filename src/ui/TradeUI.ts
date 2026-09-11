@@ -263,7 +263,7 @@ export class TradeUI {
         .map(
           (item, i) => `
         <div class="trade-gift-row" data-idx="${i}">
-          <div class="inv-icon">${item.icon}</div>
+          <div class="inv-icon">${escapeHtml(item.icon)}</div>
           <div class="trade-gift-info">
             <div class="trade-gift-name">${escapeHtml(item.name)}</div>
             <div class="trade-gift-qty">보유 ${item.quantity}개</div>
@@ -330,7 +330,7 @@ export class TradeUI {
         if (item) {
           html += `
             <div class="inv-slot filled ${removable ? "usable" : ""}" data-slot="${i}" title="${escapeHtml(item.name)} x${item.quantity}">
-              <div class="inv-icon">${item.icon}</div>
+              <div class="inv-icon">${escapeHtml(item.icon)}</div>
               ${item.quantity > 1 ? `<div class="inv-qty">${item.quantity}</div>` : ""}
             </div>`;
         } else if (i === offer.length) {
@@ -354,7 +354,7 @@ export class TradeUI {
           .map(
             (item, i) => `
         <div class="inv-slot filled usable" data-inv-idx="${i}" title="${escapeHtml(item.name)} — 클릭하면 제안에 추가">
-          <div class="inv-icon">${item.icon}</div>
+          <div class="inv-icon">${escapeHtml(item.icon)}</div>
           ${item.quantity > 1 ? `<div class="inv-qty">${item.quantity}</div>` : ""}
         </div>`,
           )

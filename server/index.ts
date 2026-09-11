@@ -39,7 +39,11 @@ const httpServer = createServer((req, res) => {
   res.end();
 });
 
-const wss = new WebSocketServer({ server: httpServer });
+// maxPayload: 정상적인 메시지(상태 동기화·거래·채팅류)는 몇백 바이트~몇 KB면
+// 충분합니다. 기본값(제한 없음)으로 두면 누군가 거대한 프레임을 계속 보내
+// 메모리를 소모시키는 공격이 가능해서, 넉넉히 64KB로 상한을 둡니다 — 이 상한을
+// 넘는 프레임은 ws가 알아서 연결을 끊습니다.
+const wss = new WebSocketServer({ server: httpServer, maxPayload: 64 * 1024 });
 
 wss.on("connection", (ws) => {
   // hello 메시지가 오기 전까지는 이름/진영을 모르므로 기본값으로 방에 넣고,

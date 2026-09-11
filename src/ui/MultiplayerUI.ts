@@ -28,6 +28,8 @@ export class MultiplayerUI {
     this.root = document.createElement("div");
     this.root.className = "mp-panel";
     this.root.hidden = true;
+    // 운영 서버 주소(VITE_MULTIPLAYER_URL)는 화면에 그대로 노출하지 않습니다 —
+    // 이 값은 오직 재접속 시 내부적으로만 쓰고, 입력창은 비워둔 채 보여줍니다.
     const defaultUrl =
       (typeof import.meta !== "undefined" && (import.meta as { env?: Record<string, string> }).env?.VITE_MULTIPLAYER_URL) ||
       "ws://localhost:8787";
@@ -35,8 +37,8 @@ export class MultiplayerUI {
     this.root.innerHTML = `
       <div class="mp-header">🌐 멀티플레이 <button class="mp-close" id="mp-close">✕</button></div>
       <div class="mp-status" id="mp-status">연결 안 됨</div>
-      <label class="mp-field">서버 주소
-        <input type="text" id="mp-url" value="${defaultUrl}" />
+      <label class="mp-field">서버 주소 (비워두면 기본 서버로 접속)
+        <input type="text" id="mp-url" placeholder="예: ws://localhost:8787" />
       </label>
       <label class="mp-field">이름
         <input type="text" id="mp-name" maxlength="12" value="여행자" />
@@ -47,8 +49,8 @@ export class MultiplayerUI {
         <span>⚔️ PvP 켜기 — 다른 진영만 공격 가능</span>
       </label>
       <div class="mp-players" id="mp-players"><div class="mp-player-empty">아직 접속하지 않았습니다</div></div>
-      <p class="mp-note">서버는 따로 실행해야 합니다 (README "멀티플레이 · PvP" 참고).
-      로컬/같은 네트워크에서 테스트할 때 기본 주소는 <b>ws://localhost:8787</b>입니다.</p>
+      <p class="mp-note">비워두면 게임이 기본으로 붙는 서버에 접속합니다.
+      직접 서버를 실행해 테스트할 때만 주소를 입력하세요(README "멀티플레이 · PvP" 참고).</p>
     `;
     container.appendChild(this.root);
 
@@ -65,9 +67,11 @@ export class MultiplayerUI {
       if (this.mp.connected || this.mp.status === "connecting") {
         this.mp.disconnect();
       } else {
-        const url = this.urlInput.value.trim();
+        // 입력창을 비워뒀으면(기본 케이스) 운영 서버 주소로 조용히 접속합니다 —
+        // 화면 어디에도 그 주소를 찍지 않습니다.
+        const url = this.urlInput.value.trim() || defaultUrl;
         const name = this.nameInput.value.trim() || "여행자";
-        if (url) this.mp.connect(url, name);
+        this.mp.connect(url, name);
       }
     });
     this.pvpCheckbox.addEventListener("change", () => {

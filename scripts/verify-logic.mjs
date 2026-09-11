@@ -27,7 +27,7 @@ const { EXP_POTION_DURATION_SEC, stepBuffs } = await import("../src/simulation/B
 const { BOAT_PRICE, summonBoat, boardBoat, leaveBoat, stepBoat, canBoardBoat, boatDeckPosition } =
   await import("../src/simulation/BoatSystem.ts");
 const { stepWater } = await import("../src/simulation/WaterSystem.ts");
-const { ISLANDS, WATER_ENTER_Y, islandAt, islandArrivalPosition, boatPosition, worldRadius,
+const { ISLANDS, WATER_ENTER_Y, islandAt, islandArrivalPosition, boatPosition, dockRadiusFor, worldRadius,
         getIsland, getSpecies, speciesCountForGap, levelGapToNextIsland, SPECIES_LEVEL_STEP,
         startIslandFor, hubIsland, hasEnemies, FACTION_LABELS } =
   await import("../src/world/islands.ts");
@@ -342,11 +342,14 @@ for (let i = 0; i < ISLANDS.length; i++) {
 }
 assert(minGap > 40, `가장 가까운 두 섬도 ${Math.round(minGap)}m 떨어져 있음 (${worstPair})`);
 
-// 부두/도착 지점이 섬 위에 제대로 잡히는지
+// 부두/도착 지점이 섬 위에 제대로 잡히는지 — 본부(hq)는 dockRadiusFor()가
+// 건물 확장 때문에 island.radius보다 훨씬 큰 값을 쓰므로(뱃사공/부두가 건물
+// 벽 속에 파묻히지 않도록) 그 섬만 dockRadiusFor 기준으로 비교합니다.
 for (const island of ISLANDS) {
   const arrival = islandArrivalPosition(island);
   const d = Math.hypot(arrival.x - island.center.x, arrival.z - island.center.z);
-  assert(d < island.radius - 5, `${island.name}: 상륙 지점이 섬 안쪽 (중심에서 ${Math.round(d)}m < ${island.radius})`);
+  const baseRadius = dockRadiusFor(island);
+  assert(d < baseRadius - 5, `${island.name}: 상륙 지점이 섬 안쪽 (중심에서 ${Math.round(d)}m < ${baseRadius})`);
 }
 for (const island of ISLANDS) {
   const boat = boatPosition(island);

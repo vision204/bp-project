@@ -503,6 +503,10 @@ export const ISLANDS: IslandDef[] = [
     kind: "hub",
     sea: 2,
     center: { x: 0, z: 0 },
+    // 이 radius(48)는 "섬끼리 안 겹침" 판정·섬 도착 판정(islandAt) 등 여러
+    // 로직이 공유해서 쓰므로 그대로 둡니다 — 뱃사공/부두 위치가 건물 안에
+    // 파묻히는 문제는 radius를 키우는 대신 dockRadiusFor()의 hq 전용 예외로
+    // 따로 처리합니다 (바로 아래 함수 참고).
     radius: 48,
     skipOwnTerrain: true,
     requiredLevel: SECOND_SEA_LEVEL,
@@ -691,13 +695,30 @@ export function dockDirection(island: IslandDef) {
   return { x: Math.cos(island.dockAngle), z: Math.sin(island.dockAngle) };
 }
 
+/**
+ * 부두/뱃사공/하선 위치 계산에만 쓰는 반지름. 기본은 섬의 실제 radius와
+ * 같지만, 본부(hq)만 예외입니다 — 본부 건물을 4배로 키우면서(HQ_BUILDING
+ * 92×60m, 대각선 방향 반폭 약 46/30m) island.radius=48 기준 위치(부두 끝
+ * radius+9=57m, 뱃사공 radius-6=42m, 하선 radius-10=38m)가 45° 방향으로는
+ * 전부 건물 벽 안쪽에 파묻혀버렸습니다("뱃사공이 대륙(건물) 안에 있다"는
+ * 버그). island.radius 자체를 키우면 대륙에 붙은 다른 4개 사냥터와 150m
+ * 간격을 두고 있다는 "섬끼리 안 겹침" 로직/테스트가 깨지므로, 부두류
+ * 위치만 이 함수로 따로 뺐습니다. 95m면 45°에서 (95-10)*0.707≈60m로,
+ * 건물 벽(46/30m)보다 한참 바깥이면서 성벽(그 방향 반지름 218m)보다는
+ * 훨씬 안쪽이라 여전히 성 안 마당입니다.
+ */
+export function dockRadiusFor(island: IslandDef): number {
+  return island.id === "hq" ? 95 : island.radius;
+}
+
 /** 배가 정박하는 위치 (부두 끝) */
 export function boatPosition(island: IslandDef) {
   const dir = dockDirection(island);
+  const radius = dockRadiusFor(island);
   return {
-    x: island.center.x + dir.x * (island.radius + 9),
+    x: island.center.x + dir.x * (radius + 9),
     y: -0.35,
-    z: island.center.z + dir.z * (island.radius + 9),
+    z: island.center.z + dir.z * (radius + 9),
   };
 }
 
@@ -705,20 +726,22 @@ export function boatPosition(island: IslandDef) {
 export function dockNpcPosition(island: IslandDef) {
   const dir = dockDirection(island);
   const perp = { x: -dir.z, z: dir.x };
+  const radius = dockRadiusFor(island);
   return {
-    x: island.center.x + dir.x * (island.radius - 6) + perp.x * 3,
+    x: island.center.x + dir.x * (radius - 6) + perp.x * 3,
     y: 1,
-    z: island.center.z + dir.z * (island.radius - 6) + perp.z * 3,
+    z: island.center.z + dir.z * (radius - 6) + perp.z * 3,
   };
 }
 
 /** 이 섬에 도착했을 때 플레이어가 내려서는 위치 */
 export function islandArrivalPosition(island: IslandDef) {
   const dir = dockDirection(island);
+  const radius = dockRadiusFor(island);
   return {
-    x: island.center.x + dir.x * (island.radius - 10),
+    x: island.center.x + dir.x * (radius - 10),
     y: 2,
-    z: island.center.z + dir.z * (island.radius - 10),
+    z: island.center.z + dir.z * (radius - 10),
   };
 }
 

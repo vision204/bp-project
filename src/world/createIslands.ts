@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type RAPIER from "@dimforge/rapier3d-compat";
-import { ISLANDS, SEA_ORIGINS, dockDirection, worldRadius, type IslandDef, type IslandTheme, type Sea } from "./islands";
+import { ISLANDS, SEA_ORIGINS, dockDirection, dockRadiusFor, worldRadius, type IslandDef, type IslandTheme, type Sea } from "./islands";
 import { HQ_BUILDING } from "./SafeZones";
 import type { QualitySettings } from "../core/GraphicsSettings";
 
@@ -1050,7 +1050,9 @@ function buildDock(
   const dir = dockDirection(island);
   const length = 16;
   const width = 3.6;
-  const centerDist = island.radius + 2;
+  // 본부(hq)는 dockRadiusFor()가 건물(4배 확장) 바깥으로 빼놓은 반지름을
+  // 씁니다 — 그래야 부두 판자가 뱃사공/정박한 배(같은 함수 기준)와 이어집니다.
+  const centerDist = dockRadiusFor(island) + 2;
   const cx = island.center.x + dir.x * centerDist;
   const cz = island.center.z + dir.z * centerDist;
   const angle = Math.atan2(dir.z, dir.x);

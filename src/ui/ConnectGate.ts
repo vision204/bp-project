@@ -54,7 +54,7 @@ export function connectMultiplayerOrWait(mp: MultiplayerClient, url: string, nam
       <div class="mp-gate-root">
         <div class="mp-gate-spinner"></div>
         <div class="mp-gate-msg" id="mp-gate-msg">멀티플레이 서버에 연결하는 중…</div>
-        <div class="mp-gate-sub" id="mp-gate-sub">${url}</div>
+        <div class="mp-gate-sub" id="mp-gate-sub">잠시만 기다려 주세요…</div>
         <button class="mp-gate-retry" id="mp-gate-retry" hidden>지금 다시 시도</button>
       </div>
     `;
@@ -78,7 +78,7 @@ export function connectMultiplayerOrWait(mp: MultiplayerClient, url: string, nam
     const attempt = () => {
       retryScheduled = false;
       msgEl.textContent = "멀티플레이 서버에 연결하는 중…";
-      subEl.textContent = url;
+      subEl.textContent = "잠시만 기다려 주세요…";
       retryBtn.hidden = true;
       mp.connect(url, name);
     };
