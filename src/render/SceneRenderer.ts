@@ -28,6 +28,7 @@ import type {
   RemoteTeleportFx,
 } from "../network/MultiplayerClient";
 import { dist2D, skillOrigin } from "../simulation/ShapeMath";
+import { getEnemyVisualExtras, type EnemyVisualExtras } from "./EnemyVisuals";
 import {
   buildEmberOverlayGroup,
   buildFruitSkillEffectGroup,
@@ -333,19 +334,31 @@ interface BlockyCharacter {
   headMesh: THREE.Mesh;
 }
 
-/** 아트가 준비되기 전까지, 로블록스 특유의 "블록형" 실루엣을 흉내낸 플레이스홀더 캐릭터. */
-function buildBlockyCharacterParts(color: number): BlockyCharacter {
+/**
+ * 아트가 준비되기 전까지, 로블록스 특유의 "블록형" 실루엣을 흉내낸 플레이스홀더 캐릭터.
+ * extras를 주면(주로 몬스터) 몸통/머리 비율·다리색·투명도를 살짝 바꾸고, extras.decorate로
+ * 종족별 모자/뿔/날개 같은 장신구를 그룹에 더 붙일 수 있습니다 — 뼈대(팔다리 피벗 구조)
+ * 자체는 항상 그대로라 걷기/공격 애니메이션 로직은 손댈 필요가 없습니다.
+ */
+function buildBlockyCharacterParts(color: number, extras?: EnemyVisualExtras): BlockyCharacter {
   const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.6,
+    transparent: extras?.opacity !== undefined,
+    opacity: extras?.opacity ?? 1,
+  });
 
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.0, 0.5), mat);
   torso.position.y = 1.1;
   torso.castShadow = true;
+  if (extras?.torsoScale) torso.scale.set(...extras.torsoScale);
   group.add(torso);
 
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), mat);
   head.position.y = 1.9;
   head.castShadow = true;
+  if (extras?.headScale) head.scale.setScalar(extras.headScale);
   group.add(head);
 
   // 다리는 엉덩이(hipY=0.9, 다리 박스의 원래 윗변) 높이에, 팔은 어깨(shoulderY=1.575,
@@ -354,7 +367,11 @@ function buildBlockyCharacterParts(color: number): BlockyCharacter {
   // (메시 중심을 그대로 돌리면 몸통을 뚫고 앞뒤로 미끄러지듯 움직여 부자연스럽습니다).
   const hipY = 0.9;
   const shoulderY = 1.575;
-  const legMat = new THREE.MeshStandardMaterial({ color: 0x2b3a67 });
+  const legMat = new THREE.MeshStandardMaterial({
+    color: extras?.legColor ?? 0x2b3a67,
+    transparent: extras?.opacity !== undefined,
+    opacity: extras?.opacity ?? 1,
+  });
   let leftLegPivot!: THREE.Group;
   let rightLegPivot!: THREE.Group;
   let leftArmPivot!: THREE.Group;
@@ -391,6 +408,8 @@ function buildBlockyCharacterParts(color: number): BlockyCharacter {
     }
   }
 
+  extras?.decorate?.({ group, color });
+
   return {
     group,
     bodyMat: mat,
@@ -406,8 +425,8 @@ function buildBlockyCharacterParts(color: number): BlockyCharacter {
 }
 
 /** 머티리얼 참조가 필요 없는 곳(적·NPC)에서 쓰는 간편 버전 */
-function buildBlockyCharacter(color: number): THREE.Group {
-  return buildBlockyCharacterParts(color).group;
+function buildBlockyCharacter(color: number, extras?: EnemyVisualExtras): THREE.Group {
+  return buildBlockyCharacterParts(color, extras).group;
 }
 
 /**
@@ -1509,8 +1528,9 @@ export class SceneRenderer {
   private ensureEnemyVisual(enemy: EnemyState): EnemyVisual {
     let visual = this.enemyVisuals.get(enemy.id);
     if (!visual) {
-      // 종류마다 색과 크기가 다릅니다 (한 섬에 여러 종류가 살기 때문)
-      const group = buildBlockyCharacter(enemy.color);
+      // 종류마다 색과 크기가 다르고(한 섬에 여러 종류가 살기 때문), 종족 이름으로
+      // EnemyVisuals.ts의 모자/뿔/날개 같은 장신구 데이터를 찾아 얹습니다.
+      const group = buildBlockyCharacter(enemy.color, getEnemyVisualExtras(enemy.speciesName));
       group.scale.setScalar(0.95 * enemy.scale);
       const healthBar = buildCanvasSprite(200, 46, [2.4, 0.55]);
       healthBar.sprite.position.y = 2.7;
