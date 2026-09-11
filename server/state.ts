@@ -255,6 +255,9 @@ export interface Connection {
   drawnWeaponId: string | null;
   dragonFormActive: boolean;
   dragonFlightActive: boolean;
+  /** 지금 누르고 있는 중인 차지 스킬 슬롯(없으면 null)과 진행률(0~1) — RemotePlayerSnapshot 참고. */
+  chargingSlot: number | null;
+  chargeFrac: number;
   pvpEnabled: boolean;
   alive: boolean;
   /** 현상금 — 같은 방 사람들끼리만 겨루는 점수(방을 나가면 사라집니다). 서버가
@@ -295,6 +298,8 @@ function snapshotOf(conn: Connection): RemotePlayerSnapshot {
     drawnWeaponId: conn.drawnWeaponId,
     dragonFormActive: conn.dragonFormActive,
     dragonFlightActive: conn.dragonFlightActive,
+    chargingSlot: conn.chargingSlot,
+    chargeFrac: conn.chargeFrac,
     pvpEnabled: conn.pvpEnabled,
   };
 }
@@ -377,6 +382,8 @@ export class World {
       drawnWeaponId: null,
       dragonFormActive: false,
       dragonFlightActive: false,
+      chargingSlot: null,
+      chargeFrac: 0,
       pvpEnabled: true,
       alive: true,
       bounty: 0,
@@ -592,6 +599,14 @@ export class World {
         conn.drawnWeaponId = typeof msg.drawnWeaponId === "string" ? msg.drawnWeaponId : null;
         conn.dragonFormActive = msg.dragonFormActive === true;
         conn.dragonFlightActive = msg.dragonFlightActive === true;
+        conn.chargingSlot =
+          typeof msg.chargingSlot === "number" && Number.isFinite(msg.chargingSlot)
+            ? Math.trunc(msg.chargingSlot)
+            : null;
+        conn.chargeFrac =
+          typeof msg.chargeFrac === "number" && Number.isFinite(msg.chargeFrac)
+            ? Math.max(0, Math.min(1, msg.chargeFrac))
+            : 0;
         conn.alive = conn.hp > 0;
         this.broadcastRoom(conn.roomId, { type: "player_state", player: snapshotOf(conn) }, conn.id);
         break;
@@ -670,6 +685,11 @@ export class World {
         this.broadcastRoom(conn.roomId, { type: "player_dash_fx", fromId: conn.id, dx, dz }, conn.id);
         break;
       }
+
+      case "jump_fx":
+        // 순수 연출 중계 — 데미지 판정이 아니므로 검증 없이 그대로 뿌립니다.
+        this.broadcastRoom(conn.roomId, { type: "player_jump_fx", fromId: conn.id }, conn.id);
+        break;
 
       case "teleport_fx": {
         const position = {

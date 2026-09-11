@@ -13,6 +13,7 @@
 
 import type { GameState, InventoryItem, ItemId } from "../core/GameState";
 import type { SkillShape } from "../simulation/skills";
+import { skillsForFruit } from "../simulation/skills";
 import { dist2D, pointInShape } from "../simulation/ShapeMath";
 import { applyReceivedItems, removeFromInventory } from "../simulation/TradeSystem";
 import { markDamagedNow } from "../simulation/HpSystem";
@@ -70,6 +71,11 @@ export interface RemoteDashFx {
   fromId: string;
   dx: number;
   dz: number;
+}
+
+/** 다른 플레이어가 점프했다고 서버가 알려준 것 — 순수 연출용입니다(그 사람의 지금 렌더 위치 발밑에 이펙트를 띄웁니다). */
+export interface RemoteJumpFx {
+  fromId: string;
 }
 
 /**
@@ -137,6 +143,12 @@ export class RemotePlayerView {
   renderY: number;
   renderZ: number;
   renderYaw: number;
+  /**
+   * 이번 프레임에 보간 좌표가 실제로 움직인 속도(m/s) — 서버가 속도 자체를 보내주진
+   * 않지만, 보간이 목표 위치를 "쫓아가는" 속도가 실제 이동 속도와 거의 비례하므로
+   * 걷기/달리기 애니메이션(다리 흔들림 진폭·빠르기)을 실시간으로 재현하는 데 씁니다.
+   */
+  horizSpeed = 0;
 
   constructor(snap: RemotePlayerSnapshot) {
     this.snapshot = snap;
@@ -152,9 +164,14 @@ export class RemotePlayerView {
 
   step(dt: number) {
     const t = Math.min(1, dt * SMOOTHING_PER_SEC);
+    const beforeX = this.renderX;
+    const beforeZ = this.renderZ;
     this.renderX += (this.snapshot.position.x - this.renderX) * t;
     this.renderY += (this.snapshot.position.y - this.renderY) * t;
     this.renderZ += (this.snapshot.position.z - this.renderZ) * t;
+    if (dt > 0.0001) {
+      this.horizSpeed = Math.hypot(this.renderX - beforeX, this.renderZ - beforeZ) / dt;
+    }
     // 각도는 최단 경로로 보간 (179도 → -179도처럼 확 튀지 않게)
     let dy = this.snapshot.yaw - this.renderYaw;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
@@ -184,6 +201,21 @@ function animStateFor(state: GameState): AnimState {
   return speed > 0.5 ? "move" : "idle";
 }
 
+/**
+ * 지금 누르고 있는 중인 차지 스킬의 슬롯·진행률 — SceneRenderer.sync()가 로컬 캐릭터의
+ * 차지 예열 연출(고무팔 당김/에너지 구슬)을 그릴 때 쓰는 것과 같은 계산입니다. 다른
+ * 플레이어 화면에도 같은 연출이 실시간으로 보이도록 매 state 동기화에 실어 보냅니다.
+ */
+function chargeStateFor(state: GameState, nowMs: number): { slot: number | null; frac: number } {
+  const slot = state.player.chargingSkillSlot;
+  if (slot === null || !state.player.fruitDrawn) return { slot: null, frac: 0 };
+  const skill = skillsForFruit(state.player.equippedFruit)[slot];
+  if (!skill?.chargeable) return { slot: null, frac: 0 };
+  const maxMs = Math.max(1, (skill.maxChargeSec ?? 1) * 1000);
+  const frac = Math.min(1, (nowMs - state.player.chargingSkillStartedAtMs) / maxMs);
+  return { slot, frac };
+}
+
 export class MultiplayerClient {
   private ws: WebSocket | null = null;
   private readonly state: GameState;
@@ -205,6 +237,8 @@ export class MultiplayerClient {
   private _pendingMeleeFx: RemoteMeleeFx[] = [];
   /** 아직 렌더러가 소비하지 않은, 다른 사람의 Q 대쉬 알림 — 매 프레임 drainDashFx()로 비웁니다. */
   private _pendingDashFx: RemoteDashFx[] = [];
+  /** 아직 렌더러가 소비하지 않은, 다른 사람의 점프 알림 — 매 프레임 drainJumpFx()로 비웁니다. */
+  private _pendingJumpFx: RemoteJumpFx[] = [];
   /** 아직 렌더러가 소비하지 않은, 다른 사람의 R 순간이동 알림 — 매 프레임 drainTeleportFx()로 비웁니다. */
   private _pendingTeleportFx: RemoteTeleportFx[] = [];
   /** 같은 방 현상금 랭킹 — 서버가 보내주는 대로 그대로 들고 있다가 랭킹 패널이 읽습니다. */
@@ -305,6 +339,7 @@ export class MultiplayerClient {
       this._pendingSkillFx = [];
       this._pendingMeleeFx = [];
       this._pendingDashFx = [];
+      this._pendingJumpFx = [];
       this._pendingTeleportFx = [];
       this._bountyEntries = [];
       this._myCrew = null;
@@ -339,6 +374,7 @@ export class MultiplayerClient {
     this._pendingSkillFx = [];
     this._pendingMeleeFx = [];
     this._pendingDashFx = [];
+    this._pendingJumpFx = [];
     this._pendingTeleportFx = [];
     this._bountyEntries = [];
     this._myCrew = null;
@@ -452,6 +488,12 @@ export class MultiplayerClient {
       case "player_dash_fx":
         if (msg.fromId !== this.myId) {
           this._pendingDashFx.push({ fromId: msg.fromId, dx: msg.dx, dz: msg.dz });
+        }
+        break;
+
+      case "player_jump_fx":
+        if (msg.fromId !== this.myId) {
+          this._pendingJumpFx.push({ fromId: msg.fromId });
         }
         break;
 
@@ -612,6 +654,7 @@ export class MultiplayerClient {
     const p = this.state.player;
     if (nowMs - this.lastStateSentAtMs >= 1000 / STATE_SYNC_HZ) {
       this.lastStateSentAtMs = nowMs;
+      const charging = chargeStateFor(this.state, nowMs);
       this.send({
         type: "state",
         position: p.position,
@@ -627,6 +670,8 @@ export class MultiplayerClient {
         drawnWeaponId,
         dragonFormActive: p.dragonFormActive,
         dragonFlightActive: p.dragonFlightActive,
+        chargingSlot: charging.slot,
+        chargeFrac: charging.frac,
       });
     }
 
@@ -779,6 +824,19 @@ export class MultiplayerClient {
     if (this._pendingDashFx.length === 0) return this._pendingDashFx;
     const out = this._pendingDashFx;
     this._pendingDashFx = [];
+    return out;
+  }
+
+  /** 점프가 실제로 나갈 때마다(다단 점프 포함) 순수 연출용으로 알립니다. */
+  sendJumpFx() {
+    this.send({ type: "jump_fx" });
+  }
+
+  /** 아직 화면에 반영하지 않은 다른 사람의 점프 알림을 꺼내고 비웁니다 — 매 프레임 한 번씩. */
+  drainJumpFx(): RemoteJumpFx[] {
+    if (this._pendingJumpFx.length === 0) return this._pendingJumpFx;
+    const out = this._pendingJumpFx;
+    this._pendingJumpFx = [];
     return out;
   }
 

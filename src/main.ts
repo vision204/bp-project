@@ -23,6 +23,7 @@ import { applyDevLoadout } from "./simulation/DevLoadout";
 import { MultiplayerClient } from "./network/MultiplayerClient";
 import {
   broadcastDashFx,
+  broadcastJumpFx,
   broadcastMeleeFx,
   broadcastSkillFx,
   broadcastSpecialAbilityFx,
@@ -574,6 +575,7 @@ async function main() {
     broadcastSkillFx(simulation.state, multiplayer);
     broadcastMeleeFx(simulation.state, multiplayer);
     broadcastDashFx(simulation.state, multiplayer);
+    broadcastJumpFx(simulation.state, multiplayer);
     broadcastSpecialAbilityFx(simulation.state, multiplayer);
     // 뇌광 질주(번개 열매 X) — 변신 중이면 접촉 반경 안 다른 플레이어에게 지속 피해 요청
     processLightningForm(simulation.state, multiplayer, Date.now());
@@ -594,6 +596,7 @@ async function main() {
       multiplayer.drainSkillFx(),
       multiplayer.drainMeleeFx(),
       multiplayer.drainDashFx(),
+      multiplayer.drainJumpFx(),
       multiplayer.drainTeleportFx(),
       multiplayer.drainSpecialAbilityFx(),
     );

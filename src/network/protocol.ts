@@ -116,6 +116,15 @@ export interface RemotePlayerSnapshot {
    * 실어 보냅니다.
    */
   dragonFlightActive: boolean;
+  /**
+   * 지금 "누르고 있는 중"인 차지 스킬 슬롯(0~3) — 없으면 null. boatTier/dragonFormActive와
+   * 같은 이유로(발동 순간의 이펙트 한 번이 아니라 누르는 동안 계속 변하는 상태라서)
+   * skill_fx가 아니라 매 state 동기화에 실어 보냅니다 — 다른 플레이어 화면에서도
+   * 팔을 당기거나 손끝에 에너지 구슬이 커지는 차지 예열 연출이 실시간으로 보이게 합니다.
+   */
+  chargingSlot: number | null;
+  /** 위 차지의 진행률(0~1) — chargingSlot이 null이면 의미 없음. */
+  chargeFrac: number;
 }
 
 /**
@@ -225,6 +234,9 @@ export type ClientMessage =
       drawnWeaponId: string | null;
       dragonFormActive: boolean;
       dragonFlightActive: boolean;
+      /** 지금 누르고 있는 중인 차지 스킬 슬롯(없으면 null)과 진행률(0~1) — RemotePlayerSnapshot 참고. */
+      chargingSlot: number | null;
+      chargeFrac: number;
     }
   | { type: "combat_stats"; stats: CombatStatsSnapshot }
   | { type: "pvp_toggle"; enabled: boolean }
@@ -263,6 +275,12 @@ export type ClientMessage =
    * 바람 이펙트가 보이도록 방향(dx, dz)만 함께 보냅니다.
    */
   | { type: "dash_fx"; dx: number; dz: number }
+  /**
+   * 점프가 실제로 나갈 때마다(다단 점프 포함) 순수 연출용으로 보내는 알림 — 다른
+   * 사람 화면에도 발밑에 공기 파열 이펙트가 보이게 합니다. 위치는 이미 주기적인
+   * state 동기화로 알고 있으므로 melee_fx와 같은 이유로 따로 싣지 않습니다.
+   */
+  | { type: "jump_fx" }
   /**
    * R 순간이동이 실제로 일어날 때마다 순수 연출용으로 보내는 알림 — 도착 지점을
    * 실어 보내서, 받는 쪽이 그 자리에 이펙트를 띄우고 그 플레이어의 렌더 위치를
@@ -329,6 +347,8 @@ export type ServerMessage =
   | { type: "player_melee_fx"; fromId: string }
   /** 같은 방의 다른 사람이 Q 대쉬를 썼다는 순수 연출용 중계 — dx/dz는 대쉬 방향. */
   | { type: "player_dash_fx"; fromId: string; dx: number; dz: number }
+  /** 같은 방의 다른 사람이 점프했다는 순수 연출용 중계 — 그 사람의 지금 렌더 위치 발밑에 이펙트를 띄웁니다. */
+  | { type: "player_jump_fx"; fromId: string }
   /** 같은 방의 다른 사람이 R 순간이동을 했다는 순수 연출용 중계 — 도착 지점. */
   | { type: "player_teleport_fx"; fromId: string; position: Vec3Like }
   // --- 거래 / 선물 ---------------------------------------------------------

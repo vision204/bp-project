@@ -21,6 +21,7 @@ import type { EnvironmentHandle, IslandVisual } from "../world/createIslands";
 import type {
   RemoteDashFx,
   RemoteEnemyGhost,
+  RemoteJumpFx,
   RemoteMeleeFx,
   RemotePlayerView,
   RemoteSkillFx,
@@ -430,6 +431,21 @@ function buildBlockyCharacter(color: number, extras?: EnemyVisualExtras): THREE.
 }
 
 /**
+ * 차지 스킬(고무 피스톨 등이 아닌 마그마·얼음·번개·어둠·모래 계열) 예열 중 손끝에
+ * 띄우는 에너지 구슬 — 로컬 플레이어와 원격 플레이어 각자 하나씩(공유 불가, 여러
+ * 명이 동시에 차지할 수 있어서) 이 함수로 만들어 rightArmPivot에 붙입니다.
+ */
+function buildChargeGlowMesh(): THREE.Mesh {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
+  );
+  mesh.position.set(0, -0.85, 0.2);
+  mesh.visible = false;
+  return mesh;
+}
+
+/**
  * 원격(다른 플레이어) 캐릭터에 붙일 무기 모델 인스턴스를 새로 만듭니다.
  * registerWeaponVisual(로컬 전용)이 하나의 THREE.Object3D를 만들어 그대로
  * playerVisual에 붙이는 것과 달리, 원격 플레이어는 여러 명이 동시에 같은
@@ -732,6 +748,45 @@ function buildTeleportFlashGroup(): THREE.Group {
   return group;
 }
 
+/**
+ * 점프 이펙트 — 발밑에 잠깐 뜨는, 바깥으로 퍼지며 옅어지는 "공기 파열" 링 +
+ * 살짝 흩날리는 먼지 조각 몇 개. 대쉬의 바람 줄무늬(직선 이동감)와 달리, 위로
+ * 튀어오르는 순간의 반동을 표현하려고 수평으로 퍼지는 링 위주로 만들었습니다.
+ * SceneRenderer.sync()가 이 그룹의 스케일/투명도를 ~0.35초에 걸쳐 갱신하고 지웁니다.
+ */
+function buildJumpBurstGroup(): THREE.Group {
+  const group = new THREE.Group();
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xe8f2ff,
+    transparent: true,
+    opacity: 0.6,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.12, 0.4, 20), ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.05;
+  group.add(ring);
+
+  const puffCount = 5;
+  for (let i = 0; i < puffCount; i++) {
+    const a = (i / puffCount) * Math.PI * 2 + Math.random() * 0.5;
+    const puffMat = new THREE.MeshBasicMaterial({
+      color: 0xdfeaf5,
+      transparent: true,
+      opacity: 0.5,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const puff = new THREE.Mesh(new THREE.SphereGeometry(0.11 + Math.random() * 0.06, 6, 6), puffMat);
+    const r = 0.25 + Math.random() * 0.15;
+    puff.position.set(Math.cos(a) * r, 0.06, Math.sin(a) * r);
+    group.add(puff);
+  }
+  return group;
+}
+
 /** 부두에 정박하는 작은 배 (플레이스홀더 지오메트리) */
 interface BoatVisual {
   group: THREE.Group;
@@ -897,6 +952,13 @@ interface RemotePlayerVisual {
    * 처리하게 합니다(로컬처럼 매 프레임 월드 좌표를 따로 계산하지 않아도 됨).
    */
   dragonFormVisual: THREE.Group | null;
+  /** 걷기 애니메이션 위상/진폭 — 로컬 플레이어(walkPhase/legSwingAmount)와 같은 역할이지만 원격 플레이어별로 따로 둡니다. */
+  walkPhase: number;
+  legSwingAmount: number;
+  /** 위 애니메이션의 dt를 재기 위한, 이 원격 플레이어 전용 마지막 갱신 시각. */
+  lastAnimTimeMs: number;
+  /** 차지 스킬 예열 중 손끝에 뜨는 에너지 구슬 — 로컬의 chargeGlowMesh와 같은 역할, 원격 플레이어별 인스턴스. */
+  chargeGlowMesh: THREE.Mesh;
 }
 
 /** 다른 플레이어의 색은 진영으로 정합니다 — 몬스터·NPC와는 다른 배색이라 한눈에 구분됩니다. */
@@ -1014,6 +1076,8 @@ export class SceneRenderer {
   private remoteAttackSwingAtMs = new Map<string, number>();
   /** R 순간이동 순간에 뜨는, 출발/도착 지점의 짧은 링 플래시. */
   private teleportFlashes: { group: THREE.Group; startedAtMs: number }[] = [];
+  /** 점프 이펙트(공기 파열) 목록 — 대쉬/순간이동 이펙트와 같은 패턴으로 시간 경과에 따라 옅어지다 사라집니다. */
+  private jumpBursts: { group: THREE.Group; startedAtMs: number }[] = [];
 
   // ── 기본 공격(좌클릭) 검 휘두르기 모션 ────────────────────────────────────
   /** 각 무기 모델의 "쥐고 있을 때" 기본 회전값 — 휘두르는 동안 여기서부터 튀어나갔다 돌아옵니다 */
@@ -1060,12 +1124,7 @@ export class SceneRenderer {
 
     // 고무가 아닌 열매를 차지하는 동안 손끝에 띄우는 에너지 구슬 — 오른팔
     // 피벗의 자식으로 둬서 걷기/스윙/차지 자세를 따라 자연스럽게 함께 움직입니다.
-    this.chargeGlowMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 12, 12),
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }),
-    );
-    this.chargeGlowMesh.position.set(0, -0.85, 0.2);
-    this.chargeGlowMesh.visible = false;
+    this.chargeGlowMesh = buildChargeGlowMesh();
     this.playerParts.rightArmPivot.add(this.chargeGlowMesh);
 
     this.boatParts = buildBoat();
@@ -1573,6 +1632,8 @@ export class SceneRenderer {
       const nameTag = buildCanvasSprite(220, 46, [2.4, 0.55]);
       nameTag.sprite.position.y = 2.7;
       group.add(nameTag.sprite);
+      const chargeGlowMesh = buildChargeGlowMesh();
+      parts.rightArmPivot.add(chargeGlowMesh);
       this.scene.add(group);
       visual = {
         group,
@@ -1584,6 +1645,10 @@ export class SceneRenderer {
         boat: null,
         lastBoatTier: "",
         dragonFormVisual: null,
+        walkPhase: 0,
+        legSwingAmount: 0,
+        lastAnimTimeMs: performance.now(),
+        chargeGlowMesh,
       };
       this.remotePlayerVisuals.set(id, visual);
     }
@@ -1663,12 +1728,54 @@ export class SceneRenderer {
         if (visual.weaponVisual) visual.group.add(visual.weaponVisual);
       }
 
+      // 걷기/달리기 모션 — 서버가 속도 자체를 보내주진 않지만, 보간 좌표가 목표를
+      // "쫓아가는" 속도(r.horizSpeed)가 실제 이동 속도와 거의 비례하므로 이걸로
+      // 로컬(playerParts)과 같은 다리·팔 흔들기를 실시간으로 재현합니다.
+      const animDt = Math.min(0.1, (nowMs - visual.lastAnimTimeMs) / 1000);
+      visual.lastAnimTimeMs = nowMs;
+      const swimmingRemote = r.snapshot.animState === "swim";
+      const onBoatRemote = r.snapshot.animState === "boat";
+      const targetSwing =
+        !formOn && !swimmingRemote && !onBoatRemote && r.horizSpeed > 0.15
+          ? r.horizSpeed > 10
+            ? 0.85
+            : 0.55
+          : 0;
+      visual.legSwingAmount += (targetSwing - visual.legSwingAmount) * Math.min(1, animDt * 10);
+      if (visual.legSwingAmount > 0.001) {
+        visual.walkPhase += animDt * (r.horizSpeed > 10 ? 11 : 7);
+      }
+      const walkSwing = Math.sin(visual.walkPhase) * visual.legSwingAmount;
+      visual.parts.leftLegPivot.rotation.x = walkSwing;
+      visual.parts.rightLegPivot.rotation.x = -walkSwing;
+      visual.parts.leftArmPivot.rotation.x = -walkSwing * 0.75;
+      visual.parts.rightArmPivot.rotation.x = walkSwing * 0.75;
+
+      // 차지 스킬(마그마·얼음·번개·어둠·모래 등) 예열 — 걷기 모션과 같은 원리로,
+      // 서버가 chargingSlot/chargeFrac을 매 state 동기화에 실어 보내므로(12Hz라
+      // 로컬보다는 계단식이지만) 팔을 당기고 손끝에 에너지 구슬을 띄웁니다.
+      // 정확한 열매 테마색은 원격 스냅샷에 없어서(fruit id 미포함) 공용 금빛으로 통일합니다.
+      const chargeFrac = r.snapshot.chargingSlot !== null ? r.snapshot.chargeFrac : 0;
+      if (chargeFrac > 0.0005 && !formOn) {
+        const baseRotX = visual.parts.rightArmPivot.rotation.x;
+        visual.parts.rightArmPivot.rotation.x = baseRotX + chargeFrac * (RUBBER_ARM_WINDUP_PITCH - baseRotX);
+        visual.chargeGlowMesh.visible = true;
+        (visual.chargeGlowMesh.material as THREE.MeshBasicMaterial).color.setHex(0xffe38a);
+        const s = 0.12 + chargeFrac * 0.34;
+        visual.chargeGlowMesh.scale.setScalar(s);
+        (visual.chargeGlowMesh.material as THREE.MeshBasicMaterial).opacity = 0.55 + chargeFrac * 0.35;
+      } else {
+        visual.chargeGlowMesh.visible = false;
+      }
+
       // 기본 공격(좌클릭) 휘두르기 — player_melee_fx를 받은 시각부터 로컬과
       // 같은 커브(사인 곡선)로 오른팔/무기를 튀어나갔다 되돌아오게 합니다.
+      // 위 걷기/차지 모션 위에 "더해지는" 값이라 =가 아니라 -=로 겹쳐 씁니다
+      // (로컬 sync()의 attackSwingArc 처리와 같은 원칙).
       const swingAt = this.remoteAttackSwingAtMs.get(r.snapshot.id) ?? -Infinity;
       const swingT = (nowMs - swingAt) / ATTACK_SWING_DURATION_MS;
       const swingArc = swingT >= 0 && swingT < 1 ? Math.sin(swingT * Math.PI) : 0;
-      visual.parts.rightArmPivot.rotation.x = -swingArc * ATTACK_SWING_ARM_AMPLITUDE;
+      visual.parts.rightArmPivot.rotation.x -= swingArc * ATTACK_SWING_ARM_AMPLITUDE;
       if (visual.weaponVisual) {
         const baseRotX = visual.weaponId ? this.weaponBaseRotationX.get(visual.weaponId) ?? 0 : 0;
         visual.weaponVisual.rotation.x = baseRotX - swingArc * ATTACK_SWING_WEAPON_AMPLITUDE;
@@ -1714,7 +1821,9 @@ export class SceneRenderer {
           }
         });
       }
-      this.scene.remove(visual.group); // visual.group의 자식(배·용 변신 모델 포함)도 함께 씬에서 빠집니다.
+      visual.chargeGlowMesh.geometry.dispose();
+      (visual.chargeGlowMesh.material as THREE.Material).dispose();
+      this.scene.remove(visual.group); // visual.group의 자식(배·용 변신 모델·에너지 구슬 포함)도 함께 씬에서 빠집니다.
       this.remotePlayerVisuals.delete(id);
       this.remoteAttackSwingAtMs.delete(id);
       if (this.hoverOutlineId === id) this.setHoverOutline(null);
@@ -1833,6 +1942,7 @@ export class SceneRenderer {
     remoteSkillFx?: RemoteSkillFx[],
     remoteMeleeFx?: RemoteMeleeFx[],
     remoteDashFx?: RemoteDashFx[],
+    remoteJumpFx?: RemoteJumpFx[],
     remoteTeleportFx?: RemoteTeleportFx[],
     remoteSpecialAbilityFx?: RemoteSpecialAbilityFx[],
   ) {
@@ -1967,6 +2077,11 @@ export class SceneRenderer {
         this.dashTrails.push({ group: trail, startedAtMs: nowMs });
       } else if (ev.type === "melee_attack_fired") {
         this.attackSwingStartedAtMs = nowMs;
+      } else if (ev.type === "player_jumped") {
+        const burst = buildJumpBurstGroup();
+        burst.position.set(state.player.position.x, state.player.position.y + 0.05, state.player.position.z);
+        this.scene.add(burst);
+        this.jumpBursts.push({ group: burst, startedAtMs: nowMs });
       }
     }
     for (let i = this.dashTrails.length - 1; i >= 0; i--) {
@@ -2013,6 +2128,18 @@ export class SceneRenderer {
       }
     }
 
+    // 다른 플레이어의 점프 — 그 사람의 지금 렌더 위치 발밑에 같은 공기 파열 이펙트를 띄웁니다.
+    if (remoteJumpFx && remotePlayers) {
+      for (const fx of remoteJumpFx) {
+        const view = remotePlayers.find((r) => r.snapshot.id === fx.fromId);
+        if (!view) continue;
+        const burst = buildJumpBurstGroup();
+        burst.position.set(view.renderX, view.renderY + 0.05, view.renderZ);
+        this.scene.add(burst);
+        this.jumpBursts.push({ group: burst, startedAtMs: nowMs });
+      }
+    }
+
     // 다른 플레이어의 R 순간이동 — 출발/도착 지점 둘 다에 짧은 링 플래시를 띄웁니다.
     // 렌더 위치 자체는 MultiplayerClient.RemotePlayerView.snapTo()가 이미
     // 보간 없이 즉시 옮겨뒀으므로, 여기서는 시각 효과만 담당합니다.
@@ -2046,6 +2173,31 @@ export class SceneRenderer {
         }
       });
       flash.group.scale.setScalar(1 + t * 2.5);
+    }
+    for (let i = this.jumpBursts.length - 1; i >= 0; i--) {
+      const burst = this.jumpBursts[i];
+      const t = (nowMs - burst.startedAtMs) / 350;
+      if (t >= 1) {
+        this.scene.remove(burst.group);
+        burst.group.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            obj.geometry.dispose();
+            (obj.material as THREE.Material).dispose();
+          }
+        });
+        this.jumpBursts.splice(i, 1);
+        continue;
+      }
+      const fade = 1 - t;
+      // 링(불투명도 기준값 0.6)과 먼지 조각(기준값 0.5)의 기본 불투명도가 달라서,
+      // dashTrails/teleportFlashes처럼 traverse로 한 번에 곱하지 않고 따로 잡습니다.
+      const ring = burst.group.children[0] as THREE.Mesh;
+      if (ring.material instanceof THREE.MeshBasicMaterial) ring.material.opacity = 0.6 * fade;
+      for (let c = 1; c < burst.group.children.length; c++) {
+        const puff = burst.group.children[c] as THREE.Mesh;
+        if (puff.material instanceof THREE.MeshBasicMaterial) puff.material.opacity = 0.5 * fade;
+      }
+      burst.group.scale.setScalar(1 + t * 1.8);
     }
 
     // 요루/삼도류/엔마 스킬 이펙트 — 내가 이번 프레임에 스킬을 썼으면 지금

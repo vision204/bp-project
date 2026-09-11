@@ -474,6 +474,8 @@ export type GameEvent =
   | { type: "island_entered"; islandName: string; recommendedLevel: number }
   /** Q 대쉬가 실제로 나갔을 때 — 렌더러가 이동 방향으로 바람 이펙트를 띄웁니다 */
   | { type: "player_dashed"; dx: number; dz: number }
+  /** 땅에서 실제로 점프가 나갔을 때(공중 점프 포함) — 렌더러가 발밑에 공기 파열 이펙트를 띄웁니다 */
+  | { type: "player_jumped" }
   /** 마우스 위치 스킬(originAtMouse)을 쓰려는데 마우스 지점이 너무 멀어서 막혔을 때 */
   | { type: "skill_target_too_far"; skillName: string }
   // --- 멀티플레이 / PvP ---------------------------------------------------

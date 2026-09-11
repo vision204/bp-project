@@ -219,3 +219,17 @@ export function broadcastDashFx(state: GameState, mp: MultiplayerClient) {
     }
   }
 }
+
+/**
+ * 점프가 실제로 나갈 때마다(다단 점프 포함, 전투 후보 유무·PvP 켬/끔과 무관하게)
+ * 같은 방의 다른 사람 화면에도 발밑에 공기 파열 이펙트가 보이도록 순수 연출용
+ * 알림을 보냅니다. broadcastDashFx와 같은 패턴입니다.
+ */
+export function broadcastJumpFx(state: GameState, mp: MultiplayerClient) {
+  if (!mp.connected) return;
+  for (const ev of state.player.events) {
+    if (ev.type === "player_jumped") {
+      mp.sendJumpFx();
+    }
+  }
+}

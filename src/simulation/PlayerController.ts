@@ -351,9 +351,11 @@ export class PlayerController {
       if (grounded) {
         this.verticalVelocity = JUMP_SPEED;
         this.jumpsUsed = 1;
+        player.events.push({ type: "player_jumped" });
       } else if (this.jumpsUsed < player.maxJumps) {
         this.verticalVelocity = JUMP_SPEED;
         this.jumpsUsed += 1;
+        player.events.push({ type: "player_jumped" });
       } else {
         this.verticalVelocity -= GRAVITY * dt;
       }
