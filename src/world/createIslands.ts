@@ -86,8 +86,25 @@ const PLATEAU_HEIGHT = 7;
  */
 const ROSE_LANDMARK_HEIGHT_SCALE = 6;
 
-/** 섬 반지름에 비례하되 12~22m 사이로 잡습니다 (너무 작거나 섬을 다 덮지 않게). */
+/**
+ * 두 번째 바다의 "바깥 고리" 섬(대륙에 붙지 않은 독립 섬) 5개 — 화염과 얼음/
+ * 저주받은 배/얼음 성/잊혀진 섬/대저택. "섬 사이즈도 엄청 크게, 조형물도
+ * 섬마다 독창적으로 최소 1개~최대 2개, 엄청 크게" 요청에 맞춰 이 섬들만
+ * 고원과 랜드마크를 훨씬 크게 키우고, 두 번째 대형 조형물을 추가로 세웁니다.
+ */
+const GIANT_OUTER_RING_IDS = new Set(["hot_cold", "cursed_ship", "ice_castle", "forgotten", "mansion"]);
+
+/** 메인 랜드마크(고원 위) 배율 — 원래 8~11m 안팎이던 조형물을 25~35m급으로 키웁니다. */
+const GIANT_MONUMENT_SCALE = 3.2;
+/** 두 번째 조형물(고원 밖, 섬 지면 위) 배율 — 메인보다 살짝 작지만 여전히 거대합니다. */
+const GIANT_SECOND_MONUMENT_SCALE = 2.1;
+
+/** 섬 반지름에 비례하되 12~22m 사이로 잡습니다 (너무 작거나 섬을 다 덮지 않게).
+ *  다만 GIANT_OUTER_RING_IDS에 속한 섬은 훨씬 커진 몸집에 맞춰 최대 48m까지 허용합니다. */
 function plateauRadiusFor(island: IslandDef): number {
+  if (GIANT_OUTER_RING_IDS.has(island.id)) {
+    return Math.min(48, Math.max(30, island.radius * 0.3));
+  }
   return Math.min(22, Math.max(12, island.radius * 0.3));
 }
 
@@ -901,7 +918,33 @@ function buildPlateau(
   const landmark = buildLandmark(island.theme, palette, rand);
   landmark.position.set(island.center.x, height + 0.3, island.center.z);
   if (island.theme === "rose") landmark.scale.y *= ROSE_LANDMARK_HEIGHT_SCALE;
+  else if (GIANT_OUTER_RING_IDS.has(island.id)) landmark.scale.multiplyScalar(GIANT_MONUMENT_SCALE);
   group.add(landmark);
+}
+
+/**
+ * GIANT_OUTER_RING_IDS 섬들에 세우는 두 번째 대형 조형물. 중앙 고원 위 메인
+ * 랜드마크와 겹치지 않도록 고원 바깥, 섬 지면(부두 반대쪽) 위에 따로 세웁니다.
+ * "섬마다 최소 1개~최대 2개"라는 요청을 만족하려고 같은 buildLandmark()를
+ * 다른 회전·배율로 한 번 더 찍어서 "쌍둥이 조형물"처럼 보이게 합니다.
+ */
+function buildSecondGiantMonument(
+  island: IslandDef,
+  palette: ThemePalette,
+  group: THREE.Group,
+  rand: () => number,
+) {
+  const monument = buildLandmark(island.theme, palette, rand);
+  monument.scale.multiplyScalar(GIANT_SECOND_MONUMENT_SCALE);
+  monument.rotation.y = rand() * Math.PI * 2;
+
+  // 부두 반대쪽(육지 안쪽) 방향으로, 고원 밖 섬 지면 위에 세웁니다.
+  const angle = island.dockAngle + Math.PI + (rand() - 0.5) * 0.6;
+  const dist = island.radius * 0.6;
+  const x = island.center.x + Math.cos(angle) * dist;
+  const z = island.center.z + Math.sin(angle) * dist;
+  monument.position.set(x, 0.3, z);
+  group.add(monument);
 }
 
 /**
@@ -1787,6 +1830,81 @@ function buildContinentGreenery(
 }
 
 /**
+ * 대륙 안쪽, 본부(HQ)를 뺀 나머지 빈 공간에 가볍게 얹는 작은 마을 — 요청:
+ * "본부 빼고는 너무 커서 빈 공간이 많아서 거기다가 마을을 만들어줘 가볍게".
+ * buildTradeTown(중앙 교역섬 마을 — 광장+분수까지 갖춘 정식 마을)보다 훨씬
+ * 가볍게, 단층 오두막 몇 채와 우물 하나만 놓습니다. 자리는 본부(반경
+ * 46×30m 상자)·4개 사냥터 색얼룩(중심에서 62m)·사방위 흙길(54~116m, ±11°)
+ * 어디와도 겹치지 않는 남동쪽 대각선 빈터(원점에서 약 85m, 45° 방향 — 길이
+ * 없는 대각선 구간이라 안전)를 골랐습니다. 건물엔 전부 충돌체가 있어
+ * 들어갈 수는 없습니다(배경 장식).
+ */
+function buildContinentVillage(
+  group: THREE.Group,
+  world: RAPIER.World,
+  RAPIER_NS: typeof RAPIER,
+  quality: QualitySettings,
+  origin: { x: number; z: number },
+) {
+  const rand = makeRandom(20260911);
+  const palette = PALETTES.hq;
+  const villageLocal = { x: 60, z: -60 };
+  const houseCount = Math.max(6, Math.round(9 * quality.propDensity));
+
+  for (let i = 0; i < houseCount; i++) {
+    const angle = (i / houseCount) * Math.PI * 2 + rand() * 0.4;
+    const dist = 8 + rand() * 22;
+    const lx = villageLocal.x + Math.cos(angle) * dist;
+    const lz = villageLocal.z + Math.sin(angle) * dist;
+    const x = origin.x + lx;
+    const z = origin.z + lz;
+
+    const width = 3.6 + rand() * 1.6;
+    const depth = 3.4 + rand() * 1.4;
+    const house = buildTownHouse(1, width, depth, palette, rand);
+    house.position.set(x, CONTINENT_GROUND_Y, z);
+    house.rotation.y = Math.atan2(villageLocal.x - lx, villageLocal.z - lz);
+    group.add(house);
+
+    // 들어갈 수 없도록 건물 전체를 막는 충돌체 (buildTradeTown과 같은 패턴).
+    const body = world.createRigidBody(
+      RAPIER_NS.RigidBodyDesc.fixed()
+        .setTranslation(x, CONTINENT_GROUND_Y + 1.55, z)
+        .setRotation({ x: 0, y: Math.sin(house.rotation.y / 2), z: 0, w: Math.cos(house.rotation.y / 2) }),
+    );
+    world.createCollider(RAPIER_NS.ColliderDesc.cuboid(width / 2, 1.55, depth / 2), body);
+  }
+
+  // 마을 한가운데 우물 하나 — 가벼운 장식 포인트.
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0xb8ae97, roughness: 0.95 });
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x4aa3d8, roughness: 0.2, metalness: 0.3 });
+  const wx = origin.x + villageLocal.x;
+  const wz = origin.z + villageLocal.z;
+
+  const wellWall = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.4, 1.0, 12), stoneMat);
+  wellWall.position.set(wx, CONTINENT_GROUND_Y + 0.5, wz);
+  wellWall.castShadow = quality.shadows;
+  group.add(wellWall);
+  const wellWater = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.05, 0.1, 12), waterMat);
+  wellWater.position.set(wx, CONTINENT_GROUND_Y + 1.0, wz);
+  group.add(wellWater);
+  for (const side of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.2, 6), stoneMat);
+    post.position.set(wx + side * 1.1, CONTINENT_GROUND_Y + 1.6, wz);
+    group.add(post);
+  }
+  const wellRoof = new THREE.Mesh(new THREE.ConeGeometry(1.7, 1.0, 4), stoneMat);
+  wellRoof.position.set(wx, CONTINENT_GROUND_Y + 3.1, wz);
+  wellRoof.rotation.y = Math.PI / 4;
+  group.add(wellRoof);
+
+  const wellBody = world.createRigidBody(
+    RAPIER_NS.RigidBodyDesc.fixed().setTranslation(wx, CONTINENT_GROUND_Y + 0.5, wz),
+  );
+  world.createCollider(RAPIER_NS.ColliderDesc.cylinder(0.5, 1.4), wellBody);
+}
+
+/**
  * 두 번째 바다 안쪽 대륙 전체(지형+해변+성벽+본부 건물)를 한 번만 짓습니다.
  * 개별 IslandDef를 도는 buildIsland()와 달리 이 함수는 createIslands()에서
  * 딱 한 번 호출됩니다.
@@ -1820,6 +1938,7 @@ function buildSecondSeaContinent(
     buildContinentRoad(group, origin, { x: region.local.x / len, z: region.local.z / len }, 54, 108);
   }
   buildContinentGreenery(group, world, RAPIER_NS, quality, origin);
+  buildContinentVillage(group, world, RAPIER_NS, quality, origin);
 
   return { group, center: { x: origin.x, z: origin.z } };
 }
@@ -1890,6 +2009,9 @@ function buildIsland(
   // 절벽 없이 걸어 오를 수 있는 완만한 언덕 + 랜드마크를 얹습니다.
   if (island.requiredLevel >= PLATEAU_MIN_LEVEL) {
     buildPlateau(island, palette, group, world, RAPIER_NS, quality, rand);
+    if (GIANT_OUTER_RING_IDS.has(island.id)) {
+      buildSecondGiantMonument(island, palette, group, rand);
+    }
   } else if (island.kind === "wild") {
     buildHill(island, palette, group, world, RAPIER_NS, quality, rand);
   }

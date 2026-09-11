@@ -458,11 +458,19 @@ for (const island of ISLANDS.filter((i) => i.species.length > 0)) {
 // 서식지가 갈라져 있는지"는 아래 섹션에서 좌표 기준으로 계속 검증합니다.
 
 // 두 번째 바다 섬은 첫 번째 바다의 같은 역할 섬보다 작아야 합니다 ("사이즈만 조금 작게")
+// — 단, 대륙에 붙지 않은 "바깥 고리" 5개 섬(화염과 얼음/저주받은 배/얼음 성/
+// 잊혀진 섬/대저택)은 이후 요청("섬들의 사이즈도 엄청 크게 만들어줘")으로
+// 의도적으로 첫 번째 바다보다 훨씬 커졌으므로 평균에서 제외합니다. 대신 대륙에
+// 흡수된 4개 사냥터(장미 왕국/초원 지대/공동묘지/눈 덮인 산, radius는 대륙
+// 흡수 전 그대로 48m)만으로 "아담함" 취지를 계속 검증합니다.
 {
   const avg = (list) => list.reduce((a, i) => a + i.radius, 0) / list.length;
+  const GIANT_OUTER_RING_IDS = new Set(["hot_cold", "cursed_ship", "ice_castle", "forgotten", "mansion"]);
   const sea1 = avg(ISLANDS.filter((i) => i.sea === 1 && i.kind === "wild"));
-  const sea2 = avg(ISLANDS.filter((i) => i.sea === 2 && i.kind === "wild"));
-  assert(sea2 < sea1, `두 번째 바다 섬이 더 아담함 (평균 반지름 ${sea1.toFixed(1)}m → ${sea2.toFixed(1)}m)`);
+  const sea2 = avg(ISLANDS.filter((i) => i.sea === 2 && i.kind === "wild" && !GIANT_OUTER_RING_IDS.has(i.id)));
+  assert(sea2 < sea1, `두 번째 바다 대륙 흡수 사냥터가 더 아담함 (평균 반지름 ${sea1.toFixed(1)}m → ${sea2.toFixed(1)}m)`);
+  const giantAvg = avg(ISLANDS.filter((i) => GIANT_OUTER_RING_IDS.has(i.id)));
+  assert(giantAvg > sea1 * 2, `두 번째 바다 바깥 고리 섬은 의도적으로 훨씬 거대함 (평균 반지름 ${giantAvg.toFixed(1)}m)`);
 }
 
 // 종족별로 서식 구역이 실제로 갈리는지 (스폰 좌표의 중심이 서로 떨어져 있어야 함)
