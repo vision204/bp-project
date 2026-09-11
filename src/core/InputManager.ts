@@ -48,6 +48,12 @@ export interface InputSnapshot {
    * devMode 분기, CombatSystem.ts의 stepFruitSpecialAbility)이 각자 소비합니다.
    */
   flySkillPressed: boolean;
+  /**
+   * F — 위 flySkillPressed와 같은 물리 키를 "누르고 있는 동안" 계속 true.
+   * 용의 비행(용용 열매)이 "F를 계속 누르고 있어야만 날 수 있게" 바뀌면서
+   * 필요해졌습니다 — 떼는 순간 CombatSystem.ts가 자동으로 착지시킵니다.
+   */
+  flySkillHeld: boolean;
   /** P — 개발자 패널 열기/닫기 */
   toggleDevPanelPressed: boolean;
   /** R — 순간이동 (마우스가 가리키는 지점으로). 배우지 않았으면 무시됩니다 */
@@ -199,6 +205,7 @@ export class InputManager {
       flyDownHeld: this.keys.has("ControlLeft") || this.keys.has("ControlRight"),
       toggleFlyPressed: this.justPressed.has("KeyF"),
       flySkillPressed: this.justPressed.has("KeyF"),
+      flySkillHeld: this.keys.has("KeyF"),
       toggleDevPanelPressed: this.justPressed.has("KeyP"),
       teleportPressed: this.justPressed.has("KeyR"),
       mouseClientX: this.lastMouseClientX,

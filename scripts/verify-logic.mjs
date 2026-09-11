@@ -2074,8 +2074,10 @@ section("빛빛/용용 F 특수 능력 — 일반 4슬롯 시스템과 무관한
   assert(pLowLvl.pendingDash === null, "빛의 비행: 열매 레벨 미달이면 발동하지 않음");
   assert(pLowLvl.events.some((e) => e.type === "skill_locked"), "빛의 비행: 레벨 미달 시 skill_locked 이벤트");
 
-  // (2) 용의 비행 — F로 켜지고(activation 시 마나만 소모, 쿨다운 없음), 날고 있는
-  //     동안 매초 마나가 계속 깎이며, 다시 F를 누르면 착지하고 그때부터 쿨다운이 돕니다.
+  // (2) 용의 비행 — 이제 F를 "누르고 있는 동안에만" 날 수 있습니다(사용자
+  //     요청). 활성화는 여전히 F를 처음 누른 순간(flySkillPressed 엣지)에만
+  //     마나를 소모하고 쿨다운 없이 시작되지만, 착지는 더 이상 "다시 F를
+  //     누름"이 아니라 "F를 뗌"(flySkillHeld가 false가 됨)으로 일어납니다.
   const pDragon = freshPlayer();
   pDragon.equippedFruit = "dragon_dragon";
   pDragon.fruitLevel = 40;
@@ -2083,36 +2085,102 @@ section("빛빛/용용 F 특수 능력 — 일반 4슬롯 시스템과 무관한
   pDragon.events = [];
   assert(pDragon.dragonFlightActive === false, "평소엔 비행 중이 아님");
   const manaBeforeFly = pDragon.mana;
-  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pDragon, Date.now());
-  assert(pDragon.dragonFlightActive === true, "용의 비행: F로 비행 시작됨");
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true, flySkillHeld: true }), pDragon, Date.now());
+  assert(pDragon.dragonFlightActive === true, "용의 비행: F를 누르면 비행 시작됨");
   assert(pDragon.mana === manaBeforeFly - DRAGON_FLIGHT_SKILL.manaCost, `용의 비행: 활성화 마나 ${DRAGON_FLIGHT_SKILL.manaCost} 소모`);
   assert(pDragon.dragonFlightCooldownRemainingSec === 0, "용의 비행: 활성화 자체엔 쿨다운이 없음(착지해야 돎)");
 
-  // 날고 있는 동안(F를 안 눌러도) 매 프레임 마나가 계속 소모됨
+  // 계속 누르고 있는 동안(flySkillHeld: true) 매 프레임 마나가 계속 소모되고, 비행이 유지됨
   const manaBeforeDrainTick = pDragon.mana;
-  stepFruitSpecialAbility(1, input(), pDragon, Date.now());
-  assert(pDragon.mana < manaBeforeDrainTick, "용의 비행: 날고 있는 동안 매초 마나가 계속 소모됨");
-  assert(pDragon.dragonFlightActive === true, "용의 비행: 마나가 남아있으면 계속 비행 중");
+  stepFruitSpecialAbility(1, input({ flySkillHeld: true }), pDragon, Date.now());
+  assert(pDragon.mana < manaBeforeDrainTick, "용의 비행: 누르고 있는 동안 매초 마나가 계속 소모됨");
+  assert(pDragon.dragonFlightActive === true, "용의 비행: 계속 누르고 있으면(+마나 남아있으면) 계속 비행 중");
 
-  // 다시 F — 착지. 그 순간부터 쿨다운이 시작됨(사용자 요청: "착지 시점부터" 쿨다운)
-  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pDragon, Date.now());
-  assert(pDragon.dragonFlightActive === false, "용의 비행: 다시 F를 누르면 착지");
+  // 날고 있는데 F를 다시 눌러도(이미 누르고 있는 채로 또 edge가 와도) 착지하지 않음 —
+  // 착지는 오직 "뗌"으로만 일어납니다.
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true, flySkillHeld: true }), pDragon, Date.now());
+  assert(pDragon.dragonFlightActive === true, "용의 비행: 날고 있는 동안 F를 또 눌러도 착지하지 않음(뗄 때만 착지)");
+
+  // F를 뗌(flySkillHeld: false) — 그 즉시 착지하고 그 순간부터 쿨다운이 시작됨
+  // (사용자 요청: "착지 시점부터" 쿨다운)
+  stepFruitSpecialAbility(0.016, input(), pDragon, Date.now());
+  assert(pDragon.dragonFlightActive === false, "용의 비행: F를 떼면 즉시 착지");
   assert(pDragon.dragonFlightCooldownRemainingSec === DRAGON_FLIGHT_SKILL.cooldownSec, "용의 비행: 착지 시점부터 쿨다운 시작");
 
-  // 착지 직후에는(쿨다운 중) 다시 F를 눌러도 못 뜸
-  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true }), pDragon, Date.now());
+  // 착지 직후에는(쿨다운 중) 다시 F를 눌러(+누르고 있어)도 못 뜸
+  stepFruitSpecialAbility(0.016, input({ flySkillPressed: true, flySkillHeld: true }), pDragon, Date.now());
   assert(pDragon.dragonFlightActive === false, "용의 비행: 착지 직후 쿨다운 중에는 다시 뜰 수 없음");
 
-  // 마나가 바닥나면 자동으로 착지함("정지 불가"와 별개인 안전장치)
+  // 마나가 바닥나면(계속 누르고 있어도) 자동으로 착지함("정지 불가"와 별개인 안전장치)
   const pDrain = freshPlayer();
   pDrain.equippedFruit = "dragon_dragon";
   pDrain.fruitLevel = 40;
   pDrain.mana = DRAGON_FLIGHT_SKILL.flightManaDrainPerSec / 2; // 1초 지속 소모량의 절반만 남겨둬서 확실히 바닥나게
   pDrain.dragonFlightActive = true;
-  stepFruitSpecialAbility(1, input(), pDrain, Date.now());
+  stepFruitSpecialAbility(1, input({ flySkillHeld: true }), pDrain, Date.now());
   assert(pDrain.mana === 0, "용의 비행: 마나가 바닥까지 깎임(음수로 내려가지 않음)");
   assert(pDrain.dragonFlightActive === false, "용의 비행: 마나가 0이 되면 자동으로 착지함");
   assert(pDrain.dragonFlightCooldownRemainingSec === DRAGON_FLIGHT_SKILL.cooldownSec, "용의 비행: 마나 고갈 착지도 쿨다운을 시작시킴");
+
+  // F를 안 누른 채로(놓친 채로) 시작해도 당연히 날지 않음, 그리고 애초에
+  // dragonFlightActive였는데 flySkillHeld가 아예 안 온 프레임(undefined)도
+  // "안 누르고 있음"으로 취급되어 착지함 — release 판정은 flySkillHeld의
+  // 진위값만 봅니다.
+  const pReleaseUndefined = freshPlayer();
+  pReleaseUndefined.equippedFruit = "dragon_dragon";
+  pReleaseUndefined.fruitLevel = 40;
+  pReleaseUndefined.mana = 999;
+  pReleaseUndefined.dragonFlightActive = true;
+  stepFruitSpecialAbility(0.016, input(), pReleaseUndefined, Date.now());
+  assert(pReleaseUndefined.dragonFlightActive === false, "용의 비행: flySkillHeld가 없는(undefined) 프레임도 착지로 취급");
+}
+
+section("빛빛/용용 F 특수 능력 — 공격 차단 (용의 비행 중)");
+{
+  // 사용자 요청: "용의 비행 상태에서는 공격을 못하게 해줘" — 근접 공격도
+  // Z/X/C/V 스킬(열매든 무기든)도 전부 막혀야 하지만, 맞는 것(피해를 받는 것)
+  // 까지 막히면 안 됩니다(그건 CombatSystem이 아니라 EnemyAI/서버의 다른
+  // 경로라 여기서 검증할 대상이 아닙니다 — dragonFlightActive가 공격 발동
+  // 쪽만 막는지만 확인합니다).
+  const pFlyingAttacker = freshPlayer();
+  pFlyingAttacker.equippedFruit = "dragon_dragon";
+  pFlyingAttacker.fruitLevel = 40;
+  pFlyingAttacker.fruitDrawn = true;
+  pFlyingAttacker.mana = 999;
+  pFlyingAttacker.dragonFlightActive = true;
+  pFlyingAttacker.hotbar[0] = "sword_wood";
+  pFlyingAttacker.activeHotbarSlot = 0;
+  pFlyingAttacker.events = [];
+  stepCombat(0.016, input({ attackPressed: true }), pFlyingAttacker, []);
+  assert(
+    !pFlyingAttacker.events.some((e) => e.type === "melee_attack_fired"),
+    "용의 비행 중에는 근접 공격이 안 나감(melee_attack_fired 이벤트 없음)",
+  );
+
+  const pFlyingSkiller = freshPlayer();
+  pFlyingSkiller.equippedFruit = "dragon_dragon";
+  pFlyingSkiller.fruitLevel = 100;
+  pFlyingSkiller.fruitDrawn = true;
+  pFlyingSkiller.mana = 999;
+  pFlyingSkiller.dragonFlightActive = true;
+  pFlyingSkiller.events = [];
+  stepCombat(0.016, input({ skillPressed: [false, false, true, false], skillHeld: [false, false, true, false] }), pFlyingSkiller, []);
+  assert(
+    !pFlyingSkiller.events.some((e) => e.type === "skill_fired"),
+    "용의 비행 중에는 열매 스킬(Z/X/C/V)도 안 나감(skill_fired 이벤트 없음)",
+  );
+
+  // 착지하면(dragonFlightActive === false) 다시 정상적으로 공격/스킬을 쓸 수 있음
+  const pLanded = freshPlayer();
+  pLanded.hotbar[0] = "sword_wood";
+  pLanded.activeHotbarSlot = 0;
+  pLanded.dragonFlightActive = false;
+  pLanded.events = [];
+  stepCombat(0.016, input({ attackPressed: true }), pLanded, []);
+  assert(
+    pLanded.events.some((e) => e.type === "melee_attack_fired"),
+    "착지 후에는(dragonFlightActive === false) 다시 공격이 나감",
+  );
 }
 
 section("돌진 / 자기 강화");

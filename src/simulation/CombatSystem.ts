@@ -362,8 +362,16 @@ export function stepFruitSpecialAbility(dt: number, input: InputSnapshot, player
     player.lightFormRemainingSec = Math.max(0, player.lightFormRemainingSec - dt);
   }
 
-  // 용의 비행 — 날고 있는 동안 매초 마나를 계속 소모하고, 다 떨어지면
-  // 자동으로 착지합니다(사용자 요청 범위 밖의 안전장치: 마나 없이 무한 비행 방지).
+  // 용의 비행 — 이제 "F를 계속 누르고 있어야만" 날 수 있습니다(사용자 요청).
+  // 떼는 순간(flySkillHeld가 false가 되는 순간) 그 프레임에 바로 착지시키고
+  // 쿨다운을 시작합니다 — 예전처럼 "다시 F를 눌러서" 착지하는 게 아닙니다.
+  if (player.dragonFlightActive && !input.flySkillHeld) {
+    player.dragonFlightActive = false;
+    player.dragonFlightCooldownRemainingSec = DRAGON_FLIGHT_SKILL.cooldownSec;
+  }
+
+  // 날고 있는 동안 매초 마나를 계속 소모하고, 다 떨어지면 자동으로 착지합니다
+  // (사용자 요청 범위 밖의 안전장치: 마나 없이 무한 비행 방지).
   if (player.dragonFlightActive) {
     const drain = (DRAGON_FLIGHT_SKILL.flightManaDrainPerSec ?? 0) * dt;
     if (drain > 0) {
@@ -408,14 +416,9 @@ export function stepFruitSpecialAbility(dt: number, input: InputSnapshot, player
     player.events.push({ type: "special_ability_fired", abilityId: "light_f" });
   } else if (player.equippedFruit === "dragon_dragon") {
     const skill = DRAGON_FLIGHT_SKILL;
-    if (player.dragonFlightActive) {
-      // 이미 날고 있으면 F를 다시 누르는 건 "착지" — dragonFlightActive를
-      // 끄기만 하면, 다음 PlayerController.step()이 자연히 평소 중력/충돌
-      // 물리로 넘어갑니다(별도 착지 연출 없음 — stepFlight()의 전례와 동일).
-      player.dragonFlightActive = false;
-      player.dragonFlightCooldownRemainingSec = skill.cooldownSec;
-      return;
-    }
+    // 이미 날고 있으면 F를 다시 눌러도 아무 일도 하지 않습니다 — 착지는 위쪽의
+    // "F를 뗀 순간" 처리(release → 착지)가 전담합니다.
+    if (player.dragonFlightActive) return;
     if (player.fruitLevel < skill.unlockFruitLevel) {
       player.events.push({ type: "skill_locked", skillName: skill.name, requiredFruitLevel: skill.unlockFruitLevel });
       return;
@@ -426,6 +429,9 @@ export function stepFruitSpecialAbility(dt: number, input: InputSnapshot, player
     player.mana -= skill.manaCost;
     player.lastManaSpentAtMs = nowMs;
     player.dragonFlightActive = true;
+    // 용의 비행 중에는 공격/스킬을 아예 못 씁니다(사용자 요청) — 혹시 차지
+    // 중이던 스킬이 있었다면 붕 뜬 채로 안 풀리지 않도록 여기서 취소합니다.
+    player.chargingSkillSlot = null;
     // 위 light_f와 같은 이유 — F는 skill_fired 루프 밖이라 별도 이벤트가 필요합니다.
     player.events.push({ type: "special_ability_fired", abilityId: "dragon_f" });
   }
@@ -470,7 +476,7 @@ export function stepCombat(
   // 손에 든 상태가 아니면 좌클릭을 눌러도 아무 일도 일어나지 않습니다(쿨다운도
   // 걸리지 않고, melee_attack_fired 이벤트도 뜨지 않아 휘두르는 애니메이션조차
   // 재생되지 않습니다 — SceneRenderer.ts가 이 이벤트로 팔 휘두르기를 재생합니다).
-  if (input.attackPressed && player.meleeRemainingCooldownSec <= 0 && canMeleeAttack(player)) {
+  if (input.attackPressed && !player.dragonFlightActive && player.meleeRemainingCooldownSec <= 0 && canMeleeAttack(player)) {
     player.meleeRemainingCooldownSec = totalMeleeCooldown(player);
     applyMelee(player, enemies, player.events);
     // 몬스터를 한 마리도 맞히지 못했어도 "공격이 나갔다"는 사실 자체는 필요합니다.
@@ -496,7 +502,11 @@ export function stepCombat(
   // 동안은 fruitDrawn이 이미 false로 강제되지만, 만약을 대비해 여기서도
   // 한 번 더 막습니다 — "확정하기 전엔 스킬을 절대 못 쓴다"는 규칙입니다.
   const weapon = drawnWeapon(player);
-  if (player.fruitDrawn && !player.heldFruitCandidate) {
+  // 용의 비행 중에는 (열매든 무기든) 공격/스킬을 아예 못 씁니다(사용자 요청) —
+  // 대신 맞는 것까지 막지는 않습니다(피해는 다른 경로로 그대로 들어옵니다).
+  if (player.dragonFlightActive) {
+    // no-op — 아래 fruitDrawn/weapon 분기를 통째로 건너뜁니다.
+  } else if (player.fruitDrawn && !player.heldFruitCandidate) {
     const skills = skillsForFruit(player.equippedFruit);
     for (let slot = 0; slot < 4; slot++) {
       const skill = skills[slot];

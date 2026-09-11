@@ -519,6 +519,7 @@ export class TouchInputManager {
       flyDownHeld: false,
       toggleFlyPressed: false,
       flySkillPressed: this.justPressed.has("fskill"),
+      flySkillHeld: this.held.has("fskill"),
       toggleDevPanelPressed: false,
       teleportPressed: false,
       // 마우스 커서 개념이 없으므로, 마우스 위치 타게팅 스킬(용암지대 등)은
@@ -567,6 +568,7 @@ export function mergeInputSnapshots(kb: InputSnapshot, touch: InputSnapshot): In
     flyDownHeld: kb.flyDownHeld || touch.flyDownHeld,
     toggleFlyPressed: kb.toggleFlyPressed || touch.toggleFlyPressed,
     flySkillPressed: kb.flySkillPressed || touch.flySkillPressed,
+    flySkillHeld: kb.flySkillHeld || touch.flySkillHeld,
     toggleDevPanelPressed: kb.toggleDevPanelPressed || touch.toggleDevPanelPressed,
     teleportPressed: kb.teleportPressed || touch.teleportPressed,
     // 터치 레이어가 있는 기기에서는 실제 마우스 커서가 의미 없는 경우가 많으므로

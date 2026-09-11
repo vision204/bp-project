@@ -187,8 +187,14 @@ const DRAGON_FLIGHT_MODEL_PATH = "models/skills/dragon_f.glb";
 // 즉 2π 차이라 원래 "보정 없음"과 같아집니다). 그래도 안 맞으면 정확히 몇 도
 // 더/덜 돌아야 하는지 알려주세요.
 const DRAGON_FLIGHT_BASE_YAW = 0;
-/** 캐릭터를 완전히 대신하는 몸이므로, 기존 오라들과 같은 "만화처럼 거대한" 스케일을 그대로 씁니다. */
-const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE;
+/**
+ * 사용자 요청("사이즈를 더 작게") — 기존에는 다른 스킬 오라들과 같은
+ * "만화처럼 거대한" 기준 스케일(SKILL_MODEL_SCALE)을 그대로 썼는데, 그보다
+ * 절반 정도로 줄입니다. 정확한 배율 요청은 없었으므로 일단 절반(0.5배)으로
+ * 잡았습니다 — 더/덜 줄이고 싶으면 이 배율만 바꾸면 됩니다.
+ */
+const DRAGON_FLIGHT_SCALE_MULTIPLIER = 0.5;
+const DRAGON_FLIGHT_MODEL_SCALE = SKILL_MODEL_SCALE * DRAGON_FLIGHT_SCALE_MULTIPLIER;
 
 // ── 용으로 변신(dragon_dragon, V 슬롯3) 전용 — dragon_v.glb를 독립적으로 사용 ──
 // F(용의 비행)는 이제 별도 전용 파일 dragon_f.glb를 쓰지만(위 DRAGON_FLIGHT_MODEL_PATH
@@ -216,14 +222,9 @@ const DRAGON_FORM_YAW_OFFSET = Math.PI / 2;
  */
 const DRAGON_FORM_SCALE_MULTIPLIER = 5;
 const DRAGON_FORM_MODEL_SCALE = SKILL_MODEL_SCALE * DRAGON_FORM_SCALE_MULTIPLIER;
-/** 헤엄치듯 상하로 일렁이는 피치 진동 진폭(라디안) — 사용자 요청 범위(8~12도) 중간값. */
-const DRAGON_SWIM_PITCH_AMPLITUDE = (10 * Math.PI) / 180;
-/** 피치 진동 주파수(Hz) — 사용자 요청 범위(1.2~1.8Hz) 중간값. */
-const DRAGON_SWIM_FREQUENCY_HZ = 1.5;
-/** 살짝 위아래로 출렁이는 수직 이동(m) — 사용자 요청 범위(0.15~0.3m) 중간값. */
-const DRAGON_SWIM_BOB_AMPLITUDE = 0.22;
-/** 수직 이동을 피치 진동과 살짝 어긋나게(1/4 주기) 둬서 "일렁이는 헤엄" 느낌을 냅니다. */
-const DRAGON_SWIM_BOB_PHASE_OFFSET = Math.PI / 2;
+// (예전엔 여기 "헤엄치듯 흔들리는" 절차적 애니메이션 상수들이 있었지만,
+// 사용자 요청으로 제거했습니다 — 이제 용의 비행은 진행 방향만 바라보는
+// 고정 자세입니다.)
 
 /**
  * 로드된 GLB는 크기와 원점이 제각각이라(모델러/AI 생성 파이프라인이 서로
@@ -952,6 +953,12 @@ interface RemotePlayerVisual {
    * 처리하게 합니다(로컬처럼 매 프레임 월드 좌표를 따로 계산하지 않아도 됨).
    */
   dragonFormVisual: THREE.Group | null;
+  /**
+   * 용의 비행(F, dragon_f) 중인 원격 플레이어의 몸을 대신하는 dragon_f.glb
+   * 인스턴스 — dragonFormVisual과 같은 원칙(group의 자식으로 붙여 위치/요를
+   * 부모가 대신 처리), 다만 다른 파일·다른 배율(DRAGON_FLIGHT_MODEL_SCALE)입니다.
+   */
+  dragonFlightVisual: THREE.Group | null;
   /** 걷기 애니메이션 위상/진폭 — 로컬 플레이어(walkPhase/legSwingAmount)와 같은 역할이지만 원격 플레이어별로 따로 둡니다. */
   walkPhase: number;
   legSwingAmount: number;
@@ -1049,6 +1056,14 @@ export class SceneRenderer {
    * cloneSkillModelInstance로 복제해서 씁니다 — 로드는 한 번만, 인스턴스는 여럿.
    */
   private dragonFormTemplate: THREE.Group | null = null;
+  /**
+   * dragon_f.glb의 정규화된(scale=1) 원본 — dragonFormTemplate과 같은 원칙의
+   * 순수 템플릿입니다. 로컬 dragonFlightVisual과 원격 플레이어별
+   * dragonFlightVisual 모두 이 템플릿을 cloneSkillModelInstance로 복제해서
+   * 씁니다(원격 플레이어에게도 실시간으로 비행 모션을 보여주기 위한 사용자
+   * 요청으로 추가됨).
+   */
+  private dragonFlightTemplate: THREE.Group | null = null;
   private readonly gltfLoader: GLTFLoader;
   private enemyVisuals = new Map<string, EnemyVisual>();
   private npcVisuals = new Map<string, NpcVisual>();
@@ -1282,11 +1297,18 @@ export class SceneRenderer {
     this.gltfLoader.load(
       url,
       (gltf) => {
-        const normalized = normalizeAndCenterModel(gltf.scene, 1);
-        normalized.scale.setScalar(DRAGON_FLIGHT_MODEL_SCALE);
-        normalized.visible = false;
-        this.scene.add(normalized);
-        this.dragonFlightVisual = normalized;
+        // dragonFormTemplate과 같은 패턴 — 정규화된(scale=1) 원본은 씬에 넣지
+        // 않고 템플릿으로만 보관해서, 로컬 인스턴스와 원격 플레이어별 인스턴스가
+        // 전부 이걸 복제해서 씁니다(원격 플레이어에게도 실시간으로 비행 모션이
+        // 보이게 해달라는 사용자 요청으로, 예전에는 로컬 전용 단일 인스턴스였습니다).
+        const template = normalizeAndCenterModel(gltf.scene, 1);
+        this.dragonFlightTemplate = template;
+
+        const localInstance = cloneSkillModelInstance(template, false);
+        localInstance.scale.setScalar(DRAGON_FLIGHT_MODEL_SCALE);
+        localInstance.visible = false;
+        this.scene.add(localInstance);
+        this.dragonFlightVisual = localInstance;
       },
       undefined,
       (err) => {
@@ -1337,6 +1359,22 @@ export class SceneRenderer {
     // 같은 오프셋, 다만 플레이어 yaw 자체는 부모가 대신 줌).
     instance.rotation.y = DRAGON_FORM_YAW_OFFSET;
     instance.position.y = DRAGON_FORM_MODEL_SCALE / 2;
+    instance.visible = false;
+    return instance;
+  }
+
+  /**
+   * 원격 플레이어 하나의 용의 비행(dragon_f) 몸 인스턴스를 만듭니다.
+   * dragonFlightTemplate 로드가 아직 안 끝났으면 null(다음에 다시 시도).
+   * buildRemoteDragonFormVisual과 같은 원칙 — 부모(캐릭터 그룹)가 위치/요를
+   * 대신 담당하므로, 여기서는 로컬 오프셋(요 보정 + 높이)만 줍니다.
+   */
+  private buildRemoteDragonFlightVisual(): THREE.Group | null {
+    if (!this.dragonFlightTemplate) return null;
+    const instance = cloneSkillModelInstance(this.dragonFlightTemplate, false);
+    instance.scale.setScalar(DRAGON_FLIGHT_MODEL_SCALE);
+    instance.rotation.y = DRAGON_FLIGHT_BASE_YAW;
+    instance.position.y = NPC_HEIGHT_APPROX / 2;
     instance.visible = false;
     return instance;
   }
@@ -1645,6 +1683,7 @@ export class SceneRenderer {
         boat: null,
         lastBoatTier: "",
         dragonFormVisual: null,
+        dragonFlightVisual: null,
         walkPhase: 0,
         legSwingAmount: 0,
         lastAnimTimeMs: performance.now(),
@@ -1697,20 +1736,31 @@ export class SceneRenderer {
       // 5배 크기(DRAGON_FORM_MODEL_SCALE)로 보여줍니다 — 로컬 플레이어의
       // dragonFormOn 처리(sync() 참고)와 같은 원칙입니다. 이름표는 계속 보여야
       // 자연스러우므로 group 전체가 아니라 몸 파츠만 개별적으로 숨깁니다.
-      const formOn = r.snapshot.dragonFormActive === true;
+      // 용의 비행(dragon_f, F) — 서버가 중계하는 dragonFlightActive가 켜져 있으면
+      // 마찬가지로 몸을 숨기고 dragon_f.glb를 보여줍니다(사용자 요청: 다른
+      // 플레이어 화면에도 실시간으로 비행 모션이 보이게). F 비행과 V 변신이
+      // 동시에 켜진 드문 경우엔 로컬 sync()와 같은 우선순위로 비행을 우선합니다.
+      const flyOn = r.snapshot.dragonFlightActive === true;
+      const formOn = r.snapshot.dragonFormActive === true && !flyOn;
       if (formOn && !visual.dragonFormVisual) {
         visual.dragonFormVisual = this.buildRemoteDragonFormVisual();
         if (visual.dragonFormVisual) visual.group.add(visual.dragonFormVisual);
       }
       if (visual.dragonFormVisual) visual.dragonFormVisual.visible = formOn;
-      visual.parts.torsoMesh.visible = !formOn;
-      visual.parts.headMesh.visible = !formOn;
-      visual.parts.leftLegPivot.visible = !formOn;
-      visual.parts.rightLegPivot.visible = !formOn;
-      visual.parts.leftArmPivot.visible = !formOn;
-      visual.parts.rightArmPivot.visible = !formOn;
-      if (visual.weaponVisual) visual.weaponVisual.visible = !formOn;
-      if (visual.boat) visual.boat.group.visible = !formOn && !!r.snapshot.boatTier;
+      if (flyOn && !visual.dragonFlightVisual) {
+        visual.dragonFlightVisual = this.buildRemoteDragonFlightVisual();
+        if (visual.dragonFlightVisual) visual.group.add(visual.dragonFlightVisual);
+      }
+      if (visual.dragonFlightVisual) visual.dragonFlightVisual.visible = flyOn;
+      const bodyHidden = formOn || flyOn;
+      visual.parts.torsoMesh.visible = !bodyHidden;
+      visual.parts.headMesh.visible = !bodyHidden;
+      visual.parts.leftLegPivot.visible = !bodyHidden;
+      visual.parts.rightLegPivot.visible = !bodyHidden;
+      visual.parts.leftArmPivot.visible = !bodyHidden;
+      visual.parts.rightArmPivot.visible = !bodyHidden;
+      if (visual.weaponVisual) visual.weaponVisual.visible = !bodyHidden;
+      if (visual.boat) visual.boat.group.visible = !bodyHidden && !!r.snapshot.boatTier;
 
       // 손에 든 무기 — drawnWeaponId가 바뀌었을 때만 떼고 새로 답니다.
       if (r.snapshot.drawnWeaponId !== visual.weaponId) {
@@ -1736,7 +1786,7 @@ export class SceneRenderer {
       const swimmingRemote = r.snapshot.animState === "swim";
       const onBoatRemote = r.snapshot.animState === "boat";
       const targetSwing =
-        !formOn && !swimmingRemote && !onBoatRemote && r.horizSpeed > 0.15
+        !bodyHidden && !swimmingRemote && !onBoatRemote && r.horizSpeed > 0.15
           ? r.horizSpeed > 10
             ? 0.85
             : 0.55
@@ -1756,7 +1806,7 @@ export class SceneRenderer {
       // 로컬보다는 계단식이지만) 팔을 당기고 손끝에 에너지 구슬을 띄웁니다.
       // 정확한 열매 테마색은 원격 스냅샷에 없어서(fruit id 미포함) 공용 금빛으로 통일합니다.
       const chargeFrac = r.snapshot.chargingSlot !== null ? r.snapshot.chargeFrac : 0;
-      if (chargeFrac > 0.0005 && !formOn) {
+      if (chargeFrac > 0.0005 && !bodyHidden) {
         const baseRotX = visual.parts.rightArmPivot.rotation.x;
         visual.parts.rightArmPivot.rotation.x = baseRotX + chargeFrac * (RUBBER_ARM_WINDUP_PITCH - baseRotX);
         visual.chargeGlowMesh.visible = true;
@@ -1816,6 +1866,15 @@ export class SceneRenderer {
         // geometry는 절대 dispose하지 않고, 인스턴스별로 clone된 머티리얼만
         // 정리합니다(skillEffects 정리 루프와 같은 원칙).
         visual.dragonFormVisual.traverse((obj) => {
+          if (obj instanceof THREE.Mesh) {
+            (obj.material as THREE.Material).dispose();
+          }
+        });
+      }
+      if (visual.dragonFlightVisual) {
+        // dragonFormVisual과 같은 원칙 — geometry는 템플릿과 공유되므로
+        // dispose하지 않고, 인스턴스별 머티리얼만 정리합니다.
+        visual.dragonFlightVisual.traverse((obj) => {
           if (obj instanceof THREE.Mesh) {
             (obj.material as THREE.Material).dispose();
           }
@@ -2506,28 +2565,16 @@ export class SceneRenderer {
     if (this.dragonFlightVisual) {
       this.dragonFlightVisual.visible = dragonFlying && !firstPerson;
       if (dragonFlying) {
-        // 헤엄치듯 몸을 일렁이게 하는 절차적 애니메이션 — 뼈대가 없는 정적
-        // 메시라 그룹 전체의 회전/위치만 사인파로 흔듭니다(피치 진동 + 살짝
-        // 어긋난 위상의 수직 bob). dragon_f.glb는 dragon_v.glb와 축 배치가
-        // 달라(로컬 X가 몸통 길이, Z가 가장 얇은 폭) 기본 자세 보정은
-        // 피치(X축 회전)가 아니라 요(Y축, DRAGON_FLIGHT_BASE_YAW) 회전이고,
-        // "코가 위아래로 까딱이는" 헤엄 진동은 로컬 Z축(요 보정 후 좌우 폭
-        // 축이 되는) 기준 회전으로 줍니다.
-        const phase = (nowMs / 1000) * DRAGON_SWIM_FREQUENCY_HZ * Math.PI * 2;
-        const oscPitch = DRAGON_SWIM_PITCH_AMPLITUDE * Math.sin(phase);
-        const bobY = DRAGON_SWIM_BOB_AMPLITUDE * Math.sin(phase + DRAGON_SWIM_BOB_PHASE_OFFSET);
-        const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), oscPitch);
+        // 사용자 요청으로 헤엄치듯 흔들리던 절차적 애니메이션(피치 진동 + 수직
+        // bob)을 없앴습니다 — 이제 진행 방향(yaw)만 따라가는 고정 자세입니다.
         const yawQuat = new THREE.Quaternion().setFromAxisAngle(
           new THREE.Vector3(0, 1, 0),
           state.player.yaw + DRAGON_FLIGHT_BASE_YAW,
         );
-        // 로컬(모델 좌표계) 피치 진동을 먼저 적용하고, 그 결과를 월드 Y축 기준
-        // 진행 방향(yaw + 기본 자세 보정)으로 돌립니다 — 자식(피치)이 부모(요)를
-        // 따라가는 합성 순서라 쿼터니언 곱셈은 yaw * pitch 순서여야 합니다.
-        this.dragonFlightVisual.quaternion.copy(yawQuat).multiply(pitchQuat);
+        this.dragonFlightVisual.quaternion.copy(yawQuat);
         this.dragonFlightVisual.position.set(
           state.player.position.x,
-          state.player.position.y + NPC_HEIGHT_APPROX / 2 + bobY,
+          state.player.position.y + NPC_HEIGHT_APPROX / 2,
           state.player.position.z,
         );
       }
